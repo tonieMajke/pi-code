@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { FilePenLine, FileText, Folder, Globe, Search, Terminal, Wrench } from "lucide-react";
 import { createWsTransport, type PiTransport } from "./lib/transport";
 import { createTauriTransport, inTauri } from "./lib/tauri";
 import type { HistoryItem, PiEvent, SessionSummary } from "../shared/protocol";
@@ -155,6 +156,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [transportKind, setTransportKind] = useState("…");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
   const transportRef = useRef<PiTransport | null>(null);
 
   const refreshSessions = useCallback(() => {
@@ -201,8 +203,15 @@ export default function App() {
     };
   }, []);
 
+  // Autoscroll only while the user is pinned to the bottom (don't fight their scroll).
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    const el = scrollRef.current;
+    if (el && atBottomRef.current) el.scrollTo({ top: el.scrollHeight });
   }, [state.messages]);
 
   const send = () => {
@@ -218,12 +227,14 @@ export default function App() {
 
   const newSession = () => {
     dispatch({ type: "clear" });
+    atBottomRef.current = true;
     transportRef.current?.send({ cmd: "session_new" });
     refreshSessions();
   };
 
   const openSession = (path: string) => {
     dispatch({ type: "clear" });
+    atBottomRef.current = true;
     const t = transportRef.current;
     t?.send({ cmd: "session_open", path });
     t?.send({ cmd: "history" });
@@ -267,7 +278,7 @@ export default function App() {
             <p className="sub">lokalny pi · {state.model || "—"}</p>
           </div>
         ) : (
-          <div className="scroll" ref={scrollRef}>
+          <div className="scroll" ref={scrollRef} onScroll={onScroll}>
             <div className="column">
               {state.messages.map((m, i) => (
                 <Message key={i} msg={m} />
@@ -353,12 +364,30 @@ function Thinking({ text, active }: { text: string; active: boolean }) {
   );
 }
 
+const TOOL_ICONS: Record<string, typeof Wrench> = {
+  read: FileText,
+  write: FilePenLine,
+  edit: FilePenLine,
+  bash: Terminal,
+  glob: Folder,
+  grep: Search,
+  web_search: Globe,
+  fetch_content: Globe,
+  source_check: Globe,
+};
+
+function toolIcon(name: string) {
+  return TOOL_ICONS[name] ?? Wrench;
+}
+
 function ToolCard({ tool }: { tool: ToolItem }) {
+  const Icon = toolIcon(tool.name);
   const argLine = summarizeArgs(tool.args);
   return (
     <details className={`tool ${tool.status}`} open={tool.status === "running"}>
       <summary>
         {tool.status === "running" && <span className="spinner" />}
+        <Icon size={14} className="tool-icon" />
         <span className="tool-name">{tool.name}</span>
         {argLine && <span className="tool-args">{argLine}</span>}
         {tool.status === "error" && <span className="tool-err">błąd</span>}

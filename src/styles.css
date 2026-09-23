@@ -160,6 +160,7 @@ body {
 .tool summary::-webkit-details-marker { display: none; }
 .tool.running { border-color: var(--accent); }
 .tool.error { border-color: var(--err); }
+.tool-icon { flex: none; opacity: 0.8; }
 .tool-name { font-weight: 600; }
 .tool-args { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-err { color: var(--err); font-weight: 600; }
