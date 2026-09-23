@@ -102,13 +102,29 @@ export class PiGateway {
   async openSession(onEvent: (e: PiEvent) => void, path: string): Promise<void> {
     if (!this.services) throw new Error("not initialized — send init first");
     const sessionManager = SessionManager.open(path);
+    await this.startSession(onEvent, this.initCwd, sessionManager);
+  }
+
+  /** Start a brand-new empty session (UI "Nowa sesja"). */
+  async newSession(onEvent: (e: PiEvent) => void, cwd?: string): Promise<void> {
+    if (!this.services) throw new Error("not initialized — send init first");
+    const sessionManager = SessionManager.create(cwd ?? this.initCwd);
+    if (cwd) this.initCwd = cwd;
+    await this.startSession(onEvent, cwd ?? this.initCwd, sessionManager);
+  }
+
+  private async startSession(
+    onEvent: (e: PiEvent) => void,
+    cwd: string,
+    sessionManager: SessionManager,
+  ): Promise<void> {
     const model = this.resolveDefaultModel();
     this.dispose();
     const { session } = await createAgentSession({
-      cwd: this.initCwd,
+      cwd,
       model,
-      modelRuntime: this.services.modelRuntime,
-      settingsManager: this.services.settingsManager,
+      modelRuntime: this.services!.modelRuntime,
+      settingsManager: this.services!.settingsManager,
       sessionManager,
     });
     this.session = session;

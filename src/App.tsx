@@ -210,7 +210,7 @@ export default function App() {
 
   const newSession = () => {
     dispatch({ type: "clear" });
-    transportRef.current?.send({ cmd: "init" });
+    transportRef.current?.send({ cmd: "session_new" });
     refreshSessions();
   };
 

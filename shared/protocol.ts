@@ -12,6 +12,7 @@ export type ClientCommand =
   | { id: number; cmd: "status" }
   | { id: number; cmd: "sessions_list"; cwd?: string }
   | { id: number; cmd: "session_open"; path: string }
+  | { id: number; cmd: "session_new"; cwd?: string }
   | { id: number; cmd: "history" }
   | { id: number; cmd: "dispose" };
 
