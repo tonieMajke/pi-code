@@ -1,5 +1,10 @@
 // Shared protocol between sidecar (pi SDK) and UI. JSON lines over stdio.
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** ClientCommand without the id: id is assigned by the transport. */
+export type ClientCommandInput = DistributiveOmit<ClientCommand, "id">;
+
 export type ClientCommand =
   | { id: number; cmd: "init"; cwd?: string; sessionFile?: string }
   | { id: number; cmd: "prompt"; text: string; behavior?: "steer" | "followUp" }

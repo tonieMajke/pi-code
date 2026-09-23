@@ -3,7 +3,7 @@ import {
   createAgentSessionServices,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import type { PiEvent } from "./protocol.js";
+import type { PiEvent } from "../../shared/protocol.js";
 
 /**
  * Thin wrapper around a pi AgentSession: one command surface in,

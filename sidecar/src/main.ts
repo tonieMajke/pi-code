@@ -1,6 +1,6 @@
 import readline from "node:readline";
 import { PiGateway } from "./gateway.js";
-import type { ClientCommand, SidecarOut } from "./protocol.js";
+import type { ClientCommand, SidecarOut } from "../../shared/protocol.js";
 
 const gateway = new PiGateway();
 
