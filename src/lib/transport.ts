@@ -3,10 +3,11 @@ import type { ClientCommand, ClientCommandInput, SidecarOut } from "../../shared
 export interface PiTransport {
   send(cmd: ClientCommandInput): void;
   onMessage(cb: (msg: SidecarOut) => void): () => void;
+  /** Fired on every (re)connect — safe point to send the boot sequence. */
+  onOpen(cb: () => void): () => void;
   close(): void;
 }
 
-/** Dev transport: WebSocket to dev/ws-bridge.mjs (wraps sidecar stdio). */
 // Explicit per-variant construction: spreading a union does not preserve
 // discriminant correlation, so TS rejects `{ ...cmd, id }` as ClientCommand.
 function withId(cmd: ClientCommandInput, id: number): ClientCommand {
@@ -30,27 +31,47 @@ function withId(cmd: ClientCommandInput, id: number): ClientCommand {
   }
 }
 
+/**
+ * Dev transport: WebSocket to dev/ws-bridge.mjs (wraps sidecar stdio).
+ * Reconnects with backoff when the bridge restarts; `onOpen` fires again
+ * so the UI can re-send its boot sequence.
+ */
 export function createWsTransport(url: string): PiTransport {
-  const ws = new WebSocket(url);
+  let ws: WebSocket | null = null;
   let nextId = 1;
+  let intentional = false;
+  let attempt = 0;
   const listeners = new Set<(m: SidecarOut) => void>();
+  const openListeners = new Set<() => void>();
 
-  ws.onmessage = (e) => {
-    let msg: SidecarOut;
-    try {
-      msg = JSON.parse(String(e.data)) as SidecarOut;
-    } catch {
-      return;
-    }
-    listeners.forEach((l) => l(msg));
-  };
+  function connect(): void {
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      attempt = 0;
+      openListeners.forEach((l) => l());
+    };
+    ws.onmessage = (e) => {
+      let msg: SidecarOut;
+      try {
+        msg = JSON.parse(String(e.data)) as SidecarOut;
+      } catch {
+        return;
+      }
+      listeners.forEach((l) => l(msg));
+    };
+    ws.onclose = () => {
+      if (intentional) return;
+      const delay = Math.min(4000, 500 * 2 ** attempt++);
+      setTimeout(connect, delay);
+    };
+  }
+  connect();
 
   return {
     send(cmd) {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      const id = nextId++;
-      const full = withId(cmd, id);
-      ws.send(JSON.stringify(full));
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(withId(cmd, nextId++)));
+      }
     },
     onMessage(cb) {
       listeners.add(cb);
@@ -58,8 +79,15 @@ export function createWsTransport(url: string): PiTransport {
         listeners.delete(cb);
       };
     },
+    onOpen(cb) {
+      openListeners.add(cb);
+      return () => {
+        openListeners.delete(cb);
+      };
+    },
     close() {
-      ws.close();
+      intentional = true;
+      ws?.close();
     },
   };
 }

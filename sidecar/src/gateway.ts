@@ -84,8 +84,9 @@ export class PiGateway {
     return items;
   }
 
-  async listSessions(cwd?: string): Promise<SessionSummary[]> {
-    const infos = await SessionManager.list(cwd ?? this.initCwd);
+  async listSessions(): Promise<SessionSummary[]> {
+    // All sessions across all project dirs (sidebar is global, like Claude desktop).
+    const infos = await SessionManager.listAll();
     return infos.map((s) => ({
       path: s.path,
       id: s.id,

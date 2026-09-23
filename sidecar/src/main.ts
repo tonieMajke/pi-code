@@ -48,7 +48,7 @@ async function handle(cmd: ClientCommand): Promise<void> {
         reply(cmd.id, true, { busy: gateway.busy, ready: gateway.ready });
         return;
       case "sessions_list":
-        reply(cmd.id, true, await gateway.listSessions(cmd.cwd));
+        reply(cmd.id, true, await gateway.listSessions());
         return;
       case "session_open":
         await gateway.openSession((e) => out({ event: e }), cmd.path);

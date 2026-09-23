@@ -174,11 +174,15 @@ export default function App() {
         dispatch({ type: "history", items: arr as HistoryItem[] });
       }
     });
-    t.send({ cmd: "init" });
-    t.send({ cmd: "history" });
-    refreshSessions();
+    const offOpen = t.onOpen(() => {
+      // Boot (or re-boot after bridge restart): init is idempotent in the sidecar.
+      t.send({ cmd: "init" });
+      t.send({ cmd: "history" });
+      t.send({ cmd: "sessions_list" });
+    });
     return () => {
       off();
+      offOpen();
       t.close();
       transportRef.current = null;
     };
