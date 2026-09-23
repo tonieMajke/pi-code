@@ -6,6 +6,8 @@
   "scripts": {
     "sidecar": "tsx sidecar/src/main.ts",
     "dev:bridge": "node dev/ws-bridge.mjs",
+    "dev": "concurrently -n bridge,vite -c blue,green \"pnpm dev:bridge\" \"vite\"",
+    "desktop": "GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1 sh -c 'cd src-tauri && cargo build && cd .. && ./src-tauri/target/debug/pi-gui'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -23,6 +25,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
