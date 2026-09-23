@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createWsTransport, type PiTransport } from "./lib/transport";
-import type { PiEvent, SessionSummary } from "../shared/protocol";
+import type { HistoryItem, PiEvent, SessionSummary } from "../shared/protocol";
 
 interface ToolItem {
   id: string;
@@ -32,6 +32,7 @@ type Action =
   | { type: "user"; text: string }
   | { type: "event"; event: PiEvent }
   | { type: "sessions"; sessions: SessionSummary[]; loading: boolean }
+  | { type: "history"; items: HistoryItem[] }
   | { type: "connected"; ok: boolean }
   | { type: "clear" }
   | { type: "error"; error: string | null };
@@ -65,6 +66,15 @@ function reducer(state: State, action: Action): State {
       return { ...state, messages: [...state.messages, { role: "user", text: action.text }], busy: true };
     case "sessions":
       return { ...state, sessions: action.sessions, loadingSessions: action.loading };
+    case "history":
+      return {
+        ...state,
+        messages: action.items.map((i) =>
+          i.role === "user"
+            ? { role: "user", text: i.text }
+            : { role: "assistant", thinking: i.thinking, text: i.text, tools: i.tools, open: false },
+        ),
+      };
     case "connected":
       return { ...state, connected: action.ok };
     case "clear":
@@ -145,10 +155,8 @@ export default function App() {
   const refreshSessions = useCallback(() => {
     const t = transportRef.current;
     if (!t) return;
-    dispatch({ type: "sessions", sessions: state.sessions, loading: true });
     t.send({ cmd: "sessions_list" });
-    // result arrives via onMessage reply handler below
-  }, [state.sessions]);
+  }, []);
 
   useEffect(() => {
     const t = createWsTransport("ws://127.0.0.1:9876");
@@ -156,12 +164,19 @@ export default function App() {
     const off = t.onMessage((msg) => {
       if ("event" in msg) {
         dispatch({ type: "event", event: msg.event });
-      } else if (msg.ok && Array.isArray((msg.result ?? []) as unknown[])) {
-        // sessions_list reply
-        dispatch({ type: "sessions", sessions: msg.result as SessionSummary[], loading: false });
+        return;
+      }
+      if (!msg.ok || !Array.isArray(msg.result)) return;
+      const arr = msg.result as (SessionSummary | HistoryItem)[];
+      if (arr.length > 0 && "path" in arr[0]) {
+        dispatch({ type: "sessions", sessions: arr as SessionSummary[], loading: false });
+      } else if (arr.length > 0 && "role" in arr[0]) {
+        dispatch({ type: "history", items: arr as HistoryItem[] });
       }
     });
     t.send({ cmd: "init" });
+    t.send({ cmd: "history" });
+    refreshSessions();
     return () => {
       off();
       t.close();
@@ -192,7 +207,9 @@ export default function App() {
 
   const openSession = (path: string) => {
     dispatch({ type: "clear" });
-    transportRef.current?.send({ cmd: "session_open", path });
+    const t = transportRef.current;
+    t?.send({ cmd: "session_open", path });
+    t?.send({ cmd: "history" });
   };
 
   return (

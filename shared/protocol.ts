@@ -12,7 +12,18 @@ export type ClientCommand =
   | { id: number; cmd: "status" }
   | { id: number; cmd: "sessions_list"; cwd?: string }
   | { id: number; cmd: "session_open"; path: string }
+  | { id: number; cmd: "history" }
   | { id: number; cmd: "dispose" };
+
+/** One rendered item of a restored session transcript. */
+export type HistoryItem =
+  | { role: "user"; text: string }
+  | {
+      role: "assistant";
+      thinking: string;
+      text: string;
+      tools: { id: string; name: string; args: unknown; status: "ok" | "error"; summary: string }[];
+    };
 
 /** Summary of a persisted pi session (from SessionManager.list). */
 export type SessionSummary = {

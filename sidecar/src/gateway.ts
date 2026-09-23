@@ -4,7 +4,7 @@ import {
   SessionManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import type { PiEvent, SessionSummary } from "../../shared/protocol.js";
+import type { HistoryItem, PiEvent, SessionSummary } from "../../shared/protocol.js";
 
 /**
  * Thin wrapper around a pi AgentSession: one command surface in,
@@ -45,6 +45,43 @@ export class PiGateway {
     this.session = session;
     this.subscribe(session, onEvent);
     this.emitInit(onEvent);
+  }
+
+  /** Rendered transcript of the active session (system/tool plumbing collapsed). */
+  history(): HistoryItem[] {
+    const s = this.requireSession();
+    const items: HistoryItem[] = [];
+    for (const msg of s.state.messages) {
+      if (msg.role === "user") {
+        items.push({ role: "user", text: userText(msg.content) });
+      } else if (msg.role === "assistant") {
+        const item: HistoryItem = {
+          role: "assistant",
+          thinking: msg.content
+            .filter((c): c is Extract<typeof c, { type: "thinking" }> => c.type === "thinking")
+            .map((c) => c.thinking)
+            .join("\n"),
+          text: msg.content
+            .filter((c): c is Extract<typeof c, { type: "text" }> => c.type === "text")
+            .map((c) => c.text)
+            .join("\n"),
+          tools: msg.content
+            .filter((c): c is Extract<typeof c, { type: "toolCall" }> => c.type === "toolCall")
+            .map((c) => ({ id: c.id, name: c.name, args: c.arguments, status: "ok" as const, summary: "" })),
+        };
+        items.push(item);
+      } else if (msg.role === "toolResult") {
+        const assistant = [...items].reverse().find((i) => i.role === "assistant");
+        if (assistant && assistant.role === "assistant") {
+          const tool = assistant.tools.find((t) => t.id === msg.toolCallId);
+          if (tool) {
+            tool.status = msg.isError ? "error" : "ok";
+            tool.summary = summarizeToolResult({ content: msg.content }, 400);
+          }
+        }
+      }
+    }
+    return items;
   }
 
   async listSessions(cwd?: string): Promise<SessionSummary[]> {
@@ -183,6 +220,14 @@ export class PiGateway {
       }
     });
   }
+}
+
+function userText(content: string | { type: string; text?: string }[]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((c) => c.type === "text" && typeof c.text === "string")
+    .map((c) => c.text)
+    .join("\n");
 }
 
 function summarizeToolResult(result: unknown, max = 400): string {

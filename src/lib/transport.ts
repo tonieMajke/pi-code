@@ -23,6 +23,8 @@ function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "sessions_list", cwd: cmd.cwd };
     case "session_open":
       return { id, cmd: "session_open", path: cmd.path };
+    case "history":
+      return { id, cmd: "history" };
     case "dispose":
       return { id, cmd: "dispose" };
   }

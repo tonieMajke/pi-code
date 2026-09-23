@@ -19,6 +19,7 @@ const KNOWN = new Set([
   "status",
   "sessions_list",
   "session_open",
+  "history",
   "dispose",
 ]);
 
@@ -52,6 +53,10 @@ async function handle(cmd: ClientCommand): Promise<void> {
       case "session_open":
         await gateway.openSession((e) => out({ event: e }), cmd.path);
         reply(cmd.id, true, { done: true });
+        return;
+      case "history":
+        if (!gateway.ready) throw new Error("not initialized — send init first");
+        reply(cmd.id, true, gateway.history());
         return;
       case "dispose":
         gateway.dispose();
