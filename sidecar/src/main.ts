@@ -12,7 +12,15 @@ function reply(id: number, ok: boolean, result?: unknown, error?: string): void 
   out(ok ? { id, ok: true, result } : { id, ok: false, error: error ?? "unknown error" });
 }
 
-const KNOWN = new Set(["init", "prompt", "abort", "status", "dispose"]);
+const KNOWN = new Set([
+  "init",
+  "prompt",
+  "abort",
+  "status",
+  "sessions_list",
+  "session_open",
+  "dispose",
+]);
 
 async function handle(cmd: ClientCommand): Promise<void> {
   if (!KNOWN.has(cmd.cmd)) {
@@ -37,6 +45,13 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "status":
         reply(cmd.id, true, { busy: gateway.busy, ready: gateway.ready });
+        return;
+      case "sessions_list":
+        reply(cmd.id, true, await gateway.listSessions(cmd.cwd));
+        return;
+      case "session_open":
+        await gateway.openSession((e) => out({ event: e }), cmd.path);
+        reply(cmd.id, true, { done: true });
         return;
       case "dispose":
         gateway.dispose();

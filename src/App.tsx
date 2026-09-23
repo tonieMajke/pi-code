@@ -1,8 +1,8 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createWsTransport, type PiTransport } from "./lib/transport";
-import type { PiEvent } from "../shared/protocol";
+import type { PiEvent, SessionSummary } from "../shared/protocol";
 
 interface ToolItem {
   id: string;
@@ -21,16 +21,19 @@ interface State {
   busy: boolean;
   model: string;
   cwd: string;
+  sessionId: string;
   connected: boolean;
+  sessions: SessionSummary[];
+  loadingSessions: boolean;
   error: string | null;
 }
 
 type Action =
   | { type: "user"; text: string }
   | { type: "event"; event: PiEvent }
-  | { type: "busy"; busy: boolean }
-  | { type: "meta"; model: string; cwd: string }
+  | { type: "sessions"; sessions: SessionSummary[]; loading: boolean }
   | { type: "connected"; ok: boolean }
+  | { type: "clear" }
   | { type: "error"; error: string | null };
 
 function withOpenAssistant(messages: Msg[]): Msg[] {
@@ -39,19 +42,46 @@ function withOpenAssistant(messages: Msg[]): Msg[] {
   return [...messages, { role: "assistant", thinking: "", text: "", tools: [], open: true }];
 }
 
+function appendToOpen(messages: Msg[], part: { text?: string; thinking?: string }): Msg[] {
+  const opened = withOpenAssistant(messages);
+  const last = opened[opened.length - 1];
+  if (last.role !== "assistant") return messages;
+  return [
+    ...opened.slice(0, -1),
+    { ...last, text: last.text + (part.text ?? ""), thinking: last.thinking + (part.thinking ?? "") },
+  ];
+}
+
+function toolsInOpen(messages: Msg[], fn: (tools: ToolItem[]) => ToolItem[]): Msg[] {
+  const opened = withOpenAssistant(messages);
+  const last = opened[opened.length - 1];
+  if (last.role !== "assistant") return messages;
+  return [...opened.slice(0, -1), { ...last, tools: fn(last.tools) }];
+}
+
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "user":
-      return {
-        ...state,
-        messages: [...state.messages, { role: "user", text: action.text }],
-        busy: true,
-      };
+      return { ...state, messages: [...state.messages, { role: "user", text: action.text }], busy: true };
+    case "sessions":
+      return { ...state, sessions: action.sessions, loadingSessions: action.loading };
+    case "connected":
+      return { ...state, connected: action.ok };
+    case "clear":
+      return { ...state, messages: [], error: null };
+    case "error":
+      return { ...state, error: action.error, busy: action.error ? false : state.busy };
     case "event": {
       const e = action.event;
       switch (e.kind) {
         case "init_done":
-          return { ...state, model: e.model, cwd: e.cwd, connected: true };
+          return {
+            ...state,
+            model: e.model,
+            cwd: e.cwd,
+            sessionId: e.sessionId,
+            connected: true,
+          };
         case "text_delta":
           return { ...state, messages: appendToOpen(state.messages, { text: e.delta }) };
         case "thinking_delta":
@@ -89,36 +119,11 @@ function reducer(state: State, action: Action): State {
         default:
           return state;
       }
-      return state; // unreachable: all event kinds return above
+      return state; // unreachable
     }
-    case "busy":
-      return { ...state, busy: action.busy };
-    case "meta":
-      return { ...state, model: action.model, cwd: action.cwd };
-    case "connected":
-      return { ...state, connected: action.ok };
-    case "error":
-      return { ...state, error: action.error, busy: action.error ? false : state.busy };
     default:
       return state;
   }
-}
-
-function appendToOpen(messages: Msg[], part: { text?: string; thinking?: string }): Msg[] {
-  const opened = withOpenAssistant(messages);
-  const last = opened[opened.length - 1];
-  if (last.role !== "assistant") return messages;
-  return [
-    ...opened.slice(0, -1),
-    { ...last, text: last.text + (part.text ?? ""), thinking: last.thinking + (part.thinking ?? "") },
-  ];
-}
-
-function toolsInOpen(messages: Msg[], fn: (tools: ToolItem[]) => ToolItem[]): Msg[] {
-  const opened = withOpenAssistant(messages);
-  const last = opened[opened.length - 1];
-  if (last.role !== "assistant") return messages;
-  return [...opened.slice(0, -1), { ...last, tools: fn(last.tools) }];
 }
 
 export default function App() {
@@ -127,28 +132,40 @@ export default function App() {
     busy: false,
     model: "",
     cwd: "",
+    sessionId: "",
     connected: false,
+    sessions: [],
+    loadingSessions: false,
     error: null,
   });
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const transportRef = useRef<PiTransport | null>(null);
 
+  const refreshSessions = useCallback(() => {
+    const t = transportRef.current;
+    if (!t) return;
+    dispatch({ type: "sessions", sessions: state.sessions, loading: true });
+    t.send({ cmd: "sessions_list" });
+    // result arrives via onMessage reply handler below
+  }, [state.sessions]);
+
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const cwd = params.get("cwd") ?? undefined;
-    const transport = createWsTransport("ws://127.0.0.1:9876");
-    transportRef.current = transport;
-    const off = transport.onMessage((msg) => {
-      if ("event" in msg) dispatch({ type: "event", event: msg.event });
-      else if (!msg.ok && "id" in msg && (msg as { cmd?: string }).cmd === undefined) {
-        // command reply with error (prompt failures surface here)
+    const t = createWsTransport("ws://127.0.0.1:9876");
+    transportRef.current = t;
+    const off = t.onMessage((msg) => {
+      if ("event" in msg) {
+        dispatch({ type: "event", event: msg.event });
+      } else if (msg.ok && Array.isArray((msg.result ?? []) as unknown[])) {
+        // sessions_list reply
+        dispatch({ type: "sessions", sessions: msg.result as SessionSummary[], loading: false });
       }
     });
-    transport.send({ cmd: "init", cwd });
+    t.send({ cmd: "init" });
     return () => {
       off();
-      transport.close();
+      t.close();
+      transportRef.current = null;
     };
   }, []);
 
@@ -158,9 +175,8 @@ export default function App() {
 
   const send = () => {
     const text = input.trim();
-    if (!text || !state.connected) return;
     const t = transportRef.current;
-    if (!t) return;
+    if (!text || !t) return;
     setInput("");
     dispatch({ type: "user", text });
     t.send({ cmd: "prompt", text, behavior: state.busy ? "steer" : undefined });
@@ -168,54 +184,106 @@ export default function App() {
 
   const stop = () => transportRef.current?.send({ cmd: "abort" });
 
+  const newSession = () => {
+    dispatch({ type: "clear" });
+    transportRef.current?.send({ cmd: "init" });
+    refreshSessions();
+  };
+
+  const openSession = (path: string) => {
+    dispatch({ type: "clear" });
+    transportRef.current?.send({ cmd: "session_open", path });
+  };
+
   return (
     <div className="app">
-      <header className="topbar">
-        <span className="dot" data-on={state.connected} />
-        <span className="model">{state.model || "pi"}</span>
-        {state.cwd && <span className="cwd">{state.cwd}</span>}
-      </header>
-
-      <div className="scroll" ref={scrollRef}>
-        <div className="column">
-          {state.messages.map((m, i) => (
-            <Message key={i} msg={m} />
+      <aside className="sidebar">
+        <button className="new-btn" onClick={newSession}>
+          + Nowa
+        </button>
+        <div className="side-label">Sesje</div>
+        <div className="session-list">
+          {state.sessions.map((s) => (
+            <button
+              key={s.path}
+              className={`session ${s.path === activePath(state) ? "active" : ""}`}
+              onClick={() => openSession(s.path)}
+              title={s.cwd}
+            >
+              <span className="s-dot" />
+              <span className="s-title">{s.name || s.firstMessage || s.id.slice(0, 8)}</span>
+            </button>
           ))}
-          {state.error && <div className="error">{state.error}</div>}
-        </div>
-      </div>
-
-      <footer className="composer">
-        <div className="composer-box">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            placeholder={state.busy ? "Napisz, aby sterować bieżącym uruchomieniem… (Enter)" : "Napisz wiadomość… (Enter, Shift+Enter = nowa linia)"}
-            rows={1}
-            autoFocus
-          />
-          {state.busy ? (
-            <button className="send stop" onClick={stop} title="Przerwij">
-              ■
-            </button>
-          ) : (
-            <button className="send" onClick={send} disabled={!state.connected || !input.trim()} title="Wyślij">
-              ↑
-            </button>
+          {state.loadingSessions && <div className="s-empty">wczytywanie…</div>}
+          {!state.loadingSessions && state.sessions.length === 0 && (
+            <div className="s-empty">brak sesji</div>
           )}
         </div>
-        <div className="hint">
-          {state.busy ? "model pracuje — Enter wyśle steering, ■ zatrzyma" : "pi działa lokalnie (llama-server)"}
+        <div className="side-footer">
+          <span className="chip">
+            <span className="avatar">M</span> majke · pi
+          </span>
         </div>
-      </footer>
+      </aside>
+
+      <main className="main">
+        {state.messages.length === 0 ? (
+          <div className="greeting">
+            <h1>Co dalej, Majku?</h1>
+            <p className="sub">lokalny pi · {state.model || "—"}</p>
+          </div>
+        ) : (
+          <div className="scroll" ref={scrollRef}>
+            <div className="column">
+              {state.messages.map((m, i) => (
+                <Message key={i} msg={m} />
+              ))}
+              {state.error && <div className="error">{state.error}</div>}
+            </div>
+          </div>
+        )}
+
+        <footer className="composer">
+          <div className="composer-box">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              placeholder="Opisz zadanie albo zadaj pytanie"
+              rows={1}
+              autoFocus
+            />
+            {state.busy ? (
+              <button className="send stop" onClick={stop} title="Przerwij">■</button>
+            ) : (
+              <button className="send" onClick={send} disabled={!state.connected || !input.trim()} title="Wyślij">
+                ↑
+              </button>
+            )}
+          </div>
+          <div className="composer-meta">
+            <span className="dot" data-on={state.connected} />
+            <span>
+              {state.busy ? "model pracuje — Enter = steering" : "pi działa lokalnie (llama-server)"}
+            </span>
+            <span className="spacer" />
+            <span className="model">{state.model || "pi"}</span>
+          </div>
+        </footer>
+      </main>
     </div>
   );
+}
+
+function activePath(state: State): string {
+  // best-effort: match session by id from init_done
+  const s = state.sessions.find((x) => x.id === state.sessionId);
+  return s?.path ?? "";
 }
 
 function Message({ msg }: { msg: Msg }) {

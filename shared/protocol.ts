@@ -10,7 +10,20 @@ export type ClientCommand =
   | { id: number; cmd: "prompt"; text: string; behavior?: "steer" | "followUp" }
   | { id: number; cmd: "abort" }
   | { id: number; cmd: "status" }
+  | { id: number; cmd: "sessions_list"; cwd?: string }
+  | { id: number; cmd: "session_open"; path: string }
   | { id: number; cmd: "dispose" };
+
+/** Summary of a persisted pi session (from SessionManager.list). */
+export type SessionSummary = {
+  path: string;
+  id: string;
+  cwd: string;
+  name?: string;
+  modified: string;
+  messageCount: number;
+  firstMessage: string;
+};
 
 export type ToolResultSummary = {
   isError: boolean;

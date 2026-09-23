@@ -1,9 +1,10 @@
 import {
   createAgentSession,
   createAgentSessionServices,
+  SessionManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import type { PiEvent } from "../../shared/protocol.js";
+import type { PiEvent, SessionSummary } from "../../shared/protocol.js";
 
 /**
  * Thin wrapper around a pi AgentSession: one command surface in,
@@ -20,34 +21,83 @@ export class PiGateway {
     return this.session?.state.isStreaming ?? false;
   }
 
+  private initCwd = process.cwd();
+  private services: Awaited<ReturnType<typeof createAgentSessionServices>> | null =
+    null;
+
   async init(onEvent: (e: PiEvent) => void, cwd?: string): Promise<void> {
-    if (this.session) return;
-    const workingDir = cwd ?? process.cwd();
-    const services = await createAgentSessionServices({ cwd: workingDir });
-    const provider = services.settingsManager.getDefaultProvider();
-    const modelId = services.settingsManager.getDefaultModel();
-    const model =
-      provider && modelId
-        ? services.modelRuntime.getModel(provider, modelId)
-        : undefined;
-    if (!model) {
-      throw new Error(
-        `default model not found: ${provider ?? "?"}/${modelId ?? "?"}`,
-      );
+    // Idempotent: a re-init (e.g. a second UI client) re-emits init_done
+    // so the caller can always learn the current model/cwd.
+    if (this.session) {
+      this.emitInit(onEvent);
+      return;
     }
+    const workingDir = cwd ?? process.cwd();
+    this.initCwd = workingDir;
+    this.services = await createAgentSessionServices({ cwd: workingDir });
+    const model = this.resolveDefaultModel();
     const { session } = await createAgentSession({
-      cwd,
+      cwd: workingDir,
       model,
-      modelRuntime: services.modelRuntime,
-      settingsManager: services.settingsManager,
+      modelRuntime: this.services.modelRuntime,
+      settingsManager: this.services.settingsManager,
     });
     this.session = session;
     this.subscribe(session, onEvent);
+    this.emitInit(onEvent);
+  }
+
+  async listSessions(cwd?: string): Promise<SessionSummary[]> {
+    const infos = await SessionManager.list(cwd ?? this.initCwd);
+    return infos.map((s) => ({
+      path: s.path,
+      id: s.id,
+      cwd: s.cwd,
+      name: s.name,
+      modified: s.modified.toISOString(),
+      messageCount: s.messageCount,
+      firstMessage: s.firstMessage,
+    }));
+  }
+
+  /** Replace the active session with a persisted one (sidebar "open"). */
+  async openSession(onEvent: (e: PiEvent) => void, path: string): Promise<void> {
+    if (!this.services) throw new Error("not initialized — send init first");
+    const sessionManager = SessionManager.open(path);
+    const model = this.resolveDefaultModel();
+    this.dispose();
+    const { session } = await createAgentSession({
+      cwd: this.initCwd,
+      model,
+      modelRuntime: this.services.modelRuntime,
+      settingsManager: this.services.settingsManager,
+      sessionManager,
+    });
+    this.session = session;
+    this.subscribe(session, onEvent);
+    this.emitInit(onEvent);
+  }
+
+  private resolveDefaultModel() {
+    const settings = this.services!.settingsManager;
+    const provider = settings.getDefaultProvider();
+    const modelId = settings.getDefaultModel();
+    const model =
+      provider && modelId
+        ? this.services!.modelRuntime.getModel(provider, modelId)
+        : undefined;
+    if (!model) {
+      throw new Error(`default model not found: ${provider ?? "?"}/${modelId ?? "?"}`);
+    }
+    return model;
+  }
+
+  private emitInit(onEvent: (e: PiEvent) => void): void {
     onEvent({
       kind: "init_done",
-      cwd: workingDir,
-      model: session.model?.id ?? "",
-      sessionId: session.sessionId ?? "",
+      cwd: this.initCwd,
+      model: this.session?.model?.id ?? "",
+      sessionId: this.session?.sessionId ?? "",
     });
   }
 

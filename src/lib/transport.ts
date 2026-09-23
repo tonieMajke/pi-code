@@ -19,6 +19,10 @@ function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "abort" };
     case "status":
       return { id, cmd: "status" };
+    case "sessions_list":
+      return { id, cmd: "sessions_list", cwd: cmd.cwd };
+    case "session_open":
+      return { id, cmd: "session_open", path: cmd.path };
     case "dispose":
       return { id, cmd: "dispose" };
   }
