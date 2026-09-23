@@ -26,6 +26,7 @@ interface State {
   connected: boolean;
   sessions: SessionSummary[];
   loadingSessions: boolean;
+  settledCount: number;
   error: string | null;
 }
 
@@ -124,6 +125,7 @@ function reducer(state: State, action: Action): State {
         case "settled":
           return {
             ...state,
+            settledCount: state.settledCount + 1,
             busy: false,
             messages: state.messages.map((m) => (m.role === "assistant" ? { ...m, open: false } : m)),
           };
@@ -147,6 +149,7 @@ export default function App() {
     connected: false,
     sessions: [],
     loadingSessions: false,
+    settledCount: 0,
     error: null,
   });
   const [input, setInput] = useState("");
@@ -159,6 +162,11 @@ export default function App() {
     if (!t) return;
     t.send({ cmd: "sessions_list" });
   }, []);
+
+  // A run may have created/renamed a session — refresh the sidebar after every settled.
+  useEffect(() => {
+    if (state.settledCount > 0) refreshSessions();
+  }, [state.settledCount, refreshSessions]);
 
   useEffect(() => {
     // In the Tauri shell the sidecar is spawned by Rust (stdio); in the
