@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",
+    "@tauri-apps/api": "^2.11.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",

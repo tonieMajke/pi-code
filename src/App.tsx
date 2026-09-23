@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createWsTransport, type PiTransport } from "./lib/transport";
+import { createTauriTransport, inTauri } from "./lib/tauri";
 import type { HistoryItem, PiEvent, SessionSummary } from "../shared/protocol";
 
 interface ToolItem {
@@ -149,6 +150,7 @@ export default function App() {
     error: null,
   });
   const [input, setInput] = useState("");
+  const [transportKind, setTransportKind] = useState("…");
   const scrollRef = useRef<HTMLDivElement>(null);
   const transportRef = useRef<PiTransport | null>(null);
 
@@ -159,7 +161,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const t = createWsTransport("ws://127.0.0.1:9876");
+    // In the Tauri shell the sidecar is spawned by Rust (stdio); in the
+    // browser we go through the local WS dev bridge.
+    const t: PiTransport = inTauri() ? createTauriTransport() : createWsTransport("ws://127.0.0.1:9876");
+    setTransportKind(inTauri() ? "tauri" : "ws");
     transportRef.current = t;
     const off = t.onMessage((msg) => {
       if ("event" in msg) {
@@ -289,6 +294,7 @@ export default function App() {
           </div>
           <div className="composer-meta">
             <span className="dot" data-on={state.connected} />
+            <span className="transport">{transportKind}</span>
             <span>
               {state.busy ? "model pracuje — Enter = steering" : "pi działa lokalnie (llama-server)"}
             </span>
