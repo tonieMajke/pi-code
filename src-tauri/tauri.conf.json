@@ -23,6 +23,10 @@
   },
   "bundle": {
     "active": false,
-    "targets": "deb"
+    "targets": "deb",
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ]
   }
 }
