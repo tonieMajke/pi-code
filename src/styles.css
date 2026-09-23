@@ -133,6 +133,16 @@ body {
 .md :not(pre) > code { background: var(--bg-soft); padding: 1px 5px; border-radius: 5px; }
 .md a { color: var(--accent); }
 .md h1, .md h2, .md h3 { margin: 18px 0 8px; }
+.md .codeblock {
+  position: relative; margin: 12px 0;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: #24292e; overflow: hidden;
+}
+.md .codeblock pre { margin: 0; padding: 12px; overflow-x: auto; font-size: 12.5px; background: none; }
+.md .codeblock-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 10px; color: #8b949e; letter-spacing: 0.5px; text-transform: uppercase;
+}
 
 /* Thinking */
 .thinking {

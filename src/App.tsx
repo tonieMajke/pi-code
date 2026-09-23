@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FilePenLine, FileText, Folder, Globe, Search, Terminal, Wrench } from "lucide-react";
+import { markdownComponents } from "./lib/code-block";
 import { createWsTransport, type PiTransport } from "./lib/transport";
 import { createTauriTransport, inTauri } from "./lib/tauri";
 import type { HistoryItem, PiEvent, SessionSummary } from "../shared/protocol";
@@ -348,7 +349,9 @@ function Message({ msg }: { msg: Msg }) {
       ))}
       {msg.text && (
         <div className="md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {msg.text}
+          </ReactMarkdown>
         </div>
       )}
     </div>
