@@ -7,7 +7,7 @@ export const DEFAULT_CONFIG: GuiConfig = {
   constitution: { enabled: true, hard: true, text: "", maxNudges: 2 },
   tools: {},
   context: { elideOldToolOutput: true, elideAboveChars: 2000 },
-  review: { enabled: true, model: "" },
+  review: { enabled: true, model: "", minLines: 40 },
   escalation: { model: "", revert: true },
   sampling: {
     enabled: false,

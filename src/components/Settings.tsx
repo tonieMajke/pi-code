@@ -586,6 +586,23 @@ function QualitySection({
           <ModelSelect value={g.review.model} models={models} empty="ten sam co sesja" onChange={(v) => onPatch({ review: { model: v } })} />
         </Row>
       )}
+      {g.review.enabled && (
+        <Row
+          label="Recenzuj od"
+          desc="Mała zmiana, którą model już sprawdził testem, nie idzie do recenzji — to głównie koszt czasu. Liczone w zmienionych liniach."
+        >
+          <Segmented
+            value={String(g.review.minLines ?? 40)}
+            options={[
+              { value: "0", label: "zawsze" },
+              { value: "20", label: "20 linii" },
+              { value: "40", label: "40 linii" },
+              { value: "100", label: "100 linii" },
+            ]}
+            onChange={(v) => onPatch({ review: { minLines: Number(v) } })}
+          />
+        </Row>
+      )}
       <Row
         label="Model do eskalacji"
         desc="Gdy strażnik wyczerpie odesłania albo model kręci się w kółko, pojawi się przycisk przekazania zadania temu modelowi."

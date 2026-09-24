@@ -45,7 +45,7 @@ import { GuiConfigStore } from "./config.js";
 import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
 import { elideOldToolOutput } from "./elide.js";
 import { HANDOFF_SYSTEM_PROMPT, handoffMessages, handoffUserText } from "./handoff.js";
-import { parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
+import { changedLines, parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
 import { installFetchTap, onPerf, setSampling, withSlot } from "./perf.js";
 import { look, LOOK_COMPARE_DESCRIPTION, LOOK_DESCRIPTION, lookCompare } from "./look.js";
 import { AUDIT_DESCRIPTION, countBySeverity, formatAudit, uiAudit } from "./audit.js";
@@ -442,7 +442,7 @@ export class PiGateway {
       }
       if (cfg().review.enabled && !reviewed && !guard.finishedByUser && guard.changedFiles.length > 0) {
         reviewed = true;
-        const result = await this.review(task, guard.changedFiles).catch((err: unknown) => {
+        const result = await this.review(task, guard.changedFiles, guard.verified).catch((err: unknown) => {
           this.emit({ kind: "guard", label: `Recenzja nie wyszła: ${err instanceof Error ? err.message : String(err)}` });
           return null;
         });
@@ -450,7 +450,7 @@ export class PiGateway {
           const n = result.issues.split("\n").filter((l) => l.trim()).length;
           return back(reviewNudge(result.issues), `Recenzja: ${n} ${n === 1 ? "uwaga" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "uwagi" : "uwag"} — model poprawia`);
         }
-        if (result) this.emit({ kind: "guard", label: "Recenzja: bez uwag" });
+        if (result && !result.skipped) this.emit({ kind: "guard", label: "Recenzja: bez uwag" });
       }
       if (tasteOn()) {
         const t = cfg().taste;
@@ -525,7 +525,7 @@ export class PiGateway {
   }
 
   /** Fresh-context review of the run's changes by a tool-less session. */
-  private async review(task: string, changed: string[]): Promise<ReviewVerdict> {
+  private async review(task: string, changed: string[], verified = false): Promise<ReviewVerdict> {
     const diff = this.runCheckpoint
       ? await diffSince(this.cwd, this.runCheckpoint)
       : changed
@@ -538,6 +538,9 @@ export class PiGateway {
           })
           .join("\n\n");
     if (!diff.trim()) return { ok: true, issues: "" };
+    // A small change the model already proved with a passing check: a review costs more than it finds.
+    const minLines = this.config!.get().review.minLines;
+    if (verified && this.runCheckpoint && changedLines(diff) < minLines) return { ok: true, issues: "", skipped: true };
     this.emit({ kind: "guard", label: "Niezależna recenzja zmian…" });
     const services = this.requireServices();
     const key = this.config!.get().review.model;

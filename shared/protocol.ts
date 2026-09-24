@@ -158,6 +158,8 @@ export type GuiConfig = {
     elideAboveChars: number;
   };
   review: {
+    /** Skip the review for a verified change smaller than this many changed lines (0 = always review). */
+    minLines: number;
     /** Fresh-context review of the diff before the run may finish. */
     enabled: boolean;
     /** "provider/id"; empty = the session's model. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseVerdict, reviewPrompt } from "./review.js";
+import { changedLines, parseVerdict, reviewPrompt } from "./review.js";
 
 describe("review", () => {
   it("parses OK and ISSUES verdicts, last one wins", () => {
@@ -13,5 +13,12 @@ describe("review", () => {
   });
   it("truncates huge diffs", () => {
     expect(reviewPrompt("t", "y".repeat(30000))).toMatch(/diff truncated, 6000 more chars/);
+  });
+});
+
+describe("changedLines", () => {
+  it("counts added and removed lines, not file headers", () => {
+    const diff = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n a\n-b\n+c\n+d\n";
+    expect(changedLines(diff)).toBe(3);
   });
 });

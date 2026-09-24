@@ -28,7 +28,12 @@ VERDICT: ISSUES
 If ISSUES, list each problem above that line as "- <file>: <problem>".`;
 }
 
-export type ReviewVerdict = { ok: boolean; issues: string };
+export type ReviewVerdict = { ok: boolean; issues: string; skipped?: boolean };
+
+/** Lines added or removed in a unified diff. */
+export function changedLines(diff: string): number {
+  return diff.split("\n").filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)\s/.test(l)).length;
+}
 
 /** Unparseable answers count as OK — a confused reviewer must not trap the run. */
 export function parseVerdict(text: string): ReviewVerdict {

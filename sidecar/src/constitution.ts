@@ -139,6 +139,11 @@ export class ConstitutionGuard {
     return isAbsolute(clean) ? resolve(clean) : resolve(this.cwd(), clean);
   }
 
+  /** The last change was followed by a check that passed. */
+  get verified(): boolean {
+    return this.editSeq > 0 && this.checkSeq >= this.editSeq && this.lastCheck !== null && !this.lastCheck.failed;
+  }
+
   /** Files changed in this run (absolute). */
   get changedFiles(): string[] {
     return this.edited;
