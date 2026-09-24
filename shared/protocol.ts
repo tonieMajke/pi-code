@@ -143,6 +143,8 @@ export type SamplingConfig = {
   min_p: number | null;
   presence_penalty: number | null;
   repeat_penalty: number | null;
+  /** Max thinking tokens per model turn (llama.cpp reasoning budget); then the model must act. */
+  reasoning_budget_tokens: number | null;
 };
 
 /** Everything pi-gui itself configures, stored in ~/.pi/agent/pi-gui.json. */

@@ -687,6 +687,7 @@ const SAMPLING_FIELDS: { key: keyof Omit<SamplingConfig, "enabled">; label: stri
   { key: "min_p", label: "min_p", step: 0.01, hint: "np. 0" },
   { key: "presence_penalty", label: "presence_penalty", step: 0.1, hint: "przeciw pętlom: 0–1.5" },
   { key: "repeat_penalty", label: "repeat_penalty", step: 0.01, hint: "1 = wył." },
+  { key: "reasoning_budget_tokens", label: "limit myślenia / turę", step: 256, hint: "tokeny, np. 4096" },
 ];
 
 function SamplingRows({ cfg, onPatch }: { cfg: SamplingConfig; onPatch: (p: SettingsPatch) => void }) {

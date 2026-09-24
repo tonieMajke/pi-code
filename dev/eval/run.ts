@@ -58,6 +58,7 @@ const PROFILES: Record<string, Partial<GuiConfig>> = {
   },
   "no-review": { review: { enabled: false, model: "" } },
   "no-editfix": {},
+  "think-4k": { sampling: { enabled: true, temperature: null, top_p: null, top_k: null, min_p: null, presence_penalty: null, repeat_penalty: null, reasoning_budget_tokens: 4096 } },
   "no-taste": { taste: { enabled: false, research: "off", critic: false, criticModel: "", maxRounds: 3, requireAudit: false, criticSlot: null } },
 };
 
