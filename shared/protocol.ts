@@ -34,7 +34,22 @@ export type ClientCommand =
   | { id: number; cmd: "notify"; title: string; body: string }
   | { id: number; cmd: "settings_get" }
   | { id: number; cmd: "settings_set"; patch: SettingsPatch }
-  | { id: number; cmd: "compact" }
+  | { id: number; cmd: "compact"; instructions?: string }
+  /** Extension commands, prompt templates and skills the session can run as "/name". */
+  | { id: number; cmd: "commands_list" }
+  /** User messages of the active branch a new session can be forked from. */
+  | { id: number; cmd: "fork_points" }
+  /** New session holding the branch up to (not including) that user message; replies with its text. */
+  | { id: number; cmd: "session_fork"; entryId: string }
+  /** New session with a copy of the active branch. */
+  | { id: number; cmd: "session_clone" }
+  | { id: number; cmd: "session_stats" }
+  /** Export the session as HTML into the project directory; replies with the path. */
+  | { id: number; cmd: "export_html" }
+  /** Re-read extensions, skills, prompt templates and context files. */
+  | { id: number; cmd: "reload" }
+  /** Answer to an extension dialog (ui_request). */
+  | { id: number; cmd: "ui_response"; requestId: string; answer: UiAnswer }
   /** Hand the current task to a stronger model ("provider/id"). */
   | { id: number; cmd: "escalate"; model: string; reason: string }
   | { id: number; cmd: "checkpoint_restore"; checkpoint: string }
@@ -61,6 +76,32 @@ export type Appearance = {
 
 export type AppearancePatch = Partial<Pick<Appearance, "theme" | "accent" | "background">> & {
   image?: Partial<Appearance["image"]>;
+};
+
+export type SlashSource = "extension" | "prompt" | "skill";
+
+/** A "/name" command pi itself runs (sent as an ordinary prompt). */
+export type SlashCommandInfo = { name: string; description: string; source: SlashSource };
+
+/** A question an extension asks through ctx.ui (select / confirm / input / editor). */
+export type UiRequest =
+  | { id: string; method: "select"; title: string; options: string[] }
+  | { id: string; method: "confirm"; title: string; message: string }
+  | { id: string; method: "input"; title: string; placeholder?: string }
+  | { id: string; method: "editor"; title: string; prefill?: string };
+
+/** value: the chosen option / typed text, or true/false for confirm. */
+export type UiAnswer = { value?: string | boolean; cancelled?: boolean };
+
+export type ForkPoint = { entryId: string; text: string };
+
+export type SessionStats = {
+  sessionFile: string;
+  userMessages: number;
+  assistantMessages: number;
+  toolCalls: number;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  cost: number;
 };
 
 export type QueueMode = "all" | "one-at-a-time";
@@ -296,7 +337,16 @@ export type PiEvent =
   | { kind: "mode"; mode: PermissionMode }
   | { kind: "approval_request"; toolCallId: string; toolName: string; args: unknown }
   | { kind: "approval_done"; toolCallId: string; decision: ApprovalDecision }
-  | { kind: "status"; busy: boolean };
+  | { kind: "status"; busy: boolean }
+  /** Message from an extension (ctx.ui.notify) or a dialog the GUI cannot show. */
+  | { kind: "notice"; level: "info" | "warning" | "error"; text: string }
+  /** An extension wants this text in the composer (ctx.ui.setEditorText). */
+  | { kind: "editor_text"; text: string }
+  | { kind: "ui_request"; request: UiRequest }
+  /** An extension switched or rewound the session — reload the transcript and the session list. */
+  | { kind: "session_changed" }
+  /** The dialog was closed from the sidecar side (timeout, abort). */
+  | { kind: "ui_done"; id: string };
 
 export type SidecarOut =
   | { id: number; cmd?: CommandName; ok: true; result?: unknown }

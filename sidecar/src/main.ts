@@ -49,6 +49,14 @@ const KNOWN = new Set<CommandName>([
   "appearance_get",
   "appearance_set",
   "appearance_image",
+  "commands_list",
+  "fork_points",
+  "session_fork",
+  "session_clone",
+  "session_stats",
+  "export_html",
+  "reload",
+  "ui_response",
   "dispose",
 ]);
 
@@ -161,7 +169,7 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "compact":
         requireReady();
-        await gateway.compact(emit);
+        await gateway.compact(emit, cmd.instructions);
         reply(cmd.id, cmd.cmd, true, gateway.settings());
         return;
       case "escalate":
@@ -175,6 +183,40 @@ async function handle(cmd: ClientCommand): Promise<void> {
       case "checkpoint_restore":
         requireReady();
         reply(cmd.id, cmd.cmd, true, { files: await gateway.restoreCheckpoint(cmd.checkpoint) });
+        return;
+      case "commands_list":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.commands());
+        return;
+      case "fork_points":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.forkPoints());
+        return;
+      case "session_fork":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, { text: await gateway.fork(emit, cmd.entryId) });
+        return;
+      case "session_clone":
+        requireReady();
+        await gateway.clone(emit);
+        reply(cmd.id, cmd.cmd, true, { done: true });
+        return;
+      case "session_stats":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.stats());
+        return;
+      case "export_html":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, { path: await gateway.exportHtml() });
+        return;
+      case "reload":
+        requireReady();
+        await gateway.reload(emit);
+        reply(cmd.id, cmd.cmd, true, gateway.commands());
+        return;
+      case "ui_response":
+        gateway.answerDialog(cmd.requestId, cmd.answer);
+        reply(cmd.id, cmd.cmd, true, { done: true });
         return;
       case "dispose":
         gateway.dispose();
@@ -210,7 +252,8 @@ rl.on("line", (line) => {
   }
   // Abort/approve/mode jump the queue: they must work while anything else is pending.
   // Read-only status queries also skip it so a slow session swap can't stall the UI's polling.
-  if (["abort", "approve", "mode_set", "router_status", "git_changes", "files_list", "notify"].includes(cmd.cmd)) {
+  // ui_response too: an extension command waiting on a dialog holds the queue until it is answered.
+  if (["abort", "approve", "ui_response", "mode_set", "router_status", "git_changes", "files_list", "notify"].includes(cmd.cmd)) {
     void handle(cmd);
     return;
   }

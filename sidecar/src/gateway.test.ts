@@ -187,3 +187,53 @@ describe("PiGateway.history", () => {
     ]);
   });
 });
+
+describe("PiGateway slash commands", () => {
+  function withSession(extra: Record<string, unknown>) {
+    const gw = new PiGateway();
+    const session = { ...fakeSession(), ...extra };
+    const events: PiEvent[] = [];
+    const internal = gw as unknown as { session: unknown; emit: (e: PiEvent) => void; subscribe(s: unknown, cb: (e: PiEvent) => void): void };
+    internal.session = session;
+    internal.emit = (e) => events.push(e);
+    internal.subscribe(session, (e) => events.push(e));
+    return { gw, session, events };
+  }
+
+  it("an extension command that runs no agent still ends with settled (the UI waits for it)", async () => {
+    const { gw, events } = withSession({ prompt: async () => undefined });
+    await gw.prompt("/memory");
+    expect(events).toEqual([{ kind: "settled" }]);
+  });
+
+  it("a real run is not settled twice", async () => {
+    const { gw, session, events } = withSession({});
+    Object.assign(session, { prompt: async () => session.push({ type: "agent_settled" }) });
+    await gw.prompt("zrób coś");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(events.filter((e) => e.kind === "settled")).toHaveLength(1);
+  });
+
+  it("lists extension commands, prompt templates and skills like RPC get_commands", () => {
+    const { gw } = withSession({
+      extensionRunner: { getRegisteredCommands: () => [{ invocationName: "memory", description: "Pokaż pamięć" }] },
+      promptTemplates: [{ name: "fix-tests", description: "Napraw testy" }],
+      resourceLoader: { getSkills: () => ({ skills: [{ name: "3d-models", description: "Modele 3D" }] }) },
+    });
+    expect(gw.commands()).toEqual([
+      { name: "memory", description: "Pokaż pamięć", source: "extension" },
+      { name: "fix-tests", description: "Napraw testy", source: "prompt" },
+      { name: "skill:3d-models", description: "Modele 3D", source: "skill" },
+    ]);
+  });
+
+  it("fork points come newest first", () => {
+    const { gw } = withSession({
+      getUserMessagesForForking: () => [
+        { entryId: "a", text: "pierwsza" },
+        { entryId: "b", text: "druga" },
+      ],
+    });
+    expect(gw.forkPoints().map((p) => p.entryId)).toEqual(["b", "a"]);
+  });
+});

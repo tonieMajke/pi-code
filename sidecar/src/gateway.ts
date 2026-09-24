@@ -1,12 +1,14 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   createAgentSession,
   createAgentSessionServices,
   DefaultResourceLoader,
+  initTheme,
   SessionManager,
   type AgentSession,
   type SettingsManager,
@@ -16,6 +18,7 @@ import { Type } from "typebox";
 import type {
   ApprovalDecision,
   Attachment,
+  ForkPoint,
   HistoryItem,
   HistoryPart,
   ModelSummary,
@@ -23,9 +26,12 @@ import type {
   PiEvent,
   PiSettings,
   SettingsPatch,
+  SessionStats,
   SessionSummary,
+  SlashCommandInfo,
   Usage,
 } from "../../shared/protocol.js";
+import { ExtensionDialogs } from "./extension-ui.js";
 import { decide, PLAN_PROMPT } from "./permissions.js";
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, DEFAULT_CONSTITUTION } from "./constitution.js";
 import { GuiConfigStore } from "./config.js";
@@ -83,6 +89,15 @@ export class PiGateway {
   /** Worktree snapshot taken when the current run started (git projects only). */
   private runCheckpoint: string | null = null;
   private reviewer: AgentSession | null = null;
+  /** ctx.ui dialogs of pi extensions, answered in the GUI. */
+  private dialogs = new ExtensionDialogs((e) => this.emit(e));
+  /** Agent runs that reached agent_settled — tells prompt() whether a "/command" ran the agent at all. */
+  private settledRuns = 0;
+
+  /** The UI answered an extension dialog. */
+  answerDialog(requestId: string, answer: Parameters<ExtensionDialogs["answer"]>[1]): void {
+    this.dialogs.answer(requestId, answer);
+  }
 
   get permissionMode(): PermissionMode {
     return this.mode;
@@ -383,6 +398,8 @@ export class PiGateway {
     installFetchTap();
     onPerf((perf) => this.emit({ kind: "perf", perf }));
     this.services = await createAgentSessionServices({ cwd: workingDir });
+    // pi's main() does this for every mode; extensions with a UI format text with the theme.
+    initTheme(this.services.settingsManager.getTheme(), false);
     // PI_GUI_CONFIG lets the eval harness run profiles without touching the user's file.
     this.config = new GuiConfigStore(process.env.PI_GUI_CONFIG ?? `${this.services.agentDir}/pi-gui.json`);
     setSampling(this.config.get().sampling);
@@ -577,10 +594,10 @@ export class PiGateway {
     return this.settings();
   }
 
-  async compact(onEvent: (e: PiEvent) => void): Promise<void> {
+  async compact(onEvent: (e: PiEvent) => void, instructions?: string): Promise<void> {
     const s = this.requireSession();
     if (this.busy) throw new Error("model pracuje — kompaktowanie po zakończeniu");
-    await s.compact();
+    await s.compact(instructions?.trim() || undefined);
     this.emitUsage(onEvent);
   }
 
@@ -609,6 +626,100 @@ export class PiGateway {
     if (res.cancelled) throw new Error("cofnięcie anulowane");
     this.emitUsage(onEvent);
     return res.editorText ?? "";
+  }
+
+  /** "/name" commands pi runs itself: extension commands, prompt templates, skills (same set as RPC get_commands). */
+  commands(): SlashCommandInfo[] {
+    const s = this.requireSession();
+    return [
+      ...s.extensionRunner
+        .getRegisteredCommands()
+        .map((c): SlashCommandInfo => ({ name: c.invocationName, description: c.description ?? "", source: "extension" })),
+      ...s.promptTemplates.map((t): SlashCommandInfo => ({ name: t.name, description: t.description, source: "prompt" })),
+      ...s.resourceLoader
+        .getSkills()
+        .skills.map((k): SlashCommandInfo => ({ name: `skill:${k.name}`, description: k.description, source: "skill" })),
+    ];
+  }
+
+  /** User messages of the active branch, newest first (what /fork offers). */
+  forkPoints(): ForkPoint[] {
+    return this.requireSession()
+      .getUserMessagesForForking()
+      .map((m) => ({ entryId: m.entryId, text: m.text }))
+      .reverse();
+  }
+
+  /**
+   * New session with the branch up to (not including) that user message — pi's /fork.
+   * Returns the message text so the UI can put it back in the composer.
+   */
+  async fork(onEvent: (e: PiEvent) => void, entryId: string): Promise<string> {
+    const s = this.requireSession();
+    if (this.busy) throw new Error("model pracuje — fork po zakończeniu");
+    const entry = s.sessionManager.getEntry(entryId) as
+      | { type: string; parentId: string | null; message?: { role: string; content: Parameters<typeof userText>[0] } }
+      | undefined;
+    if (!entry || entry.type !== "message" || entry.message?.role !== "user") throw new Error("nie ma takiej wiadomości w sesji");
+    const text = userText(entry.message.content);
+    await this.branchInto(onEvent, entry.parentId);
+    return text;
+  }
+
+  /** New session with a copy of the active branch — pi's /clone. */
+  async clone(onEvent: (e: PiEvent) => void): Promise<void> {
+    const s = this.requireSession();
+    if (this.busy) throw new Error("model pracuje — kopia po zakończeniu");
+    const leaf = s.sessionManager.getLeafId();
+    if (!leaf) throw new Error("sesja jest pusta — nie ma czego kopiować");
+    await this.branchInto(onEvent, leaf);
+  }
+
+  /** Same file handling as pi's runtime fork: a new session file holding root → leafId. */
+  private async branchInto(onEvent: (e: PiEvent) => void, leafId: string | null): Promise<void> {
+    const s = this.requireSession();
+    if (!s.sessionManager.isPersisted()) throw new Error("sesja nie jest zapisywana na dysk");
+    const file = s.sessionFile;
+    const dir = s.sessionManager.getSessionDir();
+    if (!leafId) {
+      // Forking before the very first message: an empty session that remembers its parent.
+      const sm = SessionManager.create(this.cwd, dir);
+      sm.newSession({ parentSession: file });
+      await this.startSession(onEvent, this.cwd, sm);
+      return;
+    }
+    if (!file || !existsSync(file)) throw new Error("sesja nie jest jeszcze zapisana — poczekaj na pierwszą odpowiedź modelu");
+    const sm = SessionManager.open(file, dir);
+    if (!sm.createBranchedSession(leafId)) throw new Error("nie udało się utworzyć nowej sesji");
+    await this.startSession(onEvent, sm.getCwd() || this.cwd, sm);
+  }
+
+  stats(): SessionStats {
+    const st = this.requireSession().getSessionStats();
+    return {
+      sessionFile: st.sessionFile ?? "",
+      userMessages: st.userMessages,
+      assistantMessages: st.assistantMessages,
+      toolCalls: st.toolCalls,
+      tokens: st.tokens,
+      cost: st.cost,
+    };
+  }
+
+  /** HTML export (pi's /export): into the project directory, like pi run there. */
+  async exportHtml(): Promise<string> {
+    const s = this.requireSession();
+    const name = s.sessionFile ? `pi-session-${basename(s.sessionFile, ".jsonl")}.html` : "pi-session.html";
+    return s.exportToHtml(join(this.cwd, name));
+  }
+
+  /** pi's /reload: extensions, skills, prompt templates, context files. */
+  async reload(onEvent: (e: PiEvent) => void): Promise<void> {
+    const s = this.requireSession();
+    if (this.busy) throw new Error("model pracuje — przeładowanie po zakończeniu");
+    await s.reload();
+    this.applyToolPolicy();
+    this.emitUsage(onEvent);
   }
 
   async rename(onEvent: (e: PiEvent) => void, name: string): Promise<void> {
@@ -665,8 +776,63 @@ export class PiGateway {
     this.session = session;
     this.applyToolPolicy();
     this.subscribe(session, onEvent);
+    await this.bindExtensions(session, onEvent);
     await this.emitInit(onEvent);
     this.emitUsage(onEvent);
+  }
+
+  /**
+   * What every pi mode does after creating a session: give extensions a UI and
+   * command actions, and fire session_start (MCP servers, pi-lens etc. start there).
+   */
+  private async bindExtensions(session: AgentSession, onEvent: (e: PiEvent) => void): Promise<void> {
+    const current = () => {
+      if (this.session !== session) throw new Error("sesja została już zamieniona");
+      return session;
+    };
+    // Session swaps started by an extension: the UI must reload the transcript itself.
+    const swapped = async (withSession?: (ctx: ReturnType<AgentSession["createReplacedSessionContext"]>) => Promise<void>) => {
+      onEvent({ kind: "session_changed" });
+      if (withSession && this.session) await withSession(this.session.createReplacedSessionContext());
+      return { cancelled: false };
+    };
+    const theme = (session.extensionRunner as unknown as { uiContext?: { theme?: unknown } }).uiContext?.theme;
+    await session.bindExtensions({
+      uiContext: this.dialogs.context(theme),
+      mode: "rpc",
+      commandContextActions: {
+        waitForIdle: () => current().waitForIdle(),
+        newSession: async (options) => {
+          const sm = SessionManager.create(this.cwd);
+          if (options?.parentSession) sm.newSession({ parentSession: options.parentSession });
+          await options?.setup?.(sm);
+          await this.startSession(onEvent, this.cwd, sm);
+          return swapped(options?.withSession);
+        },
+        fork: async (entryId, options) => {
+          const s = current();
+          const entry = s.sessionManager.getEntry(entryId) as { parentId: string | null } | undefined;
+          if (!entry) throw new Error("Invalid entry ID for forking");
+          await this.branchInto(onEvent, options?.position === "at" ? entryId : entry.parentId);
+          return swapped(options?.withSession);
+        },
+        navigateTree: async (targetId, options) => {
+          const res = await current().navigateTree(targetId, options);
+          if (!res.cancelled) onEvent({ kind: "session_changed" });
+          return { cancelled: res.cancelled };
+        },
+        switchSession: async (sessionPath, options) => {
+          await this.openSession(onEvent, sessionPath);
+          return swapped(options?.withSession);
+        },
+        reload: async () => {
+          await current().reload();
+          this.applyToolPolicy();
+        },
+      },
+      onError: (err) =>
+        onEvent({ kind: "notice", level: "error", text: `Rozszerzenie ${extensionName(err.extensionPath)} (${err.event}): ${err.error}` }),
+    });
   }
 
   private resolveDefaultModel() {
@@ -738,16 +904,20 @@ export class PiGateway {
       return;
     }
     this.running = true;
+    const runs = this.settledRuns;
     try {
       await s.prompt(text, imgs?.length ? { images: imgs } : undefined);
     } finally {
       this.running = false;
+      // An extension command may finish without an agent run — the UI still waits for "settled".
+      if (this.settledRuns === runs && !s.state.isStreaming) this.emit({ kind: "settled" });
     }
   }
 
   async abort(): Promise<void> {
     // A run parked on an approval prompt can't observe abort — release it first.
     this.denyAllPending();
+    this.dialogs.cancelAll();
     void this.reviewer?.abort();
     const s = this.session;
     if (s && this.busy) await s.abort();
@@ -755,6 +925,7 @@ export class PiGateway {
 
   dispose(): void {
     this.denyAllPending();
+    this.dialogs.cancelAll();
     this.session?.dispose();
     this.session = null;
     this.running = false;
@@ -819,6 +990,7 @@ export class PiGateway {
           onEvent({ kind: "agent_end" });
           return;
         case "agent_settled": {
+          this.settledRuns++;
           this.emitUsage(onEvent);
           const cp = this.runCheckpoint;
           this.runCheckpoint = null;

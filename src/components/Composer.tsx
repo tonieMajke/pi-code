@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ArrowUp, Check, ChevronDown, Clock, Cpu, Folder, GitBranch, Paperclip, Square, X } from "lucide-react";
 import type { Attachment, ModelSummary, PermissionMode, SessionSummary, Usage } from "../../shared/protocol";
 import { Menu, type MenuItem } from "./Menu";
@@ -6,6 +6,22 @@ import { basename, formatTokens } from "../lib/format";
 import type { Outgoing } from "../lib/reducer";
 import { MODES, modeInfo } from "../lib/modes";
 import { dataUrl, imageFiles } from "../lib/images";
+import { matchCommands, matchPicks, slashState, type PickItem, type SlashEntry, type SlashPick } from "../lib/slash";
+
+const KIND_LABEL: Record<SlashEntry["kind"], string> = {
+  gui: "",
+  extension: "rozszerzenie",
+  prompt: "szablon",
+  skill: "skill",
+  terminal: "tylko terminal",
+};
+
+const PICK_TITLE: Record<SlashPick, string> = {
+  model: "Model tej sesji",
+  thinking: "Poziom myślenia",
+  mode: "Tryb uprawnień",
+  fork: "Nowa sesja od wiadomości — wybierz, od której",
+};
 
 export function Composer({
   value,
@@ -34,6 +50,10 @@ export function Composer({
   blocked,
   files,
   onNeedFiles,
+  commands,
+  pickItems,
+  onNeedPick,
+  onCommand,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -63,10 +83,70 @@ export function Composer({
   /** Project files for @-mentions (null until first requested). */
   files: string[] | null;
   onNeedFiles: () => void;
+  /** Everything "/" offers: built-ins, pi's extension commands / templates / skills, terminal-only. */
+  commands: SlashEntry[];
+  /** Choices for a picker command; null = still loading. */
+  pickItems: (pick: SlashPick) => PickItem[] | null;
+  onNeedPick: (pick: SlashPick) => void;
+  onCommand: (name: string, args: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   const [mentionSel, setMentionSel] = useState(0);
+  /** Text before the caret while it may be a command; null = popup closed. */
+  const [slashBefore, setSlashBefore] = useState<string | null>(null);
+  const [slashSel, setSlashSel] = useState(0);
+  const slashPopRef = useRef<HTMLDivElement>(null);
+
+  const slash = slashBefore === null ? null : slashState(slashBefore, commands);
+  const slashList = slash?.kind === "list" ? matchCommands(commands, slash.query) : [];
+  const pick = slash?.kind === "pick" ? slash.entry.pick! : null;
+  const pickAll = pick ? pickItems(pick) : null;
+  const pickList = slash?.kind === "pick" && pickAll ? matchPicks(pickAll, slash.query) : [];
+  const slashCount = slash?.kind === "list" ? slashList.length : pickList.length;
+
+  useEffect(() => {
+    if (pick) onNeedPick(pick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per picker opened
+  }, [pick]);
+
+  // A freshly opened (or loaded) picker starts on the current choice.
+  const pickReady = pickAll !== null;
+  useEffect(() => {
+    if (pick && pickReady) setSlashSel(Math.max(0, pickList.findIndex((p) => p.active)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the picker opens or loads
+  }, [pick, pickReady]);
+
+  useEffect(() => {
+    slashPopRef.current?.querySelector<HTMLElement>(".sel")?.scrollIntoView?.({ block: "nearest" });
+  }, [slashSel, slash?.kind]);
+
+  const setCaretText = (next: string) => {
+    onChange(next);
+    setSlashBefore(next);
+    setSlashSel(0);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.length, next.length);
+    });
+  };
+
+  /** Enter/click on a command: pickers and required arguments continue typing, the rest runs. */
+  const chooseCommand = (c: SlashEntry, complete: boolean) => {
+    if (complete || c.pick || c.args?.startsWith("<")) setCaretText(`/${c.name} `);
+    else {
+      setSlashBefore(null);
+      onCommand(c.name, "");
+    }
+  };
+
+  const choosePick = (item: PickItem) => {
+    if (slash?.kind !== "pick") return;
+    setSlashBefore(null);
+    onCommand(slash.entry.name, item.key);
+  };
 
   const suggestions = useMemo(() => {
     if (!mention || !files) return [];
@@ -81,9 +161,12 @@ export function Composer({
     return scored.sort((a, b) => b[0] - a[0]).slice(0, 8).map(([, f]) => f);
   }, [mention, files]);
 
-  /** Detect an "@query" token right before the caret. */
+  /** Detect an "@query" token or a "/command" right before the caret. */
   const updateMention = (el: HTMLTextAreaElement) => {
     const before = el.value.slice(0, el.selectionStart);
+    const maybeSlash = before.startsWith("/") && !before.includes("\n");
+    setSlashBefore(maybeSlash ? before : null);
+    if (maybeSlash && before !== slashBefore) setSlashSel(0);
     const m = /(^|\s)@([^\s@]*)$/.exec(before);
     if (m) {
       if (!files) onNeedFiles();
@@ -185,6 +268,50 @@ export function Composer({
         </div>
       )}
       <div className={`composer-box mode-${mode}`}>
+        {slash && (
+          <div className="mention-pop slash-pop" ref={slashPopRef}>
+            {slash.kind === "pick" && <div className="slash-head">{PICK_TITLE[slash.entry.pick!]}</div>}
+            {slash.kind === "pick" && !pickAll && <div className="s-empty">wczytywanie…</div>}
+            {slashCount === 0 && (slash.kind === "list" || pickAll) && (
+              <div className="s-empty">{slash.kind === "list" ? "brak takiej komendy" : "nic nie pasuje"}</div>
+            )}
+            {slash.kind === "list" &&
+              slashList.map((c, i) => (
+                <button
+                  key={c.name}
+                  className={`mention-item slash-item ${i === slashSel ? "sel" : ""} ${c.kind === "terminal" ? "dim" : ""}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    chooseCommand(c, false);
+                  }}
+                  onMouseEnter={() => setSlashSel(i)}
+                >
+                  <span className="slash-name">
+                    /{c.name}
+                    {c.args && <span className="slash-args"> {c.args}</span>}
+                  </span>
+                  <span className="slash-desc">{c.description}</span>
+                  {KIND_LABEL[c.kind] && <span className={`slash-kind k-${c.kind}`}>{KIND_LABEL[c.kind]}</span>}
+                </button>
+              ))}
+            {slash.kind === "pick" &&
+              pickList.map((p, i) => (
+                <button
+                  key={p.key}
+                  className={`mention-item slash-item ${i === slashSel ? "sel" : ""}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    choosePick(p);
+                  }}
+                  onMouseEnter={() => setSlashSel(i)}
+                >
+                  <span className="slash-pick-label">{p.label}</span>
+                  {p.hint && <span className="slash-desc">{p.hint}</span>}
+                  {p.active && <Check size={13} className="slash-check" />}
+                </button>
+              ))}
+          </div>
+        )}
         {mention && (
           <div className="mention-pop">
             {!files && <div className="s-empty">wczytywanie plików…</div>}
@@ -228,7 +355,12 @@ export function Composer({
             updateMention(e.target);
           }}
           onClick={(e) => updateMention(e.currentTarget)}
-          onBlur={() => setTimeout(() => setMention(null), 150)}
+          onBlur={() =>
+            setTimeout(() => {
+              setMention(null);
+              setSlashBefore(null);
+            }, 150)
+          }
           onPaste={(e) => {
             const files = imageFiles(e.clipboardData.items);
             if (files.length) {
@@ -237,6 +369,27 @@ export function Composer({
             }
           }}
           onKeyDown={(e) => {
+            if (slash && e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              setSlashBefore(null);
+              return;
+            }
+            if (slash && slashCount > 0) {
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const d = e.key === "ArrowDown" ? 1 : -1;
+                setSlashSel((s) => (s + d + slashCount) % slashCount);
+                return;
+              }
+              const sel = Math.min(slashSel, slashCount - 1);
+              if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+                e.preventDefault();
+                if (slash.kind === "list") chooseCommand(slashList[sel], e.key === "Tab");
+                else choosePick(pickList[sel]);
+                return;
+              }
+            }
             if (mention && suggestions.length > 0) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
@@ -347,7 +500,7 @@ export function Composer({
         <div className="composer-hint">
           {connected ? (
             <>
-              <kbd>Enter</kbd> wyślij · <kbd>Shift Enter</kbd> nowa linia · <kbd>Shift Tab</kbd> tryb
+              <kbd>Enter</kbd> wyślij · <kbd>Shift Enter</kbd> nowa linia · <kbd>/</kbd> komendy · <kbd>Shift Tab</kbd> tryb
               {busy && (
                 <>
                   {" "}

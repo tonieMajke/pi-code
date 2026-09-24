@@ -7,6 +7,7 @@ import type {
   PiEvent,
   SessionSummary,
   ToolStatus,
+  UiRequest,
   Usage,
 } from "../../shared/protocol";
 
@@ -34,8 +35,14 @@ export type Part =
   | { type: "tool"; tool: ToolItem }
   | { type: "notice"; text: string };
 
+export type InfoLevel = "info" | "warning" | "error";
+
 export type Msg =
   | { role: "user"; text: string; images?: Attachment[] }
+  /** A slash command the user ran (local to the view, not part of the session file). */
+  | { role: "command"; text: string }
+  /** Output of a command or an extension message (local to the view). */
+  | { role: "info"; text: string; level: InfoLevel }
   | {
       role: "assistant";
       parts: Part[];
@@ -68,6 +75,8 @@ export interface State {
   mode: PermissionMode;
   /** Tool calls parked on the permission gate, oldest first. */
   approvals: Approval[];
+  /** Questions from pi extensions (ctx.ui select/confirm/input/editor), oldest first. */
+  dialogs: UiRequest[];
   /** The hard guards gave up on the last run. */
   stuck: { label: string; suggest: string } | null;
   /** Speed of the request in flight (cleared when it completes). */
@@ -78,6 +87,10 @@ export interface State {
 
 export type Action =
   | { type: "user"; text: string; images?: Attachment[]; at?: number }
+  /** A slash command; run = pi executes it (the view waits for "settled"). */
+  | { type: "command"; text: string; run?: boolean; at?: number }
+  | { type: "info"; text: string; level?: InfoLevel }
+  | { type: "dialog_done"; id: string }
   | { type: "event"; event: PiEvent; at?: number }
   | { type: "sessions"; sessions: SessionSummary[]; loading: boolean }
   | { type: "models"; models: ModelSummary[] }
@@ -108,6 +121,7 @@ export const initialState: State = {
   pending: [],
   mode: "ask",
   approvals: [],
+  dialogs: [],
   stuck: null,
   perf: null,
   settledCount: 0,
@@ -213,6 +227,16 @@ export function reducer(state: State, action: Action): State {
         error: null,
         stuck: null,
       };
+    case "command":
+      return {
+        ...state,
+        messages: [...state.messages, { role: "command", text: action.text }],
+        ...(action.run ? { busy: true, busySince: action.at ?? null, error: null } : {}),
+      };
+    case "info":
+      return { ...state, messages: [...state.messages, { role: "info", text: action.text, level: action.level ?? "info" }] };
+    case "dialog_done":
+      return { ...state, dialogs: state.dialogs.filter((d) => d.id !== action.id) };
     case "sessions":
       return { ...state, sessions: action.sessions, loadingSessions: action.loading };
     case "models":
@@ -233,7 +257,7 @@ export function reducer(state: State, action: Action): State {
     case "connected":
       return { ...state, connected: action.ok };
     case "clear":
-      return { ...state, messages: [], error: null, pending: [], approvals: [], perf: null, stuck: null };
+      return { ...state, messages: [], error: null, pending: [], approvals: [], dialogs: [], perf: null, stuck: null };
     case "restored":
       return {
         ...state,
@@ -329,6 +353,10 @@ export function reducer(state: State, action: Action): State {
           };
         case "approval_done":
           return { ...state, approvals: state.approvals.filter((a) => a.toolCallId !== e.toolCallId) };
+        case "ui_request":
+          return { ...state, dialogs: [...state.dialogs, e.request] };
+        case "ui_done":
+          return { ...state, dialogs: state.dialogs.filter((d) => d.id !== e.id) };
         case "perf": {
           if (e.perf.phase !== "done") return { ...state, perf: e.perf };
           const stats = e.perf;

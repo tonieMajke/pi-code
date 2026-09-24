@@ -55,7 +55,23 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
     case "settings_set":
       return { id, cmd: "settings_set", patch: cmd.patch };
     case "compact":
-      return { id, cmd: "compact" };
+      return { id, cmd: "compact", instructions: cmd.instructions };
+    case "commands_list":
+      return { id, cmd: "commands_list" };
+    case "fork_points":
+      return { id, cmd: "fork_points" };
+    case "session_fork":
+      return { id, cmd: "session_fork", entryId: cmd.entryId };
+    case "session_clone":
+      return { id, cmd: "session_clone" };
+    case "session_stats":
+      return { id, cmd: "session_stats" };
+    case "export_html":
+      return { id, cmd: "export_html" };
+    case "reload":
+      return { id, cmd: "reload" };
+    case "ui_response":
+      return { id, cmd: "ui_response", requestId: cmd.requestId, answer: cmd.answer };
     case "escalate":
       return { id, cmd: "escalate", model: cmd.model, reason: cmd.reason };
     case "checkpoint_restore":

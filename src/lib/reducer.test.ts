@@ -212,3 +212,32 @@ describe("reducer", () => {
     expect(s.error).toBeNull();
   });
 });
+
+describe("reducer: slash commands and extension dialogs", () => {
+  it("an extension command shows its line and keeps the view busy until settled", () => {
+    let s = reducer(initialState, { type: "command", text: "/memory", run: true, at: 5 });
+    expect(s.messages).toEqual([{ role: "command", text: "/memory" }]);
+    expect(s.busy).toBe(true);
+    s = reducer(s, { type: "info", text: "pamięć" });
+    s = reducer(s, { type: "event", event: { kind: "settled" } });
+    expect(s.busy).toBe(false);
+    expect(s.messages).toEqual([
+      { role: "command", text: "/memory" },
+      { role: "info", text: "pamięć", level: "info" },
+    ]);
+  });
+
+  it("a local command does not touch busy", () => {
+    const s = reducer(initialState, { type: "command", text: "/session" });
+    expect(s.busy).toBe(false);
+  });
+
+  it("dialogs queue up and leave on answer or ui_done", () => {
+    let s = reducer(initialState, { type: "event", event: { kind: "ui_request", request: { id: "a", method: "input", title: "x" } } });
+    s = reducer(s, { type: "event", event: { kind: "ui_request", request: { id: "b", method: "confirm", title: "y", message: "?" } } });
+    expect(s.dialogs.map((d) => d.id)).toEqual(["a", "b"]);
+    s = reducer(s, { type: "dialog_done", id: "a" });
+    s = reducer(s, { type: "event", event: { kind: "ui_done", id: "b" } });
+    expect(s.dialogs).toEqual([]);
+  });
+});

@@ -3,7 +3,7 @@ import { WindowControls } from "./components/WindowControls";
 import { WindowFrame } from "./components/WindowFrame";
 import { Logo } from "./components/Logo";
 import { ArrowDown, FileDiff, ImagePlus, PanelLeftOpen, X } from "lucide-react";
-import { initialState, reducer, type LivePerf } from "./lib/reducer";
+import { initialState, reducer, type InfoLevel, type LivePerf } from "./lib/reducer";
 import { createWsTransport, type PiTransport } from "./lib/transport";
 import { createTauriTransport, inTauri } from "./lib/tauri";
 import { formatDuration, formatTokens, sessionTitle } from "./lib/format";
@@ -12,13 +12,21 @@ import type {
   Appearance,
   AppearancePatch,
   Attachment,
+  ForkPoint,
   GitChanges,
   HistoryItem,
   ModelSummary,
   PiSettings,
   RouterStatus,
+  SessionStats,
   SessionSummary,
+  SlashCommandInfo,
+  UiAnswer,
 } from "../shared/protocol";
+import { allCommands, parseSlash, type PickItem, type SlashPick } from "./lib/slash";
+import { copyText } from "./lib/code-block";
+import { ExtensionDialog } from "./components/ExtensionDialog";
+import { Toasts, type Toast } from "./components/Toasts";
 import { ChangesPanel } from "./components/ChangesPanel";
 import { GpuStatus } from "./components/GpuStatus";
 import { CommandPalette, type Command } from "./components/CommandPalette";
@@ -67,6 +75,13 @@ export default function App() {
   const [prefs, setPrefs] = useState(readPrefs);
   const [appearance, setAppearance] = useState<Appearance>(cachedAppearance);
   const [imageBusy, setImageBusy] = useState(false);
+  const [piCommands, setPiCommands] = useState<SlashCommandInfo[]>([]);
+  const [forkPoints, setForkPoints] = useState<ForkPoint[] | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  /** An extension command is running: its ctx.ui.notify output belongs in the transcript. */
+  const commandOutputRef = useRef(false);
+  /** Transcript items to re-add once the next history reload lands (it replaces the view). */
+  const afterHistoryRef = useRef<({ role: "command"; text: string } | { role: "info"; text: string; level: InfoLevel })[]>([]);
   const appearancePatchRef = useRef<AppearancePatch>({});
   const appearanceTimerRef = useRef<number | undefined>(undefined);
   const restoringRef = useRef<string | null>(null);
@@ -84,6 +99,13 @@ export default function App() {
 
   const send = useCallback((cmd: Parameters<PiTransport["send"]>[0]) => transportRef.current?.send(cmd), []);
 
+  const toast = useCallback((text: string, level: InfoLevel = "info") => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t.slice(-3), { id, text, level }]);
+    // Errors stay until closed; the rest fades out.
+    if (level !== "error") setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
+  }, []);
+
   // A run may have created/renamed a session — refresh the sidebar after every settled.
   useEffect(() => {
     if (state.settledCount > 0) send({ cmd: "sessions_list" });
@@ -96,11 +118,38 @@ export default function App() {
     transportRef.current = t;
     const off = t.onMessage((msg) => {
       if ("event" in msg) {
-        dispatch({ type: "event", event: msg.event, at: Date.now() });
+        const e = msg.event;
+        switch (e.kind) {
+          case "notice":
+            if (commandOutputRef.current) dispatch({ type: "info", text: e.text, level: e.level });
+            else toast(e.text, e.level);
+            return;
+          case "editor_text":
+            setInput(e.text);
+            requestAnimationFrame(() => inputRef.current?.focus());
+            return;
+          case "session_changed":
+            dispatch({ type: "clear" });
+            t.send({ cmd: "history" });
+            t.send({ cmd: "sessions_list" });
+            return;
+          case "init_done":
+            // Extensions, templates and skills are per project — refresh "/" on every (re)init.
+            t.send({ cmd: "commands_list" });
+            break;
+          case "settled":
+            commandOutputRef.current = false;
+            break;
+        }
+        dispatch({ type: "event", event: e, at: Date.now() });
         return;
       }
       if (!msg.ok) {
-        if (msg.cmd === "compact") setCompacting(false);
+        if (msg.cmd === "compact") {
+          setCompacting(false);
+          afterHistoryRef.current = [];
+        }
+        if (msg.cmd === "fork_points") setForkPoints([]);
         if (msg.cmd === "appearance_image") setImageBusy(false);
         dispatch({ type: "error", error: `${msg.cmd ?? "pi"}: ${msg.error}` });
         return;
@@ -111,6 +160,38 @@ export default function App() {
           return;
         case "history":
           dispatch({ type: "history", items: msg.result as HistoryItem[] });
+          for (const m of afterHistoryRef.current) {
+            dispatch(m.role === "command" ? { type: "command", text: m.text } : { type: "info", text: m.text, level: m.level });
+          }
+          afterHistoryRef.current = [];
+          return;
+        case "commands_list":
+          setPiCommands(msg.result as SlashCommandInfo[]);
+          return;
+        case "reload":
+          setPiCommands(msg.result as SlashCommandInfo[]);
+          dispatch({ type: "info", text: "Przeładowano rozszerzenia, skille, szablony i pliki kontekstu." });
+          return;
+        case "fork_points":
+          setForkPoints(msg.result as ForkPoint[]);
+          return;
+        case "session_fork":
+          setInput((msg.result as { text: string }).text);
+          afterHistoryRef.current = [{ role: "info", text: "Nowa sesja od wybranej wiadomości — wiadomość czeka w polu do poprawienia.", level: "info" }];
+          t.send({ cmd: "history" });
+          t.send({ cmd: "sessions_list" });
+          requestAnimationFrame(() => inputRef.current?.focus());
+          return;
+        case "session_clone":
+          afterHistoryRef.current = [{ role: "info", text: "To jest kopia sesji — oryginał został bez zmian.", level: "info" }];
+          t.send({ cmd: "history" });
+          t.send({ cmd: "sessions_list" });
+          return;
+        case "session_stats":
+          dispatch({ type: "info", text: formatStats(msg.result as SessionStats) });
+          return;
+        case "export_html":
+          dispatch({ type: "info", text: `Zapisano sesję jako HTML:\n\n\`${(msg.result as { path: string }).path}\`` });
           return;
         case "models_list":
           dispatch({ type: "models", models: msg.result as ModelSummary[] });
@@ -150,6 +231,7 @@ export default function App() {
         case "compact":
           setSettings(msg.result as PiSettings);
           setCompacting(false);
+          if (afterHistoryRef.current.length) afterHistoryRef.current.push({ role: "info", text: "Kontekst skompaktowany.", level: "info" });
           t.send({ cmd: "history" });
           return;
         case "rewind":
@@ -163,6 +245,7 @@ export default function App() {
       // Boot (or re-boot after bridge restart): init is idempotent in the sidecar.
       t.send({ cmd: "appearance_get" });
       t.send({ cmd: "init" });
+      t.send({ cmd: "commands_list" });
       t.send({ cmd: "history" });
       t.send({ cmd: "sessions_list" });
       t.send({ cmd: "models_list" });
@@ -296,6 +379,11 @@ export default function App() {
     const text = input.trim();
     const images = attachments.length ? attachments : undefined;
     if ((!text && !images) || !state.connected) return;
+    const slash = images ? null : parseSlash(text);
+    if (slash) {
+      runSlash(slash.name, slash.args);
+      return;
+    }
     setInput("");
     setAttachments([]);
     atBottomRef.current = true;
@@ -423,6 +511,167 @@ export default function App() {
   };
   const editMessage = (fromEnd: number) => send({ cmd: "rewind", fromEnd });
 
+  const slashCommands = allCommands(piCommands);
+
+  /** Run "/name args". Clears the composer unless the user has to fix what they typed. */
+  const runSlash = (name: string, args: string) => {
+    const entry = slashCommands.find((c) => c.name === name);
+    const done = () => setInput("");
+    const echo = (text = `/${name}${args ? ` ${args}` : ""}`) => dispatch({ type: "command", text });
+    const info = (text: string, level: InfoLevel = "info") => dispatch({ type: "info", text, level });
+    if (!entry) {
+      info(`Nie ma komendy \`/${name}\`. Wpisz \`/\`, żeby zobaczyć listę.`, "warning");
+      return;
+    }
+    if (entry.kind !== "gui" && entry.kind !== "terminal" && state.busy) {
+      toast("Model pracuje — komendy pi uruchomisz, gdy skończy (Esc przerywa).", "warning");
+      return;
+    }
+    done();
+    switch (entry.kind) {
+      case "terminal":
+        echo();
+        info(`\`/${name}\` działa tylko w pi w terminalu. Otwieranie sesji w terminalu będzie w następnym kroku.`, "warning");
+        return;
+      case "extension":
+        // pi runs it inside prompt(); its ctx.ui.notify output lands under this line.
+        commandOutputRef.current = true;
+        dispatch({ type: "command", text: `/${name}${args ? ` ${args}` : ""}`, run: true, at: Date.now() });
+        send({ cmd: "prompt", text: `/${name}${args ? ` ${args}` : ""}` });
+        return;
+      case "prompt":
+      case "skill": {
+        // pi expands the template / skill into the prompt the model gets.
+        const text = `/${name}${args ? ` ${args}` : ""}`;
+        dispatch({ type: "user", text, at: Date.now() });
+        send({ cmd: "prompt", text });
+        return;
+      }
+    }
+    switch (name) {
+      case "compact":
+        echo();
+        afterHistoryRef.current = [{ role: "command", text: `/compact${args ? ` ${args}` : ""}` }];
+        setCompacting(true);
+        send({ cmd: "compact", instructions: args || undefined });
+        return;
+      case "new":
+        newSession();
+        return;
+      case "name":
+        if (!args) {
+          setInput("/name ");
+          info("Podaj nazwę: `/name Nowa nazwa`.", "warning");
+          return;
+        }
+        send({ cmd: "session_rename", name: args });
+        return;
+      case "model": {
+        const q = args.toLowerCase();
+        const m =
+          state.models.find((x) => `${x.provider}/${x.id}` === args) ??
+          state.models.find((x) => x.id.toLowerCase() === q) ??
+          state.models.find((x) => x.id.toLowerCase().includes(q));
+        if (!args || !m) {
+          setInput("/model ");
+          if (args) info(`Nie znam modelu „${args}”.`, "warning");
+          return;
+        }
+        send({ cmd: "model_set", provider: m.provider, modelId: m.id });
+        toast(`Model: ${m.id}`);
+        return;
+      }
+      case "thinking":
+        if (!args) {
+          setInput("/thinking ");
+          return;
+        }
+        send({ cmd: "settings_set", patch: { thinkingLevel: args } });
+        toast(`Myślenie: ${args}`);
+        return;
+      case "mode": {
+        const q = args.toLowerCase();
+        const m = MODES.find((x) => x.id.toLowerCase() === q || x.label.toLowerCase() === q) ?? MODES.find((x) => x.label.toLowerCase().includes(q));
+        if (!args || !m) {
+          setInput("/mode ");
+          return;
+        }
+        setMode(m.id);
+        return;
+      }
+      case "fork":
+        if (!args) {
+          setInput("/fork ");
+          return;
+        }
+        resetView();
+        send({ cmd: "session_fork", entryId: args });
+        return;
+      case "clone":
+        resetView();
+        send({ cmd: "session_clone" });
+        return;
+      case "session":
+        echo();
+        send({ cmd: "session_stats" });
+        return;
+      case "export":
+        echo();
+        send({ cmd: "export_html" });
+        return;
+      case "copy": {
+        const last = [...state.messages].reverse().find((m) => m.role === "assistant");
+        const text = last?.role === "assistant" ? last.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("\n\n") : "";
+        if (!text.trim()) {
+          toast("Nie ma jeszcze odpowiedzi do skopiowania.", "warning");
+          return;
+        }
+        void copyText(text).then(() => toast("Skopiowano ostatnią odpowiedź."));
+        return;
+      }
+      case "reload":
+        echo();
+        send({ cmd: "reload" });
+        return;
+      case "settings":
+        setSettingsOpen(true);
+        return;
+    }
+  };
+
+  const pickItems = (pick: SlashPick): PickItem[] | null => {
+    switch (pick) {
+      case "model":
+        return state.models.map((m) => ({
+          key: `${m.provider}/${m.id}`,
+          label: m.id,
+          hint: formatTokens(m.contextWindow),
+          active: m.id === state.model && m.provider === state.provider,
+        }));
+      case "thinking":
+        if (!settings) return null;
+        return settings.thinking.available.map((l) => ({ key: l, label: l, active: l === settings.thinking.level }));
+      case "mode":
+        return MODES.map((m) => ({ key: m.id, label: m.label, hint: m.desc, active: m.id === state.mode }));
+      case "fork":
+        return forkPoints?.map((f) => ({ key: f.entryId, label: f.text.replace(/\s+/g, " ").slice(0, 120) || "(pusta wiadomość)" })) ?? null;
+    }
+  };
+
+  const onNeedPick = (pick: SlashPick) => {
+    if (pick === "fork") {
+      setForkPoints(null);
+      send({ cmd: "fork_points" });
+    } else if (pick === "thinking") send({ cmd: "settings_get" });
+  };
+
+  const dialog = state.dialogs[0];
+  const answerDialog = (answer: UiAnswer) => {
+    if (!dialog) return;
+    dispatch({ type: "dialog_done", id: dialog.id });
+    send({ cmd: "ui_response", requestId: dialog.id, answer });
+  };
+
   const commands: Command[] = [
     { id: "new", group: "Akcje", label: "Nowa sesja", hint: <kbd>Ctrl N</kbd>, run: () => newSession() },
     { id: "changes", group: "Akcje", label: changesOpen ? "Ukryj panel zmian" : "Pokaż panel zmian", hint: <kbd>Ctrl Shift D</kbd>, run: () => setChangesOpen((o) => !o) },
@@ -492,6 +741,10 @@ export default function App() {
       usage={state.usage}
       inputRef={inputRef}
       hero={empty}
+      commands={slashCommands}
+      pickItems={pickItems}
+      onNeedPick={onNeedPick}
+      onCommand={runSlash}
     />
   );
 
@@ -588,9 +841,10 @@ export default function App() {
           <div className="hero">
             <Logo size={60} className="hero-mark" />
             <h1>Co dalej, Majku?</h1>
+            {dialog && <ExtensionDialog key={dialog.id} request={dialog} queued={state.dialogs.length - 1} onAnswer={answerDialog} />}
             {composer}
             <div className="hero-hints">
-              <kbd>Ctrl N</kbd> nowa sesja · <kbd>Ctrl K</kbd> szukaj · <kbd>Ctrl B</kbd> panel
+              <kbd>/</kbd> komendy · <kbd>Ctrl N</kbd> nowa sesja · <kbd>Ctrl K</kbd> szukaj · <kbd>Ctrl B</kbd> panel
             </div>
           </div>
         ) : (
@@ -634,6 +888,7 @@ export default function App() {
                   onDismiss={() => dispatch({ type: "unstuck" })}
                 />
               )}
+              {dialog && <ExtensionDialog key={dialog.id} request={dialog} queued={state.dialogs.length - 1} onAnswer={answerDialog} />}
               {approval && (
                 <ApprovalCard
                   approval={approval}
@@ -682,6 +937,7 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      <Toasts toasts={toasts} onClose={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
     </div>
   );
@@ -720,6 +976,18 @@ function StuckCard({
       </div>
     </div>
   );
+}
+
+function formatStats(st: SessionStats): string {
+  const t = st.tokens;
+  const lines = [
+    "**Sesja**",
+    `- wiadomości: ${st.userMessages} Twoich, ${st.assistantMessages} modelu, ${st.toolCalls} wywołań narzędzi`,
+    `- tokeny: ${formatTokens(t.input)} wejście${t.cacheRead ? ` (z cache ${formatTokens(t.cacheRead)})` : ""}, ${formatTokens(t.output)} wyjście, razem ${formatTokens(t.total)}`,
+  ];
+  if (st.cost > 0) lines.push(`- koszt: $${st.cost.toFixed(4)}`);
+  if (st.sessionFile) lines.push(`- plik: \`${st.sessionFile.replace(/^\/home\/[^/]+/, "~")}\``);
+  return lines.join("\n");
 }
 
 function firstUserText(state: { messages: { role: string; text?: string }[] }): string {

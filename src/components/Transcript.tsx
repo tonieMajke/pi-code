@@ -47,6 +47,13 @@ export function Transcript({
             images={m.images}
             onEdit={onEdit && (() => onEdit(fromEnd.get(i)!))}
           />
+        ) : m.role === "command" ? (
+          <div className="cmd-line" key={i}>
+            <span className="cmd-prompt">›</span>
+            <code>{m.text}</code>
+          </div>
+        ) : m.role === "info" ? (
+          <InfoBlock key={i} text={m.text} level={m.level} />
         ) : (
           <AssistantTurn
             key={i}
@@ -65,6 +72,17 @@ export function Transcript({
     </>
   );
 }
+
+/** Command output / extension message: markdown, quieter than an answer. */
+const InfoBlock = memo(function InfoBlock({ text, level }: { text: string; level: "info" | "warning" | "error" }) {
+  return (
+    <div className={`info-block info-${level}`}>
+      <ReactMarkdown remarkPlugins={REMARK} components={markdownComponents}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+});
 
 const UserMessage = memo(function UserMessage({
   text,
