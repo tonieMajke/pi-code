@@ -1,0 +1,1 @@
+{ "prompt": "Dodaj do wc.py flagę --json. Z flagą program wypisuje wynik jako obiekt JSON z kluczami lines, words, chars zamiast tekstu. Bez flagi działa jak dotąd.", "check": "python3 hidden_test.py" }

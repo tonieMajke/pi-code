@@ -1,0 +1,1 @@
+{ "prompt": "Zmień nazwę funkcji calc_total na compute_total w całym projekcie (definicja i wszystkie użycia). Zachowanie ma zostać bez zmian.", "check": "python3 hidden_test.py && ! grep -rn calc_total --include=*.py ." }

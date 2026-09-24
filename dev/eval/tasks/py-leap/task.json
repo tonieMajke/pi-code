@@ -1,0 +1,1 @@
+{ "prompt": "is_leap_year w dates.py czasem zwraca zły wynik. Napraw.", "check": "python3 hidden_test.py" }

@@ -1,0 +1,1 @@
+{ "prompt": "Funkcja median w stats.py zwraca złe wyniki dla niektórych list. Napraw ją.", "check": "python3 hidden_test.py" }

@@ -1,0 +1,1 @@
+{ "prompt": "Skrypt backup.sh psuje się, gdy ścieżka katalogu ma spacje, i nie tworzy katalogu docelowego, jeśli go nie ma. Napraw oba problemy.", "check": "bash hidden_test.sh" }

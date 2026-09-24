@@ -3,3 +3,4 @@ dist/
 *.local
 src-tauri/target/
 .vitest/
+dev/eval/results/

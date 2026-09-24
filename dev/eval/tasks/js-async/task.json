@@ -1,0 +1,1 @@
+{ "prompt": "totalSize w files.mjs zwraca 0 zamiast sumy rozmiarów plików. Napraw.", "check": "node --test hidden.test.mjs" }

@@ -1,0 +1,1 @@
+{ "prompt": "Zaimplementuj klasę PriorityQueue w src/queue.mjs tak, żeby przechodziły testy w test/queue.test.mjs (uruchamiasz: node --test test/).", "check": "node --test test/ && node --test hidden.test.mjs" }

@@ -6,7 +6,7 @@ import { WebSocketServer } from "ws";
  * so the React UI can be developed in a browser against the real sidecar.
  * In the Tauri shell the same sidecar is spawned in-process (no WS).
  */
-const PORT = process.env.PORT ? Number(process.env.PORT) : 9876;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 9877;
 const CWD = process.env.CWD;
 
 const sidecar = spawn("pnpm", ["sidecar"], {

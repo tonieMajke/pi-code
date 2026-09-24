@@ -1,0 +1,1 @@
+{ "prompt": "Dodaj do strings.mjs eksportowaną funkcję slugify(text), która zamienia tekst na slug do URL: małe litery, polskie znaki bez ogonków (np. 'Zażółć gęślą jaźń' -> 'zazolc-gesla-jazn'), wszystko poza literami i cyframi zamienia na pojedynczy myślnik, bez myślników na początku i końcu.", "check": "node --test hidden.test.mjs" }
