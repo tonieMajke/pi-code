@@ -22,7 +22,7 @@ export const DEFAULT_CONFIG: GuiConfig = {
 };
 
 /** Loaded with every request: the core loop plus cheap project navigation (pi-lens). */
-const ALWAYS = new Set(["read", "bash", "edit", "write", "grep", "find", "project_report", "symbol_search", "look"]);
+const ALWAYS = new Set(["read", "bash", "edit", "write", "grep", "find", "project_report", "symbol_search", "look", "todo"]);
 /** Useless or harmful here. */
 const OFF = new Set(["powershell"]);
 

@@ -3,6 +3,7 @@ import {
   Check,
   ChevronRight,
   Columns2,
+  ListTodo,
   Eye,
   FilePenLine,
   FilePlus2,
@@ -39,6 +40,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   source_check: Globe,
   look: Eye,
   look_compare: Columns2,
+  todo: ListTodo,
   ui_audit: Ruler,
   design_refs: Images,
   enable_tools: PackagePlus,
@@ -59,6 +61,7 @@ const TOOL_VERBS: Record<string, string> = {
   source_check: "Źródło",
   look: "Podgląd",
   look_compare: "Porównanie",
+  todo: "Plan",
   ui_audit: "Audyt UI",
   design_refs: "Wzorce",
   enable_tools: "Ładuje narzędzia",
@@ -128,6 +131,13 @@ export function shortPath(p: string, cwd: string): string {
 export function summarizeArgs(args: unknown, cwd = ""): string {
   if (!args || typeof args !== "object") return "";
   const a = args as Record<string, unknown>;
+  // todo: the item in progress, else how far along
+  if (Array.isArray(a.items)) {
+    const items = a.items as { text?: string; status?: string }[];
+    const now = items.find((i) => i.status === "in_progress")?.text;
+    const done = items.filter((i) => i.status === "done" || i.status === "skipped").length;
+    return now ? `${done}/${items.length} · ${now}` : `${done}/${items.length}`;
+  }
   // look_compare: reference ↔ work
   if (typeof a.a === "string" && typeof a.b === "string") return `${shortPath(a.a, cwd)} ↔ ${shortPath(a.b, cwd)}`;
   for (const key of ["path", "file", "command", "pattern", "query", "url", "target", "tool"]) {

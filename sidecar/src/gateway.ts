@@ -38,6 +38,8 @@ import { ExtensionDialogs } from "./extension-ui.js";
 import { SidebarStore } from "./sidebar-store.js";
 import { decide, PLAN_PROMPT } from "./permissions.js";
 import { repairEdit } from "./editfix.js";
+import { ProgressWatch } from "./progress.js";
+import { reciteTodo, TODO_DESCRIPTION, TodoList, type TodoItem } from "./todo.js";
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, DEFAULT_CONSTITUTION, finishIntent } from "./constitution.js";
 import { GuiConfigStore } from "./config.js";
 import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
@@ -167,6 +169,11 @@ export class PiGateway {
     // One guard per session: the factory runs once per resource loader.
     const guard = new ConstitutionGuard(() => this.cwd);
     const taste = new TasteGuard(() => this.cwd);
+    const progress = new ProgressWatch(() => this.cwd);
+    const todo = new TodoList();
+    /** The plan was written or updated in this run (a stale plan from an old task is not enforced). */
+    let todoTouched = false;
+    let todoNudges = 0;
     this.taste = taste;
     this.guard = guard;
     let stopNoted = false;
@@ -232,6 +239,7 @@ export class PiGateway {
           return { block: true, reason: tasteReason };
         }
       }
+      progress.beforeTool(event.toolName, input);
       if (event.toolName === "edit" && !process.env.PI_GUI_NO_EDITFIX) {
         // Small models get the code right and the whitespace wrong, or edit from memory.
         const fix = repairEdit(input, this.cwd);
@@ -250,6 +258,33 @@ export class PiGateway {
       // Visual work started: the measuring tools come along without the model asking.
       if (tasteOn() && taste.visualKind === "ui") loadTools(["ui_audit", "look_compare"]);
       if (tasteOn() && taste.visualKind === "image") loadTools(["look_compare"]);
+      const output = event.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
+      const note = hard() ? progress.afterTool(event.toolName, event.input, event.isError, output) : null;
+      if (note) {
+        this.emit({ kind: "guard", label: "Postęp: model kręci się w kółko — dostał sygnał do zmiany podejścia" });
+        return { content: [...event.content, { type: "text" as const, text: `\n\n${note}` }] };
+      }
+      return undefined;
+    });
+
+    pi.registerTool({
+      name: "todo",
+      label: "Plan",
+      description: TODO_DESCRIPTION,
+      parameters: Type.Object({
+        items: Type.Array(
+          Type.Object({
+            text: Type.String(),
+            status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("done"), Type.Literal("skipped")]),
+          }),
+        ),
+      }),
+      execute: async (_id, params) => {
+        const err = todo.set(params.items as TodoItem[]);
+        if (err) throw new Error(err);
+        todoTouched = true;
+        return { content: [{ type: "text", text: todo.all.length ? `Plan saved.\n${todo.render()}` : "Plan cleared." }], details: undefined };
+      },
     });
 
     pi.registerTool({
@@ -338,6 +373,11 @@ export class PiGateway {
     pi.on("before_agent_start", async (event) => {
       guard.startRun();
       taste.startRun();
+      progress.startRun();
+      todoTouched = false;
+      todoNudges = 0;
+      // A finished plan is history; an unfinished one carries over to a follow-up.
+      if (!todo.open.length) todo.clear();
       stopNoted = false;
       if (finishIntent(event.prompt)) {
         guard.userFinish();
@@ -388,6 +428,13 @@ export class PiGateway {
           return undefined;
         }
         if (verdict) return back(verdict.content, verdict.label);
+      }
+      if (hard() && todoTouched && !guard.finishedByUser && todoNudges < 2) {
+        const n = todo.unfinishedNudge();
+        if (n) {
+          todoNudges++;
+          return back(n.content, n.label);
+        }
       }
       if (guard.finishedByUser && !stopNoted) {
         stopNoted = true;
@@ -443,6 +490,8 @@ export class PiGateway {
       if (c.elideOldToolOutput) messages = elideOldToolOutput(messages, c.elideAboveChars);
       // Screenshots are heavy: within a run only the newest few stay as pictures.
       if (tasteOn()) messages = elideOldImages(messages, 3);
+      // The plan goes last, where a small model's attention is: every call, not stored.
+      messages = reciteTodo(messages, todo.recitation());
       return messages === event.messages ? undefined : { messages };
     });
   };
