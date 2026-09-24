@@ -697,19 +697,33 @@ export function TasteSection({ s, models, onPatch }: { s: PiSettings; models: Mo
   );
 }
 
-const SAMPLING_FIELDS: { key: keyof Omit<SamplingConfig, "enabled">; label: string; step: number; hint: string }[] = [
+const SAMPLING_FIELDS: { key: keyof Omit<SamplingConfig, "enabled" | "reasoning_budget_tokens">; label: string; step: number; hint: string }[] = [
   { key: "temperature", label: "temperature", step: 0.05, hint: "kod: 0.2–0.7" },
   { key: "top_p", label: "top_p", step: 0.05, hint: "np. 0.95" },
   { key: "top_k", label: "top_k", step: 1, hint: "np. 20" },
   { key: "min_p", label: "min_p", step: 0.01, hint: "np. 0" },
   { key: "presence_penalty", label: "presence_penalty", step: 0.1, hint: "przeciw pętlom: 0–1.5" },
   { key: "repeat_penalty", label: "repeat_penalty", step: 0.01, hint: "1 = wył." },
-  { key: "reasoning_budget_tokens", label: "limit myślenia / turę", step: 256, hint: "tokeny, np. 4096" },
 ];
 
 function SamplingRows({ cfg, onPatch }: { cfg: SamplingConfig; onPatch: (p: SettingsPatch) => void }) {
   return (
     <>
+      <Row
+        label="Limit myślenia na turę"
+        desc="Ile tokenów model może myśleć przed jednym krokiem; potem musi działać. Małe modele potrafią przemyśliwać proste kroki tysiącami tokenów. W evalu 4096 dało ten sam wynik ~15% szybciej."
+      >
+        <Segmented
+          value={String(cfg.reasoning_budget_tokens ?? 0)}
+          options={[
+            { value: "0", label: "bez limitu" },
+            { value: "2048", label: "2k" },
+            { value: "4096", label: "4k" },
+            { value: "8192", label: "8k" },
+          ]}
+          onChange={(v) => onPatch({ sampling: { reasoning_budget_tokens: Number(v) || null } })}
+        />
+      </Row>
       <Row
         label="Własne parametry próbkowania"
         desc="Nadpisuje preset routera dla każdego zapytania do lokalnego modelu (konfiguracja routera zostaje bez zmian). Puste pole = wartość z presetu."

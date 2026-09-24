@@ -58,6 +58,7 @@ const PROFILES: Record<string, Partial<GuiConfig>> = {
   base: {
     constitution: { enabled: false, hard: false, text: "", maxNudges: 0 },
     review: { enabled: false, model: "", minLines: 0 },
+    sampling: { enabled: false, temperature: null, top_p: null, top_k: null, min_p: null, presence_penalty: null, repeat_penalty: null, reasoning_budget_tokens: null },
     context: { elideOldToolOutput: false, elideAboveChars: 2000 },
     taste: { enabled: false, research: "off", critic: false, criticModel: "", maxRounds: 3, requireAudit: false, criticSlot: null },
     // every tool always loaded, like plain pi
@@ -65,7 +66,7 @@ const PROFILES: Record<string, Partial<GuiConfig>> = {
   },
   "no-review": { review: { enabled: false, model: "", minLines: 0 } },
   "no-editfix": {},
-  "think-4k": { sampling: { enabled: true, temperature: null, top_p: null, top_k: null, min_p: null, presence_penalty: null, repeat_penalty: null, reasoning_budget_tokens: 4096 } },
+  "no-think-limit": { sampling: { enabled: false, temperature: null, top_p: null, top_k: null, min_p: null, presence_penalty: null, repeat_penalty: null, reasoning_budget_tokens: null } },
   "no-taste": { taste: { enabled: false, research: "off", critic: false, criticModel: "", maxRounds: 3, requireAudit: false, criticSlot: null } },
 };
 

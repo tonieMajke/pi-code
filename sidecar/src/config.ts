@@ -17,7 +17,7 @@ export const DEFAULT_CONFIG: GuiConfig = {
     min_p: null,
     presence_penalty: null,
     repeat_penalty: null,
-    reasoning_budget_tokens: null,
+    reasoning_budget_tokens: 4096,
   },
   taste: { enabled: true, research: "auto", critic: true, criticModel: "", maxRounds: 2, requireAudit: true, criticSlot: null },
 };

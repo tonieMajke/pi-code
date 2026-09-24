@@ -155,15 +155,20 @@ export async function withSlot<T>(id: number | null, fn: () => Promise<T>): Prom
   }
 }
 
-const SAMPLING_KEYS = ["temperature", "top_p", "top_k", "min_p", "presence_penalty", "repeat_penalty", "reasoning_budget_tokens"] as const;
+const SAMPLING_KEYS = ["temperature", "top_p", "top_k", "min_p", "presence_penalty", "repeat_penalty"] as const;
 
 /** Said inside the thinking block when the budget runs out, so the answer that follows makes sense. */
 const BUDGET_MESSAGE = "\n\nI have thought enough about this step. Time to act on what I have.\n";
 
 export function applySampling(obj: Record<string, unknown>, cfg: SamplingConfig | null): void {
-  if (!cfg?.enabled) return;
+  if (!cfg) return;
+  // The thinking budget stands on its own (on by default); the rest only with the override switch.
+  if (cfg.reasoning_budget_tokens) {
+    obj.reasoning_budget_tokens = cfg.reasoning_budget_tokens;
+    obj.reasoning_budget_message = BUDGET_MESSAGE;
+  }
+  if (!cfg.enabled) return;
   for (const k of SAMPLING_KEYS) if (cfg[k] !== null) obj[k] = cfg[k];
-  if (cfg.reasoning_budget_tokens !== null) obj.reasoning_budget_message = BUDGET_MESSAGE;
 }
 
 export function installFetchTap(): void {
