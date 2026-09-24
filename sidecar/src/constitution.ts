@@ -86,6 +86,28 @@ export function isSceneChange(toolName: string, input: Record<string, unknown>):
 type Nudge = { content: string; label: string };
 
 /**
+ * "Enough, wrap it up" from the user — Polish or English. Guards stop sending the model
+ * back to work for the rest of that run: the user has seen the state and decided.
+ */
+const WORD_END = "(?![a-ząćęłńóśźż])";
+const FINISH = new RegExp(
+  [
+    `\\b(s|za)?ko[nń]cz${WORD_END}`, // kończ / skończ / zakończ — not "zakończenie"
+    "\\bwystarczy\\s*([.!,]|$)",
+    "\\bzostaw\\s+(to|tak)\\b",
+    "\\b(that'?s\\s+)?enough\\s*([.!,]|$)",
+    "\\bwrap\\s+(it\\s+)?up\\b",
+    "\\bgood\\s+enough\\b",
+    "\\bship\\s+it\\b",
+  ].join("|"),
+  "i",
+);
+
+export function finishIntent(text: string): boolean {
+  return FINISH.test(text);
+}
+
+/**
  * Per-session guard state. Tool hooks feed it; beforeSettle decides whether the
  * model must keep going. All paths are absolute.
  */
@@ -106,6 +128,8 @@ export class ConstitutionGuard {
   private loopBlocks = 0;
   /** Consecutive failures per identical call (tool + args). */
   private failures = new Map<string, number>();
+  /** The user said "finish" this run: no more nudges. */
+  private userDone = false;
 
   constructor(private readonly cwd: () => string) {}
 
@@ -120,7 +144,17 @@ export class ConstitutionGuard {
     return this.edited;
   }
 
+  /** The user asked to wrap up (see finishIntent): stop nudging and reviewing this run. */
+  userFinish(): void {
+    this.userDone = true;
+  }
+
+  get finishedByUser(): boolean {
+    return this.userDone;
+  }
+
   startRun(): void {
+    this.userDone = false;
     this.edited = [];
     this.editSeq = 0;
     this.checkSeq = 0;
@@ -190,6 +224,7 @@ export class ConstitutionGuard {
 
   /** agent_before_settle: a message that sends the model back to work, or null. */
   beforeSettle(maxNudges: number): Nudge | { stuck: string } | null {
+    if (this.userDone) return null;
     const rel = (p: string) => (p.startsWith(`${this.cwd()}/`) ? p.slice(this.cwd().length + 1) : p);
     let nudge: Nudge | null = null;
     // For purely visual files, looking at the render after the last change is the check.

@@ -37,7 +37,7 @@ import type {
 import { ExtensionDialogs } from "./extension-ui.js";
 import { SidebarStore } from "./sidebar-store.js";
 import { decide, PLAN_PROMPT } from "./permissions.js";
-import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, DEFAULT_CONSTITUTION } from "./constitution.js";
+import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, DEFAULT_CONSTITUTION, finishIntent } from "./constitution.js";
 import { GuiConfigStore } from "./config.js";
 import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
 import { elideOldToolOutput } from "./elide.js";
@@ -78,6 +78,7 @@ export class PiGateway {
   /** True from prompt() call until it resolves — covers the gap before isStreaming flips. */
   private running = false;
   private taste: TasteGuard | null = null;
+  private guard: ConstitutionGuard | null = null;
 
   get ready(): boolean {
     return this.session !== null;
@@ -166,6 +167,7 @@ export class PiGateway {
     const guard = new ConstitutionGuard(() => this.cwd);
     const taste = new TasteGuard(() => this.cwd);
     this.taste = taste;
+    this.guard = guard;
     let stopNoted = false;
     let task = "";
     let reviewed = false;
@@ -327,6 +329,10 @@ export class PiGateway {
       guard.startRun();
       taste.startRun();
       stopNoted = false;
+      if (finishIntent(event.prompt)) {
+        guard.userFinish();
+        taste.userSpoke();
+      }
       if (hasRefs(this.cwd)) taste.markResearched();
       // A picture the user attached is the reference — no search needed.
       if (tasteOn() && event.images?.length) {
@@ -373,7 +379,11 @@ export class PiGateway {
         }
         if (verdict) return back(verdict.content, verdict.label);
       }
-      if (cfg().review.enabled && !reviewed && guard.changedFiles.length > 0) {
+      if (guard.finishedByUser && !stopNoted) {
+        stopNoted = true;
+        this.emit({ kind: "guard", label: "Strażnicy wstrzymani — użytkownik kazał kończyć" });
+      }
+      if (cfg().review.enabled && !reviewed && !guard.finishedByUser && guard.changedFiles.length > 0) {
         reviewed = true;
         const result = await this.review(task, guard.changedFiles).catch((err: unknown) => {
           this.emit({ kind: "guard", label: `Recenzja nie wyszła: ${err instanceof Error ? err.message : String(err)}` });
@@ -1243,6 +1253,7 @@ export class PiGateway {
     if (this.busy) {
       // The user is steering: the taste loop stops pushing its own agenda.
       this.taste?.userSpoke();
+      if (finishIntent(text)) this.guard?.userFinish();
       // SDK rejects guessing while streaming: default to followUp (don't interrupt).
       if ((behavior ?? "followUp") === "steer") await s.steer(text, imgs);
       else await s.followUp(text, imgs);

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ConstitutionGuard, DEFAULT_CONSTITUTION, isCheckCommand } from "./constitution.js";
+import { ConstitutionGuard, DEFAULT_CONSTITUTION, finishIntent, isCheckCommand } from "./constitution.js";
 import { GuiConfigStore, defaultToolPolicy } from "./config.js";
 
 function setup() {
@@ -142,5 +142,24 @@ describe("GuiConfigStore", () => {
     expect(store.get().tools).toEqual({ subagent: "always" });
     store.setToolPolicy("subagent", "deferred");
     expect(store.get().tools).toEqual({});
+  });
+});
+
+describe("finishIntent", () => {
+  it("hears 'wrap it up' without catching ordinary requests", () => {
+    for (const t of ["dobra kończ już", "kończ już i odpal w firefox", "skończ to", "zakończ", "wystarczy.", "zostaw to tak", "ok that's enough", "wrap it up", "ship it"])
+      expect(finishIntent(t), t).toBe(true);
+    for (const t of ["dokończ stronę", "dodaj zakończenie sekcji", "wystarczy że dodasz stopkę", "add a stop button", "kończę na tym? nie, dodaj menu", "enough padding on the cards please"])
+      expect(finishIntent(t), t).toBe(false);
+  });
+
+  it("silences the guard for the rest of the run", () => {
+    const { g } = setup();
+    g.afterTool("edit", { path: "a.ts" }, false);
+    g.userFinish();
+    expect(g.beforeSettle(3)).toBeNull();
+    g.startRun();
+    g.afterTool("edit", { path: "a.ts" }, false);
+    expect(g.beforeSettle(3)).not.toBeNull();
   });
 });
