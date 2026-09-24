@@ -1,0 +1,13 @@
+diff --git a/src/lib/format.ts b/src/lib/format.ts
+index 65d510f..be97938 100644
+--- a/src/lib/format.ts
++++ b/src/lib/format.ts
+@@ -38,7 +38,7 @@ export type SessionGroup = { label: string; items: SessionSummary[] };
+ 
+ /** Bucket sessions like Claude desktop: Dziś / Wczoraj / 7 dni / 30 dni / Starsze. */
+ export function groupSessions(sessions: SessionSummary[], now = new Date()): SessionGroup[] {
+-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
++  const startOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+   const day = 86_400_000;
+   const buckets: [string, number][] = [
+     ["Dziś", startOfToday],

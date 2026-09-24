@@ -11,7 +11,7 @@
  * Profiles only change a temporary pi-gui.json (PI_GUI_CONFIG) — the user's config is untouched.
  */
 import { spawn, execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -26,7 +26,14 @@ const TASKS = join(ROOT, "dev/eval/tasks");
 const RESULTS = join(ROOT, "dev/eval/results");
 
 /** visual: a page the model must produce — screenshotted and measured after the run. */
-type Task = { prompt: string; check: string; timeoutSec?: number; visual?: string };
+type Task = {
+  prompt: string;
+  check: string;
+  timeoutSec?: number;
+  visual?: string;
+  /** A real codebase instead of files/: this repo at a commit, a bug patched in, some tests taken away. */
+  repo?: { commit: string; patch: string; remove?: string[] };
+};
 type Result = {
   task: string;
   pass: boolean;
@@ -93,9 +100,15 @@ function configFile(profile: string, toolNames: string[]): string {
   return file;
 }
 
-function prepare(task: string): string {
+function prepare(task: string, spec: Task): string {
   const dir = mkdtempSync(join(tmpdir(), `pi-gui-eval-${task}-`));
-  cpSync(join(TASKS, task, "files"), dir, { recursive: true });
+  if (spec.repo) {
+    execFileSync("sh", ["-c", `git -C "$0" archive "$1" | tar -x -C "$2"`, ROOT, spec.repo.commit, dir]);
+    execFileSync("git", ["apply", join(TASKS, task, spec.repo.patch)], { cwd: dir });
+    for (const f of spec.repo.remove ?? []) rmSync(join(dir, f), { force: true });
+    rmSync(join(dir, "dev/eval"), { recursive: true, force: true }); // no answers lying around
+    symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
+  } else cpSync(join(TASKS, task, "files"), dir, { recursive: true });
   const git = (...a: string[]) => execFileSync("git", a, { cwd: dir, stdio: "ignore" });
   git("init", "-q");
   git("-c", "user.email=e@e", "-c", "user.name=eval", "add", "-A");
@@ -115,7 +128,7 @@ function killTree(pid: number | undefined): void {
 
 /** One sidecar process per task: clean session state, no cross-talk. */
 async function runTask(task: string, spec: Task, cfgFile: string, runDir: string, n: number, extraEnv: Record<string, string> = {}): Promise<Result> {
-  const cwd = prepare(task);
+  const cwd = prepare(task, spec);
   const child = spawn("npx", ["tsx", join(ROOT, "sidecar/src/main.ts")], {
     cwd: ROOT,
     env: { ...process.env, ...extraEnv, PI_GUI_CONFIG: cfgFile, PI_GUI_EPHEMERAL: "1" },

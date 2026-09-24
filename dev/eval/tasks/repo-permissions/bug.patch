@@ -1,0 +1,13 @@
+diff --git a/sidecar/src/permissions.ts b/sidecar/src/permissions.ts
+index 71f7fe9..d77dcec 100644
+--- a/sidecar/src/permissions.ts
++++ b/sidecar/src/permissions.ts
+@@ -31,7 +31,7 @@ export function isReadOnlyCommand(command: string): boolean {
+   return segments.every((seg) => {
+     const cmd = seg
+       .replace(/^(\w+=\S*\s+)+/, "") // leading VAR=value
+-      .replace(/\d?>&\d|\d?>\s*\/dev\/null/g, ""); // 2>&1, 2>/dev/null, >/dev/null
++      .replace(/\d?>&\d|\d?>\s*\S+/g, ""); // 2>&1, 2>/dev/null, >/dev/null
+     return !DESTRUCTIVE.some((p) => p.test(cmd)) && SAFE_START.some((p) => p.test(cmd));
+   });
+ }
