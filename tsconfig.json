@@ -11,5 +11,6 @@
     "types": ["node"],
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["sidecar/src", "shared", "src", "dev"]
+  "include": ["sidecar/src", "shared", "src", "dev"],
+  "exclude": ["dev/eval/tasks"]
 }
