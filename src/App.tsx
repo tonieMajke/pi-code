@@ -1,3 +1,4 @@
+import { imageStore } from "./lib/image-store";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { WindowControls } from "./components/WindowControls";
 import { WindowFrame } from "./components/WindowFrame";
@@ -81,6 +82,10 @@ export default function App() {
   /** An extension command is running: its ctx.ui.notify output belongs in the transcript. */
   const commandOutputRef = useRef(false);
   /** Transcript items to re-add once the next history reload lands (it replaces the view). */
+  const openingRef = useRef(false);
+  const queuedOpenRef = useRef<string | null>(null);
+  const openSessionRef = useRef<(path: string) => void>(() => {});
+  const [switching, setSwitching] = useState(false);
   const afterHistoryRef = useRef<({ role: "command"; text: string } | { role: "info"; text: string; level: InfoLevel })[]>([]);
   const appearancePatchRef = useRef<AppearancePatch>({});
   const appearanceTimerRef = useRef<number | undefined>(undefined);
@@ -116,6 +121,7 @@ export default function App() {
     // browser we go through the local WS dev bridge.
     const t: PiTransport = inTauri() ? createTauriTransport() : createWsTransport("ws://127.0.0.1:9877");
     transportRef.current = t;
+    imageStore.setFetcher((ref) => t.send({ cmd: "history_image", ref }));
     const off = t.onMessage((msg) => {
       if ("event" in msg) {
         const e = msg.event;
@@ -140,9 +146,21 @@ export default function App() {
           case "settled":
             commandOutputRef.current = false;
             break;
+          case "history":
+            imageStore.clear();
+            atBottomRef.current = true;
+            setAtBottom(true);
+            break;
         }
         dispatch({ type: "event", event: e, at: Date.now() });
         return;
+      }
+      if (msg.cmd === "session_open") {
+        openingRef.current = false;
+        setSwitching(false);
+        const next = queuedOpenRef.current;
+        queuedOpenRef.current = null;
+        if (next) openSessionRef.current(next);
       }
       if (!msg.ok) {
         if (msg.cmd === "compact") {
@@ -150,6 +168,7 @@ export default function App() {
           afterHistoryRef.current = [];
         }
         if (msg.cmd === "fork_points") setForkPoints([]);
+        if (msg.cmd === "history_image") return; // stale ref after a session switch — nothing to show
         if (msg.cmd === "session_handoff") {
           dispatch({ type: "event", event: { kind: "settled" }, at: Date.now() });
           if (/przerwany/.test(msg.error ?? "")) {
@@ -172,6 +191,11 @@ export default function App() {
           }
           afterHistoryRef.current = [];
           return;
+        case "history_image": {
+          const img = msg.result as Attachment;
+          if (img.ref) imageStore.resolve(img.ref, img);
+          return;
+        }
         case "commands_list":
           setPiCommands(msg.result as SlashCommandInfo[]);
           return;
@@ -276,6 +300,7 @@ export default function App() {
       offOpen();
       t.close();
       transportRef.current = null;
+      imageStore.setFetcher(null);
     };
   }, []);
 
@@ -444,6 +469,7 @@ export default function App() {
 
   const resetView = () => {
     dispatch({ type: "clear" });
+    imageStore.clear();
     atBottomRef.current = true;
     setAtBottom(true);
   };
@@ -458,11 +484,21 @@ export default function App() {
     [send],
   );
 
+  /**
+   * The old transcript stays until the sidecar sends the new one (a "history" event,
+   * straight from the file) — no empty flash. Clicks during an open coalesce: only
+   * the last one is opened next.
+   */
   const openSession = (path: string) => {
-    resetView();
+    if (openingRef.current) {
+      queuedOpenRef.current = path;
+      return;
+    }
+    openingRef.current = true;
+    setSwitching(true);
     send({ cmd: "session_open", path });
-    send({ cmd: "history" });
   };
+  openSessionRef.current = openSession;
 
   // Settings are per session in part (thinking level, tools) — refetch on open and on session swap.
   useEffect(() => {
@@ -882,7 +918,7 @@ export default function App() {
           </div>
         ) : (
           <>
-            <div className="scroll" ref={scrollRef} onScroll={onScroll}>
+            <div className={`scroll ${switching ? "switching" : ""}`} ref={scrollRef} onScroll={onScroll}>
               <div className="column" ref={columnRef}>
                 <Transcript
                   messages={state.messages}

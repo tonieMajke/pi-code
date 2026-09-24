@@ -195,6 +195,18 @@ function attachStats(messages: Msg[], stats: RequestStats): Msg[] {
   return messages;
 }
 
+function historyMessages(items: HistoryItem[]): Msg[] {
+  return items.map((i): Msg =>
+    i.role === "user"
+      ? userMsg(i.text, i.images)
+      : {
+          role: "assistant",
+          open: false,
+          parts: i.parts.map((p): Part => (p.type === "tool" ? { type: "tool", tool: { ...p.tool } } : p)),
+        },
+  );
+}
+
 function userMsg(text: string, images?: Attachment[]): Msg {
   return images?.length ? { role: "user", text, images } : { role: "user", text };
 }
@@ -242,18 +254,7 @@ export function reducer(state: State, action: Action): State {
     case "models":
       return { ...state, models: action.models };
     case "history":
-      return {
-        ...state,
-        messages: action.items.map((i): Msg =>
-          i.role === "user"
-            ? userMsg(i.text, i.images)
-            : {
-                role: "assistant",
-                open: false,
-                parts: i.parts.map((p): Part => (p.type === "tool" ? { type: "tool", tool: { ...p.tool } } : p)),
-              },
-        ),
-      };
+      return { ...state, messages: historyMessages(action.items) };
     case "connected":
       return { ...state, connected: action.ok };
     case "clear":
@@ -273,6 +274,19 @@ export function reducer(state: State, action: Action): State {
       const e = action.event;
       const at = action.at;
       switch (e.kind) {
+        case "history":
+          // A session being opened: its transcript replaces whatever was on screen.
+          return {
+            ...state,
+            messages: historyMessages(e.items),
+            sessionPath: e.sessionPath,
+            error: null,
+            pending: [],
+            approvals: [],
+            dialogs: [],
+            perf: null,
+            stuck: null,
+          };
         case "init_done":
           return {
             ...state,

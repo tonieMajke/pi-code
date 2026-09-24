@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PiEvent } from "../../shared/protocol";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PiGateway } from "./gateway";
 
 /** Fake AgentSession: captures the subscriber, lets tests push SDK events. */
@@ -292,6 +293,58 @@ describe("PiGateway handoff", () => {
       expect(started).toHaveLength(0);
     } finally {
       cleanup();
+    }
+  });
+});
+
+describe("PiGateway opening a session", () => {
+  const PNG = "iVBORw0KGgo=";
+  function sessionFile(dir: string): string {
+    const sm = SessionManager.create(dir, dir);
+    sm.appendMessage({ role: "user", content: "zrób zrzut", timestamp: 0 } as never);
+    sm.appendMessage({
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call-1", name: "look", arguments: {} }],
+      timestamp: 0,
+    } as never);
+    sm.appendMessage({
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "look",
+      content: [{ type: "text", text: "zrzut" }, { type: "image", data: PNG, mimeType: "image/png" }],
+      isError: false,
+      timestamp: 0,
+    } as never);
+    return sm.getSessionFile()!;
+  }
+
+  it("sends the transcript from the file before the session starts, with images as references", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-gui-open-"));
+    try {
+      const file = sessionFile(dir);
+      const gw = new PiGateway();
+      const internal = gw as unknown as { services: unknown; startSession: () => Promise<void> };
+      internal.services = {};
+      let startedAfter = -1;
+      const events: PiEvent[] = [];
+      internal.startSession = async () => {
+        startedAfter = events.length;
+      };
+      await gw.openSession((e) => events.push(e), file);
+      expect(startedAfter).toBe(1);
+      const h = events[0];
+      if (h.kind !== "history") throw new Error("expected history first");
+      expect(h.sessionPath).toBe(file);
+      const tool = h.items[1].role === "assistant" ? h.items[1].parts[0] : null;
+      if (tool?.type !== "tool") throw new Error("expected a tool part");
+      const [img] = tool.tool.images!;
+      expect(img.data).toBe("");
+      expect(JSON.stringify(h).includes(PNG)).toBe(false);
+      // The image is served from what is on screen, even before the session is up.
+      expect(gw.historyImage(img.ref!)).toEqual({ data: PNG, mimeType: "image/png", ref: img.ref });
+      expect(() => gw.historyImage(`inna/call-1/0`)).toThrow(/innej sesji/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

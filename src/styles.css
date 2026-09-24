@@ -312,6 +312,8 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .hero-hints { font-size: 12px; color: var(--faint); margin-top: 6px; }
 
 .scroll { flex: 1; overflow-y: auto; overflow-anchor: none; }
+/* Opening another session: dim the old transcript only if it takes a moment. */
+.scroll.switching { opacity: 0.55; transition: opacity 0.15s ease 0.12s; }
 .column { max-width: 780px; margin: 0 auto; padding: 16px 28px 28px; }
 
 /* Messages */
@@ -963,6 +965,8 @@ select.s-input { width: 260px; }
 }
 .tool-shot img { display: block; max-width: 360px; max-height: 220px; width: auto; height: auto; }
 .tool-shot:hover { border-color: var(--accent); }
+/* Placeholder while a history image is fetched: keeps the row from jumping much. */
+.tool-shot-wait { display: block; width: 240px; height: 150px; background: var(--hover); }
 .lightbox {
   position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, 0.78);
   display: flex; align-items: center; justify-content: center; padding: 32px; cursor: zoom-out;

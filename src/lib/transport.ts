@@ -62,6 +62,8 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "fork_points" };
     case "session_fork":
       return { id, cmd: "session_fork", entryId: cmd.entryId };
+    case "history_image":
+      return { id, cmd: "history_image", ref: cmd.ref };
     case "session_clone":
       return { id, cmd: "session_clone" };
     case "session_handoff":

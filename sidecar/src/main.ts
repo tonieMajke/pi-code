@@ -58,6 +58,7 @@ const KNOWN = new Set<CommandName>([
   "reload",
   "ui_response",
   "session_handoff",
+  "history_image",
   "dispose",
 ]);
 
@@ -202,6 +203,10 @@ async function handle(cmd: ClientCommand): Promise<void> {
         await gateway.clone(emit);
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
+      case "history_image":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.historyImage(cmd.ref));
+        return;
       case "session_handoff":
         requireReady();
         reply(cmd.id, cmd.cmd, true, await gateway.handoff(emit, cmd.goal ?? ""));
@@ -259,7 +264,7 @@ rl.on("line", (line) => {
   // Abort/approve/mode jump the queue: they must work while anything else is pending.
   // Read-only status queries also skip it so a slow session swap can't stall the UI's polling.
   // ui_response too: an extension command waiting on a dialog holds the queue until it is answered.
-  if (["abort", "approve", "ui_response", "mode_set", "router_status", "git_changes", "files_list", "notify"].includes(cmd.cmd)) {
+  if (["abort", "approve", "ui_response", "mode_set", "router_status", "git_changes", "files_list", "notify", "history_image"].includes(cmd.cmd)) {
     void handle(cmd);
     return;
   }

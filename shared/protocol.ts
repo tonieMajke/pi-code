@@ -10,7 +10,11 @@ export type PermissionMode = "ask" | "acceptEdits" | "plan" | "yolo";
 
 export type ApprovalDecision = "allow" | "always" | "deny";
 
-export type Attachment = { data: string; mimeType: string };
+/**
+ * `ref` set + empty `data`: the image stays in the sidecar until the UI asks for it
+ * (history_image) — history of screenshot-heavy sessions would otherwise be megabytes.
+ */
+export type Attachment = { data: string; mimeType: string; ref?: string };
 
 export type ClientCommand =
   | { id: number; cmd: "init"; cwd?: string; sessionFile?: string }
@@ -43,6 +47,8 @@ export type ClientCommand =
   | { id: number; cmd: "session_fork"; entryId: string }
   /** New session with a copy of the active branch. */
   | { id: number; cmd: "session_clone" }
+  /** One tool-result image left out of history (Attachment.ref); reply Attachment. */
+  | { id: number; cmd: "history_image"; ref: string }
   /** Model writes a prompt for a fresh session, then that session starts; reply {prompt, from}. */
   | { id: number; cmd: "session_handoff"; goal?: string }
   | { id: number; cmd: "session_stats" }
@@ -328,6 +334,8 @@ export type PiEvent =
   | { kind: "turn_end" }
   | { kind: "agent_end" }
   | { kind: "settled" }
+  /** Transcript of a session being opened, sent before the session itself is ready. */
+  | { kind: "history"; sessionPath: string; items: HistoryItem[] }
   | { kind: "queue"; steering: number; followUp: number }
   | { kind: "usage"; usage: Usage }
   | { kind: "guard"; label: string }

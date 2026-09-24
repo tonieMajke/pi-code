@@ -50,6 +50,7 @@ const run = promisify(execFile);
 /** Tool output kept for the UI (bash logs can be long; the card scrolls). */
 const TOOL_TEXT_MAX = 8000;
 
+type AgentMessage = AgentSession["state"]["messages"][number];
 const SKILLS_DIR = fileURLToPath(new URL("../../skills", import.meta.url));
 
 /** Meta-tool that loads deferred tools. */
@@ -94,6 +95,8 @@ export class PiGateway {
   private runCheckpoint: string | null = null;
   private reviewer: AgentSession | null = null;
   private handoffAbort: AbortController | null = null;
+  /** Extensions' session_start (MCP connects etc.) runs after the session is shown; a prompt waits for it. */
+  private extensionsReady: Promise<void> = Promise.resolve();
   /** ctx.ui dialogs of pi extensions, answered in the GUI. */
   private dialogs = new ExtensionDialogs((e) => this.emit(e));
   /** Agent runs that reached agent_settled — tells prompt() whether a "/command" ran the agent at all. */
@@ -416,9 +419,17 @@ export class PiGateway {
   /** Rendered transcript of the active session, blocks kept in model order. */
   history(): HistoryItem[] {
     const s = this.requireSession();
+    return this.historyOf(s.sessionId, s.state.messages);
+  }
+
+  /** Messages last rendered by historyOf — historyImage looks images up here. */
+  private shown: { sessionId: string; messages: readonly AgentMessage[] } | null = null;
+
+  private historyOf(sessionId: string, messages: readonly AgentMessage[]): HistoryItem[] {
+    this.shown = { sessionId, messages };
     const items: HistoryItem[] = [];
     const toolIndex = new Map<string, Extract<HistoryPart, { type: "tool" }>>();
-    for (const msg of s.state.messages) {
+    for (const msg of messages) {
       if (msg.role === "user") {
         const images = userImages(msg.content);
         items.push(images.length ? { role: "user", text: userText(msg.content), images } : { role: "user", text: userText(msg.content) });
@@ -450,12 +461,26 @@ export class PiGateway {
         if (part) {
           part.tool.status = msg.isError ? "error" : "ok";
           part.tool.summary = summarizeToolResult({ content: msg.content });
+          // Only references: the UI fetches each image when its thumbnail scrolls into view.
           const images = toolImages({ content: msg.content });
-          if (images.length) part.tool.images = images;
+          if (images.length)
+            part.tool.images = images.map((img, i) => ({ data: "", mimeType: img.mimeType, ref: `${sessionId}/${msg.toolCallId}/${i}` }));
         }
       }
     }
     return items;
+  }
+
+  /** An image history() left out; ref = sessionId/toolCallId/index. */
+  historyImage(ref: string): Attachment {
+    const [sessionId, toolCallId, index] = ref.split("/");
+    // The transcript on screen may be an early preview of a session still starting (openSession).
+    const messages = this.shown?.sessionId === sessionId ? this.shown.messages : this.session?.sessionId === sessionId ? this.session.state.messages : null;
+    if (!messages) throw new Error("obraz z innej sesji");
+    const msg = messages.find((m) => m.role === "toolResult" && m.toolCallId === toolCallId);
+    const img = msg?.role === "toolResult" ? toolImages({ content: msg.content })[Number(index)] : undefined;
+    if (!img) throw new Error("nie ma takiego obrazu");
+    return { ...img, ref };
   }
 
   async listSessions(): Promise<SessionSummary[]> {
@@ -602,6 +627,7 @@ export class PiGateway {
   async compact(onEvent: (e: PiEvent) => void, instructions?: string): Promise<void> {
     const s = this.requireSession();
     if (this.busy) throw new Error("model pracuje — kompaktowanie po zakończeniu");
+    await this.extensionsReady;
     await s.compact(instructions?.trim() || undefined);
     this.emitUsage(onEvent);
   }
@@ -767,6 +793,7 @@ export class PiGateway {
   async reload(onEvent: (e: PiEvent) => void): Promise<void> {
     const s = this.requireSession();
     if (this.busy) throw new Error("model pracuje — przeładowanie po zakończeniu");
+    await this.extensionsReady;
     await s.reload();
     this.applyToolPolicy();
     this.emitUsage(onEvent);
@@ -781,6 +808,13 @@ export class PiGateway {
   async openSession(onEvent: (e: PiEvent) => void, path: string): Promise<void> {
     this.requireServices();
     const sessionManager = SessionManager.open(path);
+    // Show the transcript straight from the file (~20 ms); the agent session with its
+    // extensions takes up to ~0.5 s more when the project changes.
+    onEvent({
+      kind: "history",
+      sessionPath: sessionManager.getSessionFile() ?? path,
+      items: this.historyOf(sessionManager.getSessionId(), sessionManager.buildSessionContext().messages),
+    });
     // Tools must run in the session's own project, not wherever the GUI started.
     const cwd = sessionManager.getCwd() || this.cwd;
     await this.startSession(onEvent, cwd, sessionManager);
@@ -800,6 +834,7 @@ export class PiGateway {
   ): Promise<void> {
     const services = this.requireServices();
     const model = this.session?.model ?? this.resolveDefaultModel();
+    await this.extensionsReady; // never dispose a session its extensions are still starting on
     this.dispose();
     this.alwaysAllowed.clear(); // "always" is per session
     this.onDemand.clear();
@@ -826,7 +861,10 @@ export class PiGateway {
     this.session = session;
     this.applyToolPolicy();
     this.subscribe(session, onEvent);
-    await this.bindExtensions(session, onEvent);
+    // Not awaited: switching sessions must not wait for extensions (~200 ms, more with MCP).
+    this.extensionsReady = this.bindExtensions(session, onEvent).catch((err: unknown) =>
+      onEvent({ kind: "notice", level: "error", text: `Start rozszerzeń: ${err instanceof Error ? err.message : String(err)}` }),
+    );
     await this.emitInit(onEvent);
     this.emitUsage(onEvent);
   }
@@ -956,6 +994,7 @@ export class PiGateway {
     this.running = true;
     const runs = this.settledRuns;
     try {
+      await this.extensionsReady;
       await s.prompt(text, imgs?.length ? { images: imgs } : undefined);
     } finally {
       this.running = false;

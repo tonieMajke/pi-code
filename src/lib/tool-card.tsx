@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronRight,
@@ -19,6 +19,7 @@ import {
 import type { ToolItem } from "./reducer";
 import type { Attachment } from "../../shared/protocol";
 import { dataUrl } from "./images";
+import { useImage, useSeen } from "./image-store";
 import { formatDuration } from "./format";
 
 const TOOL_ICONS: Record<string, typeof Wrench> = {
@@ -201,17 +202,30 @@ function ToolShots({ images }: { images: Attachment[] }) {
     <>
       <div className="tool-shots">
         {images.map((img, i) => (
-          <button key={i} className="tool-shot" onClick={() => setZoom(i)} title="Powiększ (to widział model)">
-            <img src={dataUrl(img)} alt="" />
-          </button>
+          <ToolShot key={img.ref ?? i} img={img} onZoom={() => setZoom(i)} />
         ))}
       </div>
-      {zoom !== null && (
-        <div className="lightbox" onClick={() => setZoom(null)}>
-          <img src={dataUrl(images[zoom])} alt="" />
-        </div>
-      )}
+      {zoom !== null && <Lightbox img={images[zoom]} onClose={() => setZoom(null)} />}
     </>
+  );
+}
+
+function ToolShot({ img, onZoom }: { img: Attachment; onZoom: () => void }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const full = useImage(img, useSeen(ref));
+  return (
+    <button ref={ref} className="tool-shot" onClick={onZoom} title="Powiększ (to widział model)">
+      {full ? <img src={dataUrl(full)} alt="" /> : <span className="tool-shot-wait" />}
+    </button>
+  );
+}
+
+function Lightbox({ img, onClose }: { img: Attachment; onClose: () => void }) {
+  const full = useImage(img, true);
+  return (
+    <div className="lightbox" onClick={onClose}>
+      {full && <img src={dataUrl(full)} alt="" />}
+    </div>
   );
 }
 

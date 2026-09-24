@@ -240,4 +240,16 @@ describe("reducer: slash commands and extension dialogs", () => {
     s = reducer(s, { type: "event", event: { kind: "ui_done", id: "b" } });
     expect(s.dialogs).toEqual([]);
   });
+
+  it("a history event replaces the transcript of the previous session and its leftovers", () => {
+    let s = reducer(initialState, { type: "user", text: "stara", at: 1 });
+    s = reducer(s, { type: "event", event: { kind: "ui_request", request: { id: "a", method: "input", title: "x" } } });
+    s = reducer(s, {
+      type: "event",
+      event: { kind: "history", sessionPath: "/s/nowa.jsonl", items: [{ role: "user", text: "nowa" }] },
+    });
+    expect(s.messages).toEqual([{ role: "user", text: "nowa" }]);
+    expect(s.sessionPath).toBe("/s/nowa.jsonl");
+    expect(s.dialogs).toEqual([]);
+  });
 });
