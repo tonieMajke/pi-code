@@ -150,6 +150,13 @@ export default function App() {
           afterHistoryRef.current = [];
         }
         if (msg.cmd === "fork_points") setForkPoints([]);
+        if (msg.cmd === "session_handoff") {
+          dispatch({ type: "event", event: { kind: "settled" }, at: Date.now() });
+          if (/przerwany/.test(msg.error ?? "")) {
+            dispatch({ type: "info", text: "Handoff przerwany — zostajesz w tej sesji.", level: "warning" });
+            return;
+          }
+        }
         if (msg.cmd === "appearance_image") setImageBusy(false);
         dispatch({ type: "error", error: `${msg.cmd ?? "pi"}: ${msg.error}` });
         return;
@@ -182,6 +189,20 @@ export default function App() {
           t.send({ cmd: "sessions_list" });
           requestAnimationFrame(() => inputRef.current?.focus());
           return;
+        case "session_handoff": {
+          const { prompt, from } = msg.result as { prompt: string; from: string };
+          dispatch({ type: "event", event: { kind: "settled" }, at: Date.now() });
+          resetView();
+          setInput(prompt);
+          const origin = from ? `sesji „${from}”` : "poprzedniej sesji";
+          afterHistoryRef.current = [
+            { role: "info", text: `Handoff z ${origin}: model napisał prompt dla tej nowej sesji — czeka w polu wiadomości. Popraw go i wyślij Enterem.`, level: "info" },
+          ];
+          t.send({ cmd: "history" });
+          t.send({ cmd: "sessions_list" });
+          requestAnimationFrame(() => inputRef.current?.focus());
+          return;
+        }
         case "session_clone":
           afterHistoryRef.current = [{ role: "info", text: "To jest kopia sesji — oryginał został bez zmian.", level: "info" }];
           t.send({ cmd: "history" });
@@ -611,6 +632,17 @@ export default function App() {
         resetView();
         send({ cmd: "session_clone" });
         return;
+      case "handoff":
+        if (state.busy) {
+          setInput(`/handoff${args ? ` ${args}` : ""}`);
+          toast("Model pracuje — handoff zrobisz, gdy skończy.", "warning");
+          return;
+        }
+        // Busy until the reply: the old transcript stays up while the model writes; Esc cancels.
+        dispatch({ type: "command", text: `/handoff${args ? ` ${args}` : ""}`, run: true, at: Date.now() });
+        dispatch({ type: "info", text: "Model pisze handoff do nowej sesji…" });
+        send({ cmd: "session_handoff", goal: args || undefined });
+        return;
       case "session":
         echo();
         send({ cmd: "session_stats" });
@@ -678,6 +710,7 @@ export default function App() {
     { id: "sidebar", group: "Akcje", label: sidebarOpen ? "Zwiń panel sesji" : "Pokaż panel sesji", hint: <kbd>Ctrl B</kbd>, run: toggleSidebar },
     { id: "settings", group: "Akcje", label: "Ustawienia", hint: <kbd>Ctrl ,</kbd>, keywords: "settings konfiguracja", run: () => setSettingsOpen(true) },
     { id: "compact", group: "Akcje", label: "Kompaktuj kontekst", keywords: "compact", run: () => { setCompacting(true); send({ cmd: "compact" }); } },
+    { id: "handoff", group: "Akcje", label: "Handoff → nowa sesja", keywords: "handoff podsumowanie przekazanie", run: () => runSlash("handoff", "") },
     ...(state.busy ? [{ id: "stop", group: "Akcje", label: "Przerwij model", hint: <kbd>Esc</kbd>, run: stop }] : []),
     ...MODES.map((m) => ({
       id: `mode-${m.id}`,

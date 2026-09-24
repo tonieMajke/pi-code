@@ -22,7 +22,8 @@ export function Menu({
   title?: string;
   placement?: "up" | "down";
   className?: string;
-  footer?: ReactNode;
+  /** A function gets close() — for footers with their own buttons. */
+  footer?: ReactNode | ((close: () => void) => ReactNode);
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -72,7 +73,7 @@ export function Menu({
               </button>
             ))}
           </div>
-          {footer && <div className="menu-footer">{footer}</div>}
+          {footer && <div className="menu-footer">{typeof footer === "function" ? footer(() => setOpen(false)) : footer}</div>}
         </div>
       )}
     </div>

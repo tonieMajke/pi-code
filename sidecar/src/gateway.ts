@@ -4,11 +4,14 @@ import { userInfo } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
 import {
+  convertToLlm,
   createAgentSession,
   createAgentSessionServices,
   DefaultResourceLoader,
   initTheme,
+  serializeConversation,
   SessionManager,
   type AgentSession,
   type SettingsManager,
@@ -37,6 +40,7 @@ import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, DEFAULT_CONSTITUTION } fr
 import { GuiConfigStore } from "./config.js";
 import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
 import { elideOldToolOutput } from "./elide.js";
+import { HANDOFF_SYSTEM_PROMPT, handoffMessages, handoffUserText } from "./handoff.js";
 import { parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
 import { installFetchTap, onPerf, setSampling } from "./perf.js";
 import { look, LOOK_DESCRIPTION } from "./look.js";
@@ -89,6 +93,7 @@ export class PiGateway {
   /** Worktree snapshot taken when the current run started (git projects only). */
   private runCheckpoint: string | null = null;
   private reviewer: AgentSession | null = null;
+  private handoffAbort: AbortController | null = null;
   /** ctx.ui dialogs of pi extensions, answered in the GUI. */
   private dialogs = new ExtensionDialogs((e) => this.emit(e));
   /** Agent runs that reached agent_settled — tells prompt() whether a "/command" ran the agent at all. */
@@ -675,6 +680,51 @@ export class PiGateway {
     await this.branchInto(onEvent, leaf);
   }
 
+  /**
+   * pi-style /handoff: the current model writes a self-contained prompt from this
+   * branch, then a fresh session (child of this one) starts in the same cwd.
+   * The prompt is returned, not sent — the UI puts it in the composer.
+   */
+  async handoff(onEvent: (e: PiEvent) => void, goal: string): Promise<{ prompt: string; from: string }> {
+    const s = this.requireSession();
+    if (this.busy || this.handoffAbort) throw new Error("model pracuje — handoff po zakończeniu");
+    if (!s.model) throw new Error("brak modelu");
+    const messages = handoffMessages(s.sessionManager.getBranch() as never);
+    if (!messages.length) throw new Error("sesja jest pusta — nie ma czego przekazać");
+    const conversation = serializeConversation(convertToLlm(messages as never));
+    // Same title the sidebar shows: the name, else the first user message.
+    const first = messages.find((m) => (m as { role?: string }).role === "user") as { content: Parameters<typeof userText>[0] } | undefined;
+    const from = (s.sessionName || (first ? userText(first.content) : "")).replace(/\s+/g, " ").trim();
+    const title = from.length > 60 ? `${from.slice(0, 59)}…` : from;
+    const abort = (this.handoffAbort = new AbortController());
+    let prompt: string;
+    try {
+      const res = await s.modelRuntime.complete(
+        s.model,
+        {
+          systemPrompt: HANDOFF_SYSTEM_PROMPT,
+          messages: [{ role: "user", content: [{ type: "text", text: handoffUserText(conversation, goal) }], timestamp: Date.now() }],
+        },
+        { signal: abort.signal, cacheRetention: "none", sessionId: randomUUID() },
+      );
+      if (res.stopReason === "aborted" || abort.signal.aborted) throw new Error("handoff przerwany");
+      if (res.stopReason === "error") throw new Error(res.errorMessage || "model zwrócił błąd");
+      prompt = res.content
+        .map((c) => (c.type === "text" ? c.text : ""))
+        .join("\n")
+        .trim();
+    } finally {
+      this.handoffAbort = null;
+    }
+    if (!prompt) throw new Error("model nie napisał handoffu");
+    // Persisted parent → the new session keeps a link back (like pi's /handoff).
+    const file = s.sessionManager.isPersisted() && s.sessionFile && existsSync(s.sessionFile) ? s.sessionFile : undefined;
+    const sm = SessionManager.create(this.cwd, s.sessionManager.getSessionDir());
+    if (file) sm.newSession({ parentSession: file });
+    await this.startSession(onEvent, this.cwd, sm);
+    return { prompt, from: title };
+  }
+
   /** Same file handling as pi's runtime fork: a new session file holding root → leafId. */
   private async branchInto(onEvent: (e: PiEvent) => void, leafId: string | null): Promise<void> {
     const s = this.requireSession();
@@ -919,6 +969,7 @@ export class PiGateway {
     this.denyAllPending();
     this.dialogs.cancelAll();
     void this.reviewer?.abort();
+    this.handoffAbort?.abort();
     const s = this.session;
     if (s && this.busy) await s.abort();
   }

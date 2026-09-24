@@ -472,7 +472,7 @@ export function Composer({
             </span>
           )}
           <span className="bar-spacer" />
-          {pct !== null && <ContextMenu usage={usage!} pct={pct} />}
+          {pct !== null && <ContextMenu usage={usage!} pct={pct} busy={busy} onCommand={onCommand} />}
           <Menu
             className="chip-menu"
             title="Model"
@@ -524,7 +524,17 @@ const CTX_PARTS = [
 ] as const;
 
 /** Context ring; click opens the Claude-style breakdown popover. */
-function ContextMenu({ usage, pct }: { usage: Usage; pct: number }) {
+function ContextMenu({
+  usage,
+  pct,
+  busy,
+  onCommand,
+}: {
+  usage: Usage;
+  pct: number;
+  busy: boolean;
+  onCommand: (name: string, args: string) => void;
+}) {
   const used = usage.contextTokens ?? 0;
   const b = usage.breakdown;
   const width = (n: number) => `${(n / usage.contextWindow) * 100}%`;
@@ -548,7 +558,7 @@ function ContextMenu({ usage, pct }: { usage: Usage; pct: number }) {
           <span>{Math.round(pct)}%</span>
         </span>
       }
-      footer={
+      footer={(close) => (
         <div className="ctx-pop">
           <div className="ctx-head">
             <span>
@@ -578,8 +588,32 @@ function ContextMenu({ usage, pct }: { usage: Usage; pct: number }) {
             <span className="ctx-label">Wolne</span>
             <span className="ctx-val">~{formatTokens(Math.max(0, usage.contextWindow - used))}</span>
           </div>
+          <div className="ctx-actions">
+            <button
+              className="btn"
+              disabled={busy}
+              title="Streść starszą część rozmowy w tej sesji (/compact)"
+              onClick={() => {
+                close();
+                onCommand("compact", "");
+              }}
+            >
+              Kompaktuj
+            </button>
+            <button
+              className="btn"
+              disabled={busy}
+              title="Model pisze podsumowanie, a ono trafia do pola nowej sesji — poprawiasz i wysyłasz (/handoff)"
+              onClick={() => {
+                close();
+                onCommand("handoff", "");
+              }}
+            >
+              Handoff → nowa sesja
+            </button>
+          </div>
         </div>
-      }
+      )}
     />
   );
 }

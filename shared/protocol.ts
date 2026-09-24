@@ -43,6 +43,8 @@ export type ClientCommand =
   | { id: number; cmd: "session_fork"; entryId: string }
   /** New session with a copy of the active branch. */
   | { id: number; cmd: "session_clone" }
+  /** Model writes a prompt for a fresh session, then that session starts; reply {prompt, from}. */
+  | { id: number; cmd: "session_handoff"; goal?: string }
   | { id: number; cmd: "session_stats" }
   /** Export the session as HTML into the project directory; replies with the path. */
   | { id: number; cmd: "export_html" }

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PiEvent } from "../../shared/protocol";
 import { PiGateway } from "./gateway";
@@ -235,5 +238,60 @@ describe("PiGateway slash commands", () => {
       ],
     });
     expect(gw.forkPoints().map((p) => p.entryId)).toEqual(["b", "a"]);
+  });
+});
+
+describe("PiGateway handoff", () => {
+  function setup(complete: (ctx: unknown, opts: { signal: AbortSignal }) => Promise<unknown>) {
+    const dir = mkdtempSync(join(tmpdir(), "pi-gui-handoff-"));
+    const gw = new PiGateway();
+    const started: unknown[] = [];
+    const internal = gw as unknown as { session: unknown; startSession: (...a: unknown[]) => Promise<void> };
+    internal.session = {
+      ...fakeSession(),
+      sessionName: "Stara sesja",
+      sessionFile: undefined,
+      sessionManager: {
+        getBranch: () => [{ type: "message", id: "1", message: { role: "user", content: "Zrób parser CSV", timestamp: 0 } }],
+        isPersisted: () => false,
+        getSessionDir: () => dir,
+      },
+      modelRuntime: { complete: (_m: unknown, ctx: unknown, opts: { signal: AbortSignal }) => complete(ctx, opts) },
+    };
+    internal.startSession = async (...a: unknown[]) => {
+      started.push(a);
+    };
+    return { gw, started, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+
+  it("the model writes the prompt from the conversation, then a fresh session starts", async () => {
+    let seen = "";
+    const { gw, started, cleanup } = setup(async (ctx) => {
+      seen = JSON.stringify(ctx);
+      return { stopReason: "stop", content: [{ type: "text", text: "## Kontekst\nparser CSV" }] };
+    });
+    try {
+      const res = await gw.handoff(() => {}, "dodaj testy");
+      expect(res).toEqual({ prompt: "## Kontekst\nparser CSV", from: "Stara sesja" });
+      expect(seen).toContain("Zrób parser CSV");
+      expect(seen).toContain("dodaj testy");
+      expect(started).toHaveLength(1);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("abort cancels the handoff and keeps the old session", async () => {
+    const { gw, started, cleanup } = setup(
+      (_ctx, { signal }) => new Promise((resolve) => signal.addEventListener("abort", () => resolve({ stopReason: "aborted", content: [] }))),
+    );
+    try {
+      const run = gw.handoff(() => {}, "");
+      await gw.abort();
+      await expect(run).rejects.toThrow(/przerwany/);
+      expect(started).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
   });
 });

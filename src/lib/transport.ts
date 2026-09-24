@@ -64,6 +64,8 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "session_fork", entryId: cmd.entryId };
     case "session_clone":
       return { id, cmd: "session_clone" };
+    case "session_handoff":
+      return { id, cmd: "session_handoff", goal: cmd.goal };
     case "session_stats":
       return { id, cmd: "session_stats" };
     case "export_html":

@@ -22,6 +22,7 @@ export const BUILTINS: SlashEntry[] = [
   { name: "thinking", description: "Poziom myślenia modelu", kind: "gui", args: "[poziom]", pick: "thinking" },
   { name: "mode", description: "Tryb uprawnień", kind: "gui", args: "[tryb]", pick: "mode" },
   { name: "fork", description: "Nowa sesja od wybranej wiadomości (wiadomość wraca do edycji)", kind: "gui", pick: "fork" },
+  { name: "handoff", description: "Nowa sesja z podsumowaniem od modelu w polu wiadomości (do poprawienia)", kind: "gui", args: "[cel nowej sesji]" },
   { name: "clone", description: "Kopia tej sesji jako nowa sesja", kind: "gui" },
   { name: "name", description: "Zmień nazwę sesji", kind: "gui", args: "<nazwa>" },
   { name: "session", description: "Statystyki sesji: wiadomości, narzędzia, tokeny", kind: "gui" },

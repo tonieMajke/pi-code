@@ -57,6 +57,7 @@ const KNOWN = new Set<CommandName>([
   "export_html",
   "reload",
   "ui_response",
+  "session_handoff",
   "dispose",
 ]);
 
@@ -201,6 +202,10 @@ async function handle(cmd: ClientCommand): Promise<void> {
         await gateway.clone(emit);
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
+      case "session_handoff":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.handoff(emit, cmd.goal ?? ""));
+        return;
       case "session_stats":
         requireReady();
         reply(cmd.id, cmd.cmd, true, gateway.stats());
@@ -247,7 +252,8 @@ rl.on("line", (line) => {
     return;
   }
   if (!KNOWN.has(cmd.cmd)) {
-    reply(cmd.id, undefined, false, undefined, `unknown command: ${String(cmd.cmd)}`);
+    // Echo the name back: the UI clears its own waiting state (e.g. busy) by it.
+    reply(cmd.id, cmd.cmd, false, undefined, `unknown command: ${String(cmd.cmd)}`);
     return;
   }
   // Abort/approve/mode jump the queue: they must work while anything else is pending.
