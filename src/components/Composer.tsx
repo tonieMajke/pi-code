@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ArrowUp, Check, ChevronDown, Clock, Cpu, Folder, FolderPlus, GitBranch, Paperclip, Square, X } from "lucide-react";
-import type { Attachment, ModelSummary, PermissionMode, SessionSummary, Usage } from "../../shared/protocol";
+import { ArrowUp, Brain, Check, ChevronDown, Clock, Cpu, Folder, FolderPlus, GitBranch, Paperclip, Square, X } from "lucide-react";
+import type { Attachment, ModelSummary, PermissionMode, PiSettings, SessionSummary, Usage } from "../../shared/protocol";
 import { Menu, type MenuItem } from "./Menu";
 import { basename, formatTokens } from "../lib/format";
 import type { Outgoing } from "../lib/reducer";
@@ -35,6 +35,8 @@ export function Composer({
   provider,
   models,
   onModel,
+  thinking,
+  onThinking,
   cwd,
   branch,
   sessions,
@@ -67,6 +69,9 @@ export function Composer({
   provider: string;
   models: ModelSummary[];
   onModel: (m: ModelSummary) => void;
+  /** null while settings haven't loaded yet, or the current model doesn't report thinking support. */
+  thinking: PiSettings["thinking"] | null;
+  onThinking: (level: string) => void;
   cwd: string;
   branch: string;
   sessions: SessionSummary[];
@@ -235,6 +240,14 @@ export function Composer({
     hint: m.id === model && m.provider === provider ? <Check size={14} /> : formatTokens(m.contextWindow),
     active: m.id === model && m.provider === provider,
     onSelect: () => onModel(m),
+  }));
+
+  const thinkingItems: MenuItem[] = (thinking?.available ?? []).map((l) => ({
+    key: l,
+    label: l,
+    hint: l === thinking?.level ? <Check size={14} /> : undefined,
+    active: l === thinking?.level,
+    onSelect: () => onThinking(l),
   }));
 
   const pct =
@@ -486,6 +499,20 @@ export function Composer({
           )}
           <span className="bar-spacer" />
           {pct !== null && <ContextMenu usage={usage!} pct={pct} busy={busy} onCommand={onCommand} />}
+          {thinking && thinking.available.length > 0 && (
+            <Menu
+              className="chip-menu"
+              title="Poziom myślenia"
+              trigger={
+                <span className="chip thinking-chip">
+                  <Brain size={13} />
+                  <span>{thinking.level}</span>
+                  <ChevronDown size={12} className="chev" />
+                </span>
+              }
+              items={thinkingItems}
+            />
+          )}
           <Menu
             className="chip-menu"
             title="Model"

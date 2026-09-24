@@ -572,7 +572,7 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip .chev { opacity: 0.6; flex: none; }
 .chip svg { flex: none; }
-.model-chip { font-family: var(--sans); }
+.model-chip, .thinking-chip { font-family: var(--sans); }
 
 .ctx { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--faint); padding: 0 6px; }
 .ctx circle { fill: none; stroke-width: 2.4; }

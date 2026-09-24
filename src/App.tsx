@@ -495,6 +495,15 @@ export default function App() {
     [send],
   );
 
+  const onThinking = useCallback(
+    (level: string) => {
+      // Optimistic, like setMode — the chip should flip instantly, not after a round trip.
+      setSettings((s) => (s ? { ...s, thinking: { ...s.thinking, level } } : s));
+      send({ cmd: "settings_set", patch: { thinkingLevel: level } });
+    },
+    [send],
+  );
+
   const executePlan = () => {
     setMode("acceptEdits");
     const text = "Wykonaj ten plan.";
@@ -560,9 +569,10 @@ export default function App() {
   };
   openSessionRef.current = openSession;
 
-  // Settings are per session in part (thinking level, tools) — refetch on open and on session swap.
+  // Settings are per session in part (thinking level, tools) — refetch on connect, session swap, model
+  // switch, and dialog open. The composer's thinking chip needs this live, not just while the dialog is up.
   useEffect(() => {
-    if (settingsOpen && state.connected) send({ cmd: "settings_get" });
+    if (state.connected) send({ cmd: "settings_get" });
   }, [settingsOpen, state.connected, state.sessionPath, state.model, send]);
 
   // Rust owns the close button's behaviour; tell it the user's choice (and on every start).
@@ -868,6 +878,8 @@ export default function App() {
       provider={state.provider}
       models={state.models}
       onModel={(m) => send({ cmd: "model_set", provider: m.provider, modelId: m.id })}
+      thinking={settings?.thinking ?? null}
+      onThinking={onThinking}
       cwd={state.cwd}
       branch={state.branch}
       sessions={state.sessions}

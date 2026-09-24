@@ -30,6 +30,8 @@ function Harness({ onCommand, onNeedPick }: { onCommand: (n: string, a: string) 
       provider="llama"
       models={[]}
       onModel={vi.fn()}
+      thinking={null}
+      onThinking={vi.fn()}
       cwd="/tmp/p"
       branch=""
       sessions={[]}
