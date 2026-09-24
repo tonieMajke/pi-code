@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { AppearanceStore } from "./appearance.js";
 import { PiGateway } from "./gateway.js";
+import { t } from "../../shared/i18n.js";
 import { gitChanges, gitRevert, listFiles, notify, routerStatus } from "./workspace.js";
 import type { ClientCommand, CommandName, PiEvent, SidecarOut } from "../../shared/protocol.js";
 
@@ -15,7 +16,7 @@ const gateway = new PiGateway();
 /** "Dodaj projekt" typed in the browser build: must be an existing directory ("~" allowed). */
 function checkDir(path: string): string {
   const full = resolve(path.trim().replace(/^~(?=$|\/)/, homedir()));
-  if (!statSync(full, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`nie ma takiego folderu: ${full}`);
+  if (!statSync(full, { throwIfNoEntry: false })?.isDirectory()) throw new Error(t("nie ma takiego folderu: {path}", { path: full }));
   return full;
 }
 
@@ -73,6 +74,19 @@ const KNOWN = new Set<CommandName>([
   "sidebar_set",
   "session_delete",
   "dir_check",
+  "lang_set",
+  "memory_get",
+  "memory_set",
+  "memory_learn",
+  "agents_set",
+  "providers_list",
+  "provider_key",
+  "provider_logout",
+  "endpoint_probe",
+  "endpoint_add",
+  "endpoint_remove",
+  "onboarding_get",
+  "onboarding_done",
   "dispose",
 ]);
 
@@ -84,7 +98,7 @@ async function handle(cmd: ClientCommand): Promise<void> {
   try {
     switch (cmd.cmd) {
       case "init":
-        await gateway.init(emit, cmd.cwd);
+        await gateway.init(emit, cmd.cwd, cmd.lang);
         reply(cmd.id, cmd.cmd, true, { ready: true });
         return;
       case "prompt":
@@ -257,6 +271,59 @@ async function handle(cmd: ClientCommand): Promise<void> {
         gateway.answerDialog(cmd.requestId, cmd.answer);
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
+      case "lang_set":
+        gateway.setLanguage(cmd.lang);
+        reply(cmd.id, cmd.cmd, true, { lang: cmd.lang });
+        return;
+      case "memory_get":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.memoryState());
+        return;
+      case "memory_set":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.setMemory(cmd.entries));
+        return;
+      case "memory_learn":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, { added: await gateway.learnNow() });
+        return;
+      case "agents_set":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.setAgents(cmd.scope, cmd.text));
+        return;
+      case "providers_list":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.providers());
+        return;
+      case "provider_key":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.providerKey(emit, cmd.provider, cmd.key));
+        return;
+      case "provider_logout":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.providerLogout(emit, cmd.provider));
+        return;
+      case "endpoint_probe":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.probeEndpoint(cmd.baseUrl, cmd.apiKey));
+        return;
+      case "endpoint_add":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.addEndpoint(emit, cmd.endpoint));
+        return;
+      case "endpoint_remove":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.removeEndpoint(emit, cmd.name));
+        return;
+      case "onboarding_get":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.onboarding());
+        return;
+      case "onboarding_done":
+        requireReady();
+        gateway.finishOnboarding();
+        reply(cmd.id, cmd.cmd, true, { done: true });
+        return;
       case "dispose":
         gateway.dispose();
         reply(cmd.id, cmd.cmd, true, { done: true });
@@ -293,7 +360,7 @@ rl.on("line", (line) => {
   // Abort/approve/mode jump the queue: they must work while anything else is pending.
   // Read-only status queries also skip it so a slow session swap can't stall the UI's polling.
   // ui_response too: an extension command waiting on a dialog holds the queue until it is answered.
-  if (["abort", "approve", "ui_response", "mode_set", "router_status", "git_changes", "files_list", "notify", "history_image"].includes(cmd.cmd)) {
+  if (["abort", "approve", "ui_response", "mode_set", "router_status", "git_changes", "files_list", "notify", "history_image", "endpoint_probe", "lang_set"].includes(cmd.cmd)) {
     void handle(cmd);
     return;
   }

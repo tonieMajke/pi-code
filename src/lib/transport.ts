@@ -13,7 +13,33 @@ export interface PiTransport {
 export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
   switch (cmd.cmd) {
     case "init":
-      return { id, cmd: "init", cwd: cmd.cwd, sessionFile: cmd.sessionFile };
+      return { id, cmd: "init", cwd: cmd.cwd, sessionFile: cmd.sessionFile, lang: cmd.lang };
+    case "lang_set":
+      return { id, cmd: "lang_set", lang: cmd.lang };
+    case "memory_get":
+      return { id, cmd: "memory_get" };
+    case "memory_set":
+      return { id, cmd: "memory_set", entries: cmd.entries };
+    case "memory_learn":
+      return { id, cmd: "memory_learn" };
+    case "agents_set":
+      return { id, cmd: "agents_set", scope: cmd.scope, text: cmd.text };
+    case "providers_list":
+      return { id, cmd: "providers_list" };
+    case "provider_key":
+      return { id, cmd: "provider_key", provider: cmd.provider, key: cmd.key };
+    case "provider_logout":
+      return { id, cmd: "provider_logout", provider: cmd.provider };
+    case "endpoint_probe":
+      return { id, cmd: "endpoint_probe", baseUrl: cmd.baseUrl, apiKey: cmd.apiKey };
+    case "endpoint_add":
+      return { id, cmd: "endpoint_add", endpoint: cmd.endpoint };
+    case "endpoint_remove":
+      return { id, cmd: "endpoint_remove", name: cmd.name };
+    case "onboarding_get":
+      return { id, cmd: "onboarding_get" };
+    case "onboarding_done":
+      return { id, cmd: "onboarding_done" };
     case "prompt":
       return { id, cmd: "prompt", text: cmd.text, images: cmd.images, behavior: cmd.behavior };
     case "mode_set":

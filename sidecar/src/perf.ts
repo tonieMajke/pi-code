@@ -121,13 +121,42 @@ async function consume(stream: ReadableStream<Uint8Array>): Promise<void> {
   }
 }
 
-function isLocalChatCompletion(url: string): boolean {
+/** Hosts worth asking whether they are llama.cpp: this machine and private networks. */
+function isPrivateHost(host: string): boolean {
+  return (
+    /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/.test(host) ||
+    host.endsWith(".local")
+  );
+}
+
+export function chatCompletionOrigin(url: string): string | null {
   try {
     const u = new URL(url);
-    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname) && u.pathname.endsWith("/chat/completions");
+    return isPrivateHost(u.hostname) && u.pathname.endsWith("/chat/completions") ? u.origin : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * llama-server answers with "Server: llama.cpp". Only it gets the extra request
+ * fields (timings, progress, reasoning budget, slots) — vLLM, Ollama or LM Studio
+ * on localhost may warn about or reject them. One probe per origin, cached.
+ */
+const llamaOrigins = new Map<string, Promise<boolean>>();
+export function isLlamaServer(origin: string, fetchFn: typeof fetch): Promise<boolean> {
+  let known = llamaOrigins.get(origin);
+  if (!known) {
+    known = fetchFn(`${origin}/health`, { signal: AbortSignal.timeout(3000) })
+      .then((r) => (r.headers.get("server") ?? "").toLowerCase().includes("llama.cpp"))
+      .catch(() => false);
+    llamaOrigins.set(origin, known);
+    // A failed probe (server still starting) is retried on a later request.
+    void known.then((ok) => {
+      if (!ok) setTimeout(() => llamaOrigins.delete(origin), 30_000);
+    });
+  }
+  return known;
 }
 
 let installed = false;
@@ -177,7 +206,8 @@ export function installFetchTap(): void {
   const orig = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (!isLocalChatCompletion(url) || typeof init?.body !== "string") return orig(input, init);
+    const origin = chatCompletionOrigin(url);
+    if (!origin || typeof init?.body !== "string" || !(await isLlamaServer(origin, orig))) return orig(input, init);
     let body = init.body;
     try {
       const obj = JSON.parse(body) as Record<string, unknown>;

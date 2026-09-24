@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir, userInfo } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -33,6 +33,12 @@ import type {
   SessionSummary,
   SlashCommandInfo,
   Usage,
+  CustomEndpoint,
+  EndpointProbe,
+  MemoryEntry,
+  MemoryState,
+  OnboardingState,
+  ProviderInfo,
 } from "../../shared/protocol.js";
 import { withMidrunNote } from "../../shared/midrun.js";
 
@@ -58,6 +64,17 @@ import { TasteGuard, type VisualKind } from "./taste.js";
 import { CRITIC_SYSTEM_PROMPT, criticNudge, criticPrompt, pageOutline, pickReference } from "./critic.js";
 import { open as openPage, withPage } from "./browser.js";
 import { elideOldImages } from "./elide.js";
+import {
+  LEARN_SYSTEM_PROMPT,
+  learningTranscript,
+  learnUserText,
+  MemoryStore,
+  memoryPrompt,
+  MIN_USER_MESSAGES,
+  parseFacts,
+} from "./memory.js";
+import { addEndpoint, listProviders, logoutProvider, probeEndpoint, removeEndpoint, setProviderKey } from "./providers.js";
+import { setLang, t, type Lang } from "../../shared/i18n.js";
 
 const run = promisify(execFile);
 
@@ -117,6 +134,11 @@ export class PiGateway {
   private dialogs = new ExtensionDialogs((e) => this.emit(e));
   /** Agent runs that reached agent_settled — tells prompt() whether a "/command" ran the agent at all. */
   private settledRuns = 0;
+  private memory: MemoryStore | null = null;
+  /** Memory learning in the background (after a session is left); a new prompt cancels it. */
+  private learnAbort: AbortController | null = null;
+  /** Per session id: user messages already learned from, so leaving twice doesn't learn twice. */
+  private learnedUpTo = new Map<string, number>();
 
   /** The UI answered an extension dialog. */
   answerDialog(requestId: string, answer: Parameters<ExtensionDialogs["answer"]>[1]): void {
@@ -376,6 +398,23 @@ export class PiGateway {
       },
     });
 
+    // The user says "remember that…" — the model writes it down itself.
+    pi.registerTool({
+      name: "remember",
+      label: t("Pamięć"),
+      description:
+        "Save a durable fact about the user to long-term memory (carried into every future session). " +
+        "Use when the user asks you to remember something, or states a lasting preference about how you should work. " +
+        "One short sentence per call, in the user's language. Never store secrets.",
+      parameters: Type.Object({ fact: Type.String({ description: "One short sentence, e.g. \"Prefers answers in Polish.\"" }) }),
+      execute: async (_id, params) => {
+        if (!this.memoryActive()) return { content: [{ type: "text", text: "Memory is turned off." }], details: undefined };
+        const added = this.memory!.add([params.fact]);
+        this.emit({ kind: "memory", added });
+        return { content: [{ type: "text", text: added.length ? "Saved to memory." : "Already in memory." }], details: undefined };
+      },
+    });
+
     pi.on("before_agent_start", async (event) => {
       guard.startRun();
       taste.startRun();
@@ -407,6 +446,7 @@ export class PiGateway {
       const extra = [
         cfg().constitution.enabled ? this.config!.constitutionText : "",
         this.toolCatalog(),
+        this.memoryActive() ? memoryPrompt(this.memory!.read()) : "",
       ].filter(Boolean);
       return {
         systemPrompt: extra.length ? `${event.systemPrompt}\n\n${extra.join("\n\n")}` : undefined,
@@ -525,7 +565,11 @@ export class PiGateway {
     const policy = (n: string) => this.config!.toolPolicy(n);
     const hasDeferred = names.some((n) => n !== ENABLE_TOOLS && policy(n) === "deferred");
     const active = names.filter((n) =>
-      n === ENABLE_TOOLS ? hasDeferred : policy(n) === "always" || (policy(n) === "deferred" && this.onDemand.has(n)),
+      n === ENABLE_TOOLS
+        ? hasDeferred
+        : n === "remember"
+          ? this.memoryActive()
+          : policy(n) === "always" || (policy(n) === "deferred" && this.onDemand.has(n)),
     );
     s.setActiveToolsByName(active);
   }
@@ -694,7 +738,8 @@ export class PiGateway {
     return changes.map((c) => c.path);
   }
 
-  async init(onEvent: (e: PiEvent) => void, cwd?: string): Promise<void> {
+  async init(onEvent: (e: PiEvent) => void, cwd?: string, lang?: Lang): Promise<void> {
+    if (lang) setLang(lang);
     // Idempotent: a re-init (e.g. a second UI client) re-emits init_done
     // so the caller can always learn the current model/cwd.
     if (this.session) {
@@ -712,6 +757,7 @@ export class PiGateway {
     // PI_GUI_CONFIG lets the eval harness run profiles without touching the user's file.
     this.config = new GuiConfigStore(process.env.PI_GUI_CONFIG ?? `${this.services.agentDir}/pi-gui.json`);
     setSampling(this.config.get().sampling);
+    this.memory = new MemoryStore(process.env.PI_GUI_MEMORY ?? join(this.services.agentDir, "memory", "user.md"));
     // PI_GUI_EPHEMERAL (eval harness): keep throwaway runs out of the user's session history.
     const sm = process.env.PI_GUI_EPHEMERAL ? SessionManager.inMemory(workingDir) : SessionManager.create(workingDir);
     await this.startSession(onEvent, workingDir, sm);
@@ -851,6 +897,168 @@ export class PiGateway {
     this.emitUsage(onEvent);
   }
 
+  // ── Memory ────────────────────────────────────────────────────────────────
+
+  /** A pi extension that does memory on its own (e.g. ~/.pi/agent/extensions/memory.ts). */
+  private externalMemory(): string | null {
+    const exts = this.session?.resourceLoader.getExtensions().extensions ?? [];
+    const hit = exts.find((e) => !e.hidden && /(^|\/)memory(\/index)?\.[cm]?[jt]s$/.test(e.resolvedPath));
+    return hit?.resolvedPath ?? null;
+  }
+
+  /** Built-in memory is on and not doubled by an extension. */
+  private memoryActive(): boolean {
+    return Boolean(this.memory && this.config?.get().memory.enabled && !this.externalMemory());
+  }
+
+  /**
+   * Extract durable facts from a conversation into memory. Runs when a session is
+   * left (not after every answer: with one llama.cpp slot that would evict the
+   * conversation's KV cache mid-work) and on demand from the settings.
+   */
+  private async learnFrom(snap: { id: string; messages: readonly AgentMessage[]; model: AgentSession["model"] }, force = false): Promise<MemoryEntry[]> {
+    if (!this.memoryActive() || !snap.model) return [];
+    const { text, userMessages } = learningTranscript(snap.messages as never);
+    const done = this.learnedUpTo.get(snap.id) ?? 0;
+    if (!force && (userMessages < MIN_USER_MESSAGES || userMessages <= done)) return [];
+    if (!text.trim()) return [];
+    this.learnAbort?.abort();
+    const abort = (this.learnAbort = new AbortController());
+    try {
+      const existing = this.memory!.read();
+      const res = await this.requireServices().modelRuntime.complete(
+        snap.model,
+        {
+          systemPrompt: LEARN_SYSTEM_PROMPT,
+          messages: [{ role: "user", content: [{ type: "text", text: learnUserText(existing, text) }], timestamp: Date.now() }],
+        },
+        { signal: abort.signal, cacheRetention: "none", sessionId: randomUUID(), maxTokens: 6000 },
+      );
+      if (res.stopReason === "aborted" || res.stopReason === "error") return [];
+      const out = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
+      this.learnedUpTo.set(snap.id, userMessages);
+      return this.memory!.add(parseFacts(out, existing));
+    } catch {
+      return []; // best effort: never break a session switch over memory
+    } finally {
+      if (this.learnAbort === abort) this.learnAbort = null;
+    }
+  }
+
+  memoryState(): MemoryState {
+    const services = this.requireServices();
+    const cfg = this.config!.get().memory;
+    const read = (f: string) => {
+      try {
+        return readFileSync(f, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    const globalPath = join(services.agentDir, "AGENTS.md");
+    const inProject = this.cwd !== homedir() && this.cwd !== "/";
+    const projectPath = join(this.cwd, "AGENTS.md");
+    return {
+      file: this.memory!.file,
+      entries: this.memory!.read(),
+      enabled: cfg.enabled,
+      learn: cfg.learn,
+      external: this.externalMemory(),
+      agents: {
+        global: { path: globalPath, text: read(globalPath) },
+        project: inProject ? { path: projectPath, text: read(projectPath), exists: existsSync(projectPath) } : null,
+      },
+    };
+  }
+
+  setMemory(entries: MemoryEntry[]): MemoryState {
+    this.memory!.write(entries);
+    return this.memoryState();
+  }
+
+  /** "Learn from this chat now" in the settings. */
+  async learnNow(): Promise<MemoryEntry[]> {
+    const s = this.requireSession();
+    if (this.busy) throw new Error(t("model pracuje — spróbuj po zakończeniu"));
+    if (!this.memoryActive()) throw new Error(t("pamięć jest wyłączona"));
+    return this.learnFrom({ id: s.sessionId, messages: s.state.messages, model: s.model }, true);
+  }
+
+  /** Global or project AGENTS.md; empty text removes nothing, it writes an empty file. */
+  setAgents(scope: "global" | "project", text: string): MemoryState {
+    const state = this.memoryState();
+    const target = scope === "global" ? state.agents.global.path : state.agents.project?.path;
+    if (!target) throw new Error(t("ta sesja nie ma folderu projektu"));
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, text.endsWith("\n") || !text ? text : `${text}\n`);
+    return this.memoryState();
+  }
+
+  // ── Providers & first run ─────────────────────────────────────────────────
+
+  private get modelsFile(): string {
+    return process.env.PI_GUI_MODELS ?? join(this.requireServices().agentDir, "models.json");
+  }
+
+  providers(): Promise<ProviderInfo[]> {
+    return listProviders(this.requireServices().modelRuntime, this.modelsFile);
+  }
+
+  /** After credentials or models.json change: reload pi's model list; a session without a model gets one. */
+  private async providersChanged(onEvent: (e: PiEvent) => void): Promise<ProviderInfo[]> {
+    const rt = this.requireServices().modelRuntime;
+    await rt.refresh({ allowNetwork: false }).catch(() => undefined);
+    const s = this.session;
+    if (s && !s.model) {
+      const model = this.resolveDefaultModel();
+      if (model) {
+        await s.setModel(model);
+        await this.emitInit(onEvent);
+      }
+    }
+    return this.providers();
+  }
+
+  async providerKey(onEvent: (e: PiEvent) => void, provider: string, key: string): Promise<ProviderInfo[]> {
+    if (!key.trim()) throw new Error(t("pusty klucz API"));
+    await setProviderKey(this.requireServices().modelRuntime, provider, key);
+    return this.providersChanged(onEvent);
+  }
+
+  async providerLogout(onEvent: (e: PiEvent) => void, provider: string): Promise<ProviderInfo[]> {
+    await logoutProvider(this.requireServices().modelRuntime, provider);
+    return this.providersChanged(onEvent);
+  }
+
+  probeEndpoint(baseUrl: string, apiKey?: string): Promise<EndpointProbe> {
+    return probeEndpoint(baseUrl, apiKey);
+  }
+
+  async addEndpoint(onEvent: (e: PiEvent) => void, ep: CustomEndpoint): Promise<ProviderInfo[]> {
+    addEndpoint(this.modelsFile, ep);
+    return this.providersChanged(onEvent);
+  }
+
+  async removeEndpoint(onEvent: (e: PiEvent) => void, id: string): Promise<ProviderInfo[]> {
+    removeEndpoint(this.modelsFile, id);
+    return this.providersChanged(onEvent);
+  }
+
+  async onboarding(): Promise<OnboardingState> {
+    const localLlama = await fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(1500) })
+      .then((r) => (r.headers.get("server") ?? "").toLowerCase().includes("llama.cpp"))
+      .catch(() => false);
+    return { done: this.config!.get().onboarded, localLlama, hasModel: Boolean(this.session?.model), home: homedir() };
+  }
+
+  finishOnboarding(): void {
+    this.config!.setOnboarded();
+  }
+
+  setLanguage(lang: Lang): void {
+    setLang(lang);
+  }
+
   /** Snapshot for the settings dialog: pi's global settings + what this session loaded. */
   settings(): PiSettings {
     const s = this.requireSession();
@@ -937,6 +1145,10 @@ export class PiGateway {
     if (patch.review) config.update("review", patch.review);
     if (patch.escalation) config.update("escalation", patch.escalation);
     if (patch.taste) config.update("taste", patch.taste);
+    if (patch.memory) {
+      config.update("memory", patch.memory);
+      this.applyToolPolicy(); // the remember tool follows the switch
+    }
     if (patch.sampling) {
       config.update("sampling", patch.sampling);
       setSampling(config.get().sampling);
@@ -1168,6 +1380,8 @@ export class PiGateway {
     const services = this.requireServices();
     const model = this.session?.model ?? this.resolveDefaultModel();
     await this.extensionsReady; // never dispose a session its extensions are still starting on
+    const left = this.session;
+    const leftSnapshot = left ? { id: left.sessionId, messages: [...left.state.messages], model: left.model } : null;
     this.dispose();
     this.alwaysAllowed.clear(); // "always" is per session
     this.onDemand.clear();
@@ -1200,6 +1414,9 @@ export class PiGateway {
     );
     await this.emitInit(onEvent);
     this.emitUsage(onEvent);
+    if (leftSnapshot && leftSnapshot.id !== session.sessionId && this.config!.get().memory.learn) {
+      void this.learnFrom(leftSnapshot).then((added) => added.length && onEvent({ kind: "memory", added }));
+    }
   }
 
   /**
@@ -1260,11 +1477,11 @@ export class PiGateway {
     const settings = this.services!.settingsManager;
     const provider = settings.getDefaultProvider();
     const modelId = settings.getDefaultModel();
-    const model = provider && modelId ? this.services!.modelRuntime.getModel(provider, modelId) : undefined;
-    if (!model) {
-      throw new Error(`default model not found: ${provider ?? "?"}/${modelId ?? "?"}`);
-    }
-    return model;
+    const runtime = this.services!.modelRuntime;
+    const model = provider && modelId ? runtime.getModel(provider, modelId) : undefined;
+    // Fresh install or a provider that went away: any usable model, else none — the
+    // session still opens and the welcome screen / settings can add a provider.
+    return model ?? runtime.getAvailableSnapshot()[0];
   }
 
   private async emitInit(onEvent: (e: PiEvent) => void): Promise<void> {
@@ -1328,6 +1545,8 @@ export class PiGateway {
       return;
     }
     this.running = true;
+    // Learning shares the model server with this run (llama.cpp often has one slot) — the user wins.
+    this.learnAbort?.abort();
     const runs = this.settledRuns;
     try {
       await this.extensionsReady;

@@ -20,6 +20,8 @@ export const DEFAULT_CONFIG: GuiConfig = {
     reasoning_budget_tokens: 4096,
   },
   taste: { enabled: true, research: "auto", critic: true, criticModel: "", maxRounds: 2, requireAudit: true, criticSlot: null },
+  memory: { enabled: true, learn: true },
+  onboarded: false,
 };
 
 /** Loaded with every request: the core loop plus cheap project navigation (pi-lens). */
@@ -34,7 +36,7 @@ export function defaultToolPolicy(name: string): ToolPolicy {
   return "deferred";
 }
 
-type Section = Exclude<keyof GuiConfig, "tools">;
+type Section = Exclude<keyof GuiConfig, "tools" | "onboarded">;
 
 /** GUI-owned config next to pi's settings.json (pi drops unknown keys from its own file). */
 export class GuiConfigStore {
@@ -55,6 +57,8 @@ export class GuiConfigStore {
       escalation: { ...DEFAULT_CONFIG.escalation, ...raw.escalation },
       sampling: { ...DEFAULT_CONFIG.sampling, ...raw.sampling },
       taste: { ...DEFAULT_CONFIG.taste, ...raw.taste },
+      memory: { ...DEFAULT_CONFIG.memory, ...raw.memory },
+      onboarded: raw.onboarded === true,
     };
   }
 
@@ -77,6 +81,11 @@ export class GuiConfigStore {
 
   update<K extends Section>(section: K, patch: Partial<GuiConfig[K]>): void {
     this.config = { ...this.config, [section]: { ...this.config[section], ...patch } };
+    this.save();
+  }
+
+  setOnboarded(): void {
+    this.config = { ...this.config, onboarded: true };
     this.save();
   }
 

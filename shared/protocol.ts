@@ -17,7 +17,9 @@ export type ApprovalDecision = "allow" | "always" | "deny";
 export type Attachment = { data: string; mimeType: string; ref?: string };
 
 export type ClientCommand =
-  | { id: number; cmd: "init"; cwd?: string; sessionFile?: string }
+  | { id: number; cmd: "init"; cwd?: string; sessionFile?: string; lang?: Lang }
+  /** UI language changed: sidecar messages and tool labels follow. */
+  | { id: number; cmd: "lang_set"; lang: Lang }
   | { id: number; cmd: "prompt"; text: string; images?: Attachment[]; behavior?: "steer" | "followUp" }
   | { id: number; cmd: "mode_set"; mode: PermissionMode }
   | { id: number; cmd: "approve"; toolCallId: string; decision: ApprovalDecision; reason?: string }
@@ -71,7 +73,86 @@ export type ClientCommand =
   | { id: number; cmd: "appearance_set"; patch: AppearancePatch }
   /** data: URL of an already downscaled image, or null to remove it. */
   | { id: number; cmd: "appearance_image"; dataUrl: string | null }
+  | { id: number; cmd: "memory_get" }
+  /** Replace the whole memory (edit, delete, add, reorder); replies MemoryState. */
+  | { id: number; cmd: "memory_set"; entries: MemoryEntry[] }
+  /** Learn from the current session now instead of when it is left; replies {added: MemoryEntry[]}. */
+  | { id: number; cmd: "memory_learn" }
+  /** Write global (~/.pi/agent/AGENTS.md) or project (<cwd>/AGENTS.md) instructions; replies MemoryState. */
+  | { id: number; cmd: "agents_set"; scope: "global" | "project"; text: string }
+  | { id: number; cmd: "providers_list" }
+  /** Store an API key for a built-in provider (pi's auth.json); replies ProviderInfo[]. */
+  | { id: number; cmd: "provider_key"; provider: string; key: string }
+  | { id: number; cmd: "provider_logout"; provider: string }
+  /** Ask an OpenAI-compatible server for its models; replies EndpointProbe. */
+  | { id: number; cmd: "endpoint_probe"; baseUrl: string; apiKey?: string }
+  /** Add or replace a provider in ~/.pi/agent/models.json; replies ProviderInfo[]. */
+  | { id: number; cmd: "endpoint_add"; endpoint: CustomEndpoint }
+  | { id: number; cmd: "endpoint_remove"; name: string }
+  /** Is the first-run welcome done? reply OnboardingState. */
+  | { id: number; cmd: "onboarding_get" }
+  | { id: number; cmd: "onboarding_done" }
   | { id: number; cmd: "dispose" };
+
+export type { Lang } from "./i18n.js";
+import type { Lang } from "./i18n.js";
+
+/** One remembered fact about the user (see sidecar/src/memory.ts). */
+export type MemoryEntry = { id: string; date: string; text: string };
+
+export type MemoryState = {
+  file: string;
+  entries: MemoryEntry[];
+  enabled: boolean;
+  learn: boolean;
+  /** Path of a pi extension that already does memory; the built-in one stays off while it is loaded. */
+  external: string | null;
+  agents: {
+    global: { path: string; text: string };
+    /** null outside a project (cwd = home). */
+    project: { path: string; text: string; exists: boolean } | null;
+  };
+};
+
+export type ProviderInfo = {
+  id: string;
+  name: string;
+  /** Has usable credentials (stored key, env var, keyless local server…). */
+  configured: boolean;
+  /** Where the credentials come from, e.g. "auth.json", "OPENROUTER_API_KEY". */
+  source: string;
+  /** Models usable right now. */
+  models: number;
+  /** An API key can be entered in the GUI. */
+  apiKey: boolean;
+  /** Needs a browser sign-in — only through `pi` → /login in a terminal. */
+  oauthOnly: boolean;
+  /** Stored in auth.json by pi (removable with provider_logout). */
+  stored: boolean;
+  /** Defined in ~/.pi/agent/models.json (removable with endpoint_remove). */
+  custom: boolean;
+};
+
+/** An OpenAI-compatible server (vLLM, LM Studio, Ollama, SGLang, llama-server…). */
+export type CustomEndpoint = {
+  name: string;
+  baseUrl: string;
+  apiKey?: string;
+  models: string[];
+  /** Context length per model id when the server reports it (vLLM max_model_len). */
+  contextWindows?: Record<string, number>;
+};
+
+export type EndpointProbe = { baseUrl: string; models: string[]; contextWindows: Record<string, number>; llama: boolean };
+
+export type OnboardingState = {
+  done: boolean;
+  /** A llama.cpp server answers on localhost:8080. */
+  localLlama: boolean;
+  /** A default model is set and usable. */
+  hasModel: boolean;
+  home: string;
+};
 
 export type ThemeChoice = "system" | "dark" | "light";
 
@@ -173,6 +254,14 @@ export type GuiConfig = {
   };
   sampling: SamplingConfig;
   taste: TasteConfig;
+  memory: {
+    /** Remembered facts go into every session's system prompt. */
+    enabled: boolean;
+    /** Facts are extracted when a session is left (and on demand). */
+    learn: boolean;
+  };
+  /** The first-run welcome was completed or skipped. */
+  onboarded: boolean;
 };
 
 /**
@@ -245,6 +334,7 @@ export type SettingsPatch = {
   escalation?: Partial<GuiConfig["escalation"]>;
   taste?: Partial<TasteConfig>;
   sampling?: Partial<SamplingConfig>;
+  memory?: Partial<GuiConfig["memory"]>;
   /** Auto-compact threshold for the current model; 0 = pi's default. */
   compactAt?: number;
 };
@@ -380,6 +470,8 @@ export type PiEvent =
   | { kind: "queue"; steering: number; followUp: number }
   | { kind: "usage"; usage: Usage }
   | { kind: "guard"; label: string }
+  /** Facts were added to the user's memory (learned when a session was left, or the model called remember). */
+  | { kind: "memory"; added: MemoryEntry[] }
   /** The hard guards gave up — the UI offers escalation. */
   | { kind: "stuck"; label: string; suggest: string }
   /** Files a run changed, restorable to the snapshot taken when it started. */
