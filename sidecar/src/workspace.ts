@@ -1,13 +1,32 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { FileChange, GitChanges, GpuInfo, RouterStatus } from "../../shared/protocol.js";
+import { t } from "../../shared/i18n.js";
 
 const run = promisify(execFile);
 const PATCH_MAX = 60_000;
 
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await run("git", args, { cwd, maxBuffer: 32 * 1024 * 1024, timeout: 10_000 });
+async function git(cwd: string, args: string[], timeout = 10_000): Promise<string> {
+  const { stdout } = await run("git", args, { cwd, maxBuffer: 32 * 1024 * 1024, timeout });
   return stdout;
+}
+
+/** git's own message (stderr) instead of "Command failed: git …". */
+function gitError(err: unknown): Error {
+  const e = err as { stderr?: string; message?: string };
+  return new Error((e.stderr || e.message || String(err)).trim().split("\n").slice(-3).join("\n"));
+}
+
+async function repoRoot(cwd: string): Promise<string> {
+  return (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
+}
+
+/** X = index, Y = worktree (porcelain v1). */
+export function indexState(code: string): FileChange["index"] {
+  const x = code[0];
+  const y = code[1];
+  if (x === " " || x === "?") return "none";
+  return y === " " ? "staged" : "partial";
 }
 
 /** Working-tree changes vs HEAD (what the model changed, plus anything else uncommitted). */
@@ -32,7 +51,8 @@ export async function gitChanges(cwd: string): Promise<GitChanges> {
       if (code === "??") {
         patch = await git(root, ["diff", "--no-index", "--", "/dev/null", path]).catch((e: { stdout?: string }) => e.stdout ?? "");
       } else {
-        patch = await git(root, ["diff", "HEAD", "--", path]);
+        // Before the first commit there is no HEAD: compare the index with nothing instead.
+        patch = await git(root, ["diff", "HEAD", "--", path]).catch(() => git(root, ["diff", "--cached", "--", path]));
       }
     } catch {
       patch = "";
@@ -41,7 +61,7 @@ export async function gitChanges(cwd: string): Promise<GitChanges> {
       if (line.startsWith("+") && !line.startsWith("+++")) add++;
       else if (line.startsWith("-") && !line.startsWith("---")) del++;
     }
-    files.push({ path, status: code, add, del, patch: patch.length > PATCH_MAX ? `${patch.slice(0, PATCH_MAX)}\n…` : patch });
+    files.push({ path, status: code, add, del, patch: patch.length > PATCH_MAX ? `${patch.slice(0, PATCH_MAX)}\n…` : patch, index: indexState(code) });
   }
   return { repo: true, root, files };
 }
@@ -52,6 +72,58 @@ export async function gitRevert(cwd: string, path: string): Promise<void> {
   const st = (await git(root, ["status", "--porcelain=v1", "--", path])).slice(0, 2);
   if (st === "??") throw new Error("plik nieśledzony przez git — nie cofam (usuń go ręcznie)");
   await git(root, ["restore", "--staged", "--worktree", "--source=HEAD", "--", path]);
+}
+
+/** `git add` (new, changed and deleted files alike). */
+export async function gitStage(cwd: string, paths: string[]): Promise<void> {
+  if (!paths.length) return;
+  const root = await repoRoot(cwd);
+  await git(root, ["add", "--all", "--", ...paths]).catch((e) => {
+    throw gitError(e);
+  });
+}
+
+/** Take files out of the index; the worktree keeps the changes. */
+export async function gitUnstage(cwd: string, paths: string[]): Promise<void> {
+  if (!paths.length) return;
+  const root = await repoRoot(cwd);
+  const hasHead = await git(root, ["rev-parse", "--verify", "-q", "HEAD"]).then(
+    () => true,
+    () => false,
+  );
+  // No HEAD yet (first commit): there is nothing to restore the index from.
+  const args = hasHead ? ["restore", "--staged", "--", ...paths] : ["rm", "--cached", "-r", "-q", "--", ...paths];
+  await git(root, args).catch((e) => {
+    throw gitError(e);
+  });
+}
+
+/** Staged diff (what a commit would contain), for writing its message. */
+export async function stagedDiff(cwd: string, max = 30_000): Promise<{ diff: string; recent: string[] }> {
+  const root = await repoRoot(cwd);
+  const diff = await git(root, ["diff", "--cached", "--stat", "--patch"]);
+  const recent = await git(root, ["log", "-12", "--format=%s"]).then(
+    (s) => s.split("\n").filter(Boolean),
+    () => [],
+  );
+  return { diff: diff.length > max ? `${diff.slice(0, max)}\n… (${t("ucięte")})` : diff, recent };
+}
+
+/**
+ * Commit what is staged. The author is whatever the project's git config says — the GUI
+ * adds nothing. Hooks run (pre-commit may format or refuse), hence the long timeout.
+ */
+export async function gitCommit(cwd: string, message: string): Promise<{ commit: string; subject: string }> {
+  const msg = message.trim();
+  if (!msg) throw new Error(t("pusty opis commitu"));
+  const root = await repoRoot(cwd);
+  const staged = await git(root, ["diff", "--cached", "--name-only"]);
+  if (!staged.trim()) throw new Error(t("nic nie jest dodane do commitu"));
+  await git(root, ["commit", "-q", "-m", msg], 120_000).catch((e) => {
+    throw gitError(e);
+  });
+  const [commit, subject] = (await git(root, ["log", "-1", "--format=%h%x00%s"])).trim().split("\0");
+  return { commit, subject };
 }
 
 /** Project files for @-mentions: git-tracked + untracked-not-ignored, else a shallow walk. */

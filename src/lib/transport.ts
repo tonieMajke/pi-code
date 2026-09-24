@@ -73,6 +73,14 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "git_changes" };
     case "git_revert":
       return { id, cmd: "git_revert", path: cmd.path };
+    case "git_stage":
+      return { id, cmd: "git_stage", paths: cmd.paths };
+    case "git_unstage":
+      return { id, cmd: "git_unstage", paths: cmd.paths };
+    case "git_commit":
+      return { id, cmd: "git_commit", message: cmd.message };
+    case "git_commit_message":
+      return { id, cmd: "git_commit_message" };
     case "files_list":
       return { id, cmd: "files_list" };
     case "router_status":

@@ -62,6 +62,12 @@ import { HANDOFF_SYSTEM_PROMPT, handoffMessages, handoffUserText } from "./hando
 import { changedLines, parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
 import { installFetchTap, onPerf, onRequestDone, setSampling, withRequestContext, withSlot, type RequestContext } from "./perf.js";
 import { aggregate, appendStats, readStats } from "./stats.js";
+import { stagedDiff } from "./workspace.js";
+
+const COMMIT_SYSTEM_PROMPT =
+  "You write git commit messages for a staged diff. Output only the message: a subject line under 72 characters, " +
+  "then optionally a blank line and a short body saying why, wrapped at 72. Match the style of the repository's " +
+  "recent subjects (language, casing, prefixes). No code fences, no quotes, no trailers.";
 import { look, LOOK_COMPARE_DESCRIPTION, LOOK_DESCRIPTION, lookCompare } from "./look.js";
 import { AUDIT_DESCRIPTION, countBySeverity, formatAudit, uiAudit } from "./audit.js";
 import { designRefs, DESIGN_REFS_DESCRIPTION, hasRefs, refsRoot, topicSlug } from "./refs.js";
@@ -158,6 +164,31 @@ export class PiGateway {
   /** Request context for side calls made on behalf of the active session. */
   private ctx(role: RequestRole): RequestContext {
     return { sessionId: this.session?.sessionId ?? "", cwd: this.cwd, role };
+  }
+
+  /** One-shot proposal for the changes panel; nothing is committed. */
+  async commitMessage(): Promise<string> {
+    const s = this.requireSession();
+    const model = this.realModel();
+    if (!model) throw new Error(t("brak modelu"));
+    const { diff, recent } = await stagedDiff(this.cwd);
+    if (!diff.trim()) throw new Error(t("nic nie jest dodane do commitu"));
+    const text = `Recent subjects in this repository:\n${recent.map((r) => `- ${r}`).join("\n") || "(none)"}\n\nStaged diff:\n${diff}`;
+    const res = await withRequestContext(this.ctx("commit"), () =>
+      s.modelRuntime.complete(
+        model,
+        { systemPrompt: COMMIT_SYSTEM_PROMPT, messages: [{ role: "user", content: [{ type: "text", text }], timestamp: Date.now() }] },
+        { cacheRetention: "none", sessionId: randomUUID(), maxTokens: 4000 },
+      ),
+    );
+    if (res.stopReason === "error") throw new Error(res.errorMessage || t("model zwrócił błąd"));
+    const out = res.content
+      .map((c) => (c.type === "text" ? c.text : ""))
+      .join("\n")
+      .replace(/^```\w*\n?|```$/gm, "")
+      .trim();
+    if (!out) throw new Error(t("model nie zaproponował opisu"));
+    return out;
   }
 
   statsQuery(range: StatsRange): StatsSummary {

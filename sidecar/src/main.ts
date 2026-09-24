@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { AppearanceStore } from "./appearance.js";
 import { PiGateway } from "./gateway.js";
 import { t } from "../../shared/i18n.js";
-import { gitChanges, gitRevert, listFiles, notify, routerStatus } from "./workspace.js";
+import { gitChanges, gitCommit, gitRevert, gitStage, gitUnstage, listFiles, notify, routerStatus } from "./workspace.js";
 import type { ClientCommand, CommandName, PiEvent, SidecarOut } from "../../shared/protocol.js";
 
 // stdout is the JSONL protocol; keep stray logging (pi extensions, libraries) off it.
@@ -49,6 +49,10 @@ const KNOWN = new Set<CommandName>([
   "rewind",
   "git_changes",
   "git_revert",
+  "git_stage",
+  "git_unstage",
+  "git_commit",
+  "git_commit_message",
   "files_list",
   "router_status",
   "notify",
@@ -169,6 +173,27 @@ async function handle(cmd: ClientCommand): Promise<void> {
       case "git_revert":
         await gitRevert(gateway.workingDir, cmd.path);
         reply(cmd.id, cmd.cmd, true, await gitChanges(gateway.workingDir));
+        return;
+      case "git_stage":
+        await gitStage(gateway.workingDir, cmd.paths);
+        reply(cmd.id, cmd.cmd, true, await gitChanges(gateway.workingDir));
+        return;
+      case "git_unstage":
+        await gitUnstage(gateway.workingDir, cmd.paths);
+        reply(cmd.id, cmd.cmd, true, await gitChanges(gateway.workingDir));
+        return;
+      case "git_commit": {
+        const done = await gitCommit(gateway.workingDir, cmd.message);
+        reply(cmd.id, cmd.cmd, true, { ...done, changes: await gitChanges(gateway.workingDir) });
+        return;
+      }
+      case "git_commit_message":
+        requireReady();
+        // A model call: seconds, maybe queued behind a busy slot — don't hold the command queue.
+        gateway
+          .commitMessage()
+          .then((message) => reply(cmd.id, cmd.cmd, true, { message }))
+          .catch((err) => reply(cmd.id, cmd.cmd, false, undefined, errText(err)));
         return;
       case "files_list":
         reply(cmd.id, cmd.cmd, true, await listFiles(gateway.workingDir));

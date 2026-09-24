@@ -410,6 +410,10 @@ export default function App() {
     (n, m) => n + (m.role === "assistant" ? m.parts.filter((p) => p.type === "tool" && p.tool.status !== "running").length : 0),
     0,
   );
+  const gitIndex = (cmd: "git_stage" | "git_unstage", paths: string[]) => {
+    setChangesLoading(true);
+    request<GitChanges>({ cmd, paths }).then(setChanges, (e: unknown) => toast(e instanceof Error ? e.message : String(e), "error")).finally(() => setChangesLoading(false));
+  };
   const refreshChanges = useCallback(() => {
     setChangesLoading(true);
     send({ cmd: "git_changes" });
@@ -1212,6 +1216,15 @@ export default function App() {
             send({ cmd: "git_revert", path });
           }}
           onClose={() => setChangesOpen(false)}
+          onStage={(paths) => gitIndex("git_stage", paths)}
+          onUnstage={(paths) => gitIndex("git_unstage", paths)}
+          onCommit={(message) =>
+            request<{ commit: string; subject: string; changes: GitChanges }>({ cmd: "git_commit", message }).then((r) => {
+              setChanges(r.changes);
+              toast(t("Zatwierdzono {commit}: {subject}", { commit: r.commit, subject: r.subject }));
+            })
+          }
+          onSuggest={() => request<{ message: string }>({ cmd: "git_commit_message" }).then((r) => r.message)}
         />
       )}
       {deleting && (

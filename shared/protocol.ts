@@ -35,6 +35,13 @@ export type ClientCommand =
   | { id: number; cmd: "rewind"; fromEnd: number }
   | { id: number; cmd: "git_changes" }
   | { id: number; cmd: "git_revert"; path: string }
+  /** Paths relative to the repo root (as git_changes lists them); reply GitChanges. */
+  | { id: number; cmd: "git_stage"; paths: string[] }
+  | { id: number; cmd: "git_unstage"; paths: string[] }
+  /** Commit the index with the project's git identity; reply {commit, subject, changes}. */
+  | { id: number; cmd: "git_commit"; message: string }
+  /** The session's model proposes a message for the staged diff; reply {message}. */
+  | { id: number; cmd: "git_commit_message" }
   | { id: number; cmd: "files_list" }
   | { id: number; cmd: "router_status" }
   | { id: number; cmd: "notify"; title: string; body: string }
@@ -348,6 +355,8 @@ export type FileChange = {
   add: number;
   del: number;
   patch: string;
+  /** What is in the index: all of the change, part of it (more edits after `git add`), or nothing. */
+  index: "staged" | "partial" | "none";
 };
 
 export type GitChanges = { repo: boolean; root: string; files: FileChange[] };
@@ -428,7 +437,7 @@ export type Usage = {
 };
 
 /** Who a model request was for: the session's own agent loop or a side call. */
-export type RequestRole = "main" | "critic" | "reviewer" | "handoff" | "memory" | "compact";
+export type RequestRole = "main" | "critic" | "reviewer" | "handoff" | "memory" | "compact" | "commit";
 
 /** Per-request llama.cpp timings (from the streamed `timings` / `prompt_progress`). */
 export type Perf =

@@ -1309,3 +1309,19 @@ button.welcome-folder:hover { background: var(--hover); border-color: var(--bord
 .stats-list .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .stats-list .num { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .stats-file { margin-top: 18px; font-family: var(--mono); font-size: 11.5px; }
+
+/* Stage + commit in the changes panel */
+.chg-section + .chg-section { margin-top: 10px; }
+.chg-section-head { display: flex; align-items: center; gap: 6px; padding: 6px 4px 4px 8px; font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.chg-count { font-weight: 500; color: var(--faint); }
+.chg-stage { width: 24px; height: 24px; flex: none; }
+.commit-box { flex: none; border-top: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.commit-box textarea {
+  resize: vertical; min-height: 56px; max-height: 240px; width: 100%; box-sizing: border-box;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font: inherit; font-size: 13px; outline: none;
+}
+.commit-box textarea:focus { border-color: var(--border-strong); }
+.commit-actions { display: flex; align-items: center; gap: 8px; }
+.commit-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.commit-error { font-size: 12px; color: var(--del-fg); white-space: pre-wrap; }

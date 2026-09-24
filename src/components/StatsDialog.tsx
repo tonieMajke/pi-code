@@ -13,6 +13,7 @@ const ROLE_LABEL: Record<RequestRole, string> = {
   handoff: t("handoff"),
   memory: t("nauka pamięci"),
   compact: t("kompaktowanie"),
+  commit: t("opis commitu"),
 };
 
 const speed = (v: number | null) => (v === null ? "—" : v >= 100 ? String(Math.round(v)) : v.toFixed(1).replace(".", locale() === "pl-PL" ? "," : "."));
