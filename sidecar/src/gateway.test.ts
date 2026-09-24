@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -348,3 +348,50 @@ describe("PiGateway opening a session", () => {
     }
   });
 });
+
+describe("PiGateway deleting a session", () => {
+  function setup() {
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-gui-del-"));
+    const dir = join(agentDir, "sessions", "--proj--");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "s.jsonl");
+    writeFileSync(file, "{}\n");
+    process.env.PI_GUI_SIDEBAR = join(agentDir, "sidebar.json");
+    const gw = new PiGateway();
+    const internal = gw as unknown as { services: unknown; newSession: () => Promise<void>; session: unknown };
+    internal.services = { agentDir };
+    gw.trashFile = async (f) => rmSync(f);
+    let fresh = 0;
+    internal.newSession = async () => {
+      fresh++;
+    };
+    return { gw, internal, agentDir, file, fresh: () => fresh, cleanup: () => rmSync(agentDir, { recursive: true, force: true }) };
+  }
+
+  it("refuses anything that is not a pi session file", async () => {
+    const { gw, agentDir, cleanup } = setup();
+    try {
+      await expect(gw.deleteSession(() => {}, join(agentDir, "settings.json"))).rejects.toThrow(/nie jest plik sesji/);
+      await expect(gw.deleteSession(() => {}, join(agentDir, "sessions", "..", "x.jsonl"))).rejects.toThrow(/nie jest plik sesji/);
+    } finally {
+      cleanup();
+      delete process.env.PI_GUI_SIDEBAR;
+    }
+  });
+
+  it("moves the file to the trash, leaves groups, and replaces the open session", async () => {
+    const { gw, internal, file, fresh, cleanup } = setup();
+    try {
+      gw.sidebar.set({ groups: [{ id: "g", name: "G", sessions: [file] }], projects: [] });
+      internal.session = { ...fakeSession(), sessionFile: file, abort: async () => {} };
+      expect(await gw.deleteSession(() => {}, file)).toEqual({ path: file, active: true });
+      expect(existsSync(file)).toBe(false);
+      expect(gw.sidebar.get().groups[0].sessions).toEqual([]);
+      expect(fresh()).toBe(1);
+    } finally {
+      cleanup();
+      delete process.env.PI_GUI_SIDEBAR;
+    }
+  });
+});
+

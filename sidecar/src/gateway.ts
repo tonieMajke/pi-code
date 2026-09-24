@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -35,6 +35,7 @@ import type {
   Usage,
 } from "../../shared/protocol.js";
 import { ExtensionDialogs } from "./extension-ui.js";
+import { SidebarStore } from "./sidebar-store.js";
 import { decide, PLAN_PROMPT } from "./permissions.js";
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, DEFAULT_CONSTITUTION } from "./constitution.js";
 import { GuiConfigStore } from "./config.js";
@@ -481,6 +482,35 @@ export class PiGateway {
     const img = msg?.role === "toolResult" ? toolImages({ content: msg.content })[Number(index)] : undefined;
     if (!img) throw new Error("nie ma takiego obrazu");
     return { ...img, ref };
+  }
+
+  private sidebarStore: SidebarStore | null = null;
+  /** Swappable in tests: gio refuses to trash files on tmpfs. */
+  trashFile: (file: string) => Promise<void> = trash;
+
+  /** Groups and added projects; PI_GUI_SIDEBAR lets tests use a throwaway file. */
+  get sidebar(): SidebarStore {
+    this.sidebarStore ??= new SidebarStore(process.env.PI_GUI_SIDEBAR ?? join(this.requireServices().agentDir, "pi-gui-sidebar.json"));
+    return this.sidebarStore;
+  }
+
+  /**
+   * Move a session file to the system trash (recoverable). Deleting the open session
+   * stops its run and starts a fresh one in the same project.
+   */
+  async deleteSession(onEvent: (e: PiEvent) => void, path: string): Promise<{ path: string; active: boolean }> {
+    const root = resolve(this.requireServices().agentDir, "sessions");
+    const file = resolve(path);
+    if (!file.startsWith(root + sep) || !file.endsWith(".jsonl")) throw new Error("to nie jest plik sesji pi");
+    const active = !!this.session?.sessionFile && resolve(this.session.sessionFile) === file;
+    if (active) {
+      await this.abort();
+      await this.extensionsReady;
+    }
+    if (existsSync(file)) await this.trashFile(file);
+    this.sidebar.forget(path);
+    if (active) await this.newSession(onEvent, this.cwd);
+    return { path, active };
   }
 
   async listSessions(): Promise<SessionSummary[]> {
@@ -1200,4 +1230,14 @@ function extensionName(path: string): string {
   if (!/^index\.[cm]?[jt]s$/.test(file)) return file.replace(/\.[cm]?[jt]s$/, "");
   while (parts.length && ["dist", "src", "lib", "build"].includes(parts[parts.length - 1])) parts.pop();
   return parts.pop() ?? file;
+}
+
+/** freedesktop trash through gio (GLib), so the file shows up in Dolphin's trash and can be restored. */
+async function trash(file: string): Promise<void> {
+  try {
+    await run("gio", ["trash", file]);
+  } catch (err) {
+    const e = err as { code?: string; stderr?: string };
+    throw new Error(e.code === "ENOENT" ? "brak programu gio — nie mogę przenieść do kosza" : `kosz: ${String(e.stderr ?? err).trim()}`);
+  }
 }

@@ -64,6 +64,14 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "session_fork", entryId: cmd.entryId };
     case "history_image":
       return { id, cmd: "history_image", ref: cmd.ref };
+    case "sidebar_get":
+      return { id, cmd: "sidebar_get" };
+    case "sidebar_set":
+      return { id, cmd: "sidebar_set", state: cmd.state };
+    case "session_delete":
+      return { id, cmd: "session_delete", path: cmd.path };
+    case "dir_check":
+      return { id, cmd: "dir_check", path: cmd.path };
     case "session_clone":
       return { id, cmd: "session_clone" };
     case "session_handoff":

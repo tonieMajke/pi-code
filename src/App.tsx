@@ -1,3 +1,6 @@
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { addProject, moveToGroup } from "./lib/sidebar";
 import { imageStore } from "./lib/image-store";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { WindowControls } from "./components/WindowControls";
@@ -6,8 +9,9 @@ import { Logo } from "./components/Logo";
 import { ArrowDown, FileDiff, ImagePlus, PanelLeftOpen, X } from "lucide-react";
 import { initialState, reducer, type InfoLevel, type LivePerf } from "./lib/reducer";
 import { createWsTransport, type PiTransport } from "./lib/transport";
+import { invoke } from "@tauri-apps/api/core";
 import { createTauriTransport, inTauri } from "./lib/tauri";
-import { formatDuration, formatTokens, sessionTitle } from "./lib/format";
+import { basename, formatDuration, formatTokens, sessionTitle } from "./lib/format";
 import { applyAppearance, cachedAppearance, downscaleImage } from "./lib/appearance";
 import type {
   Appearance,
@@ -21,6 +25,7 @@ import type {
   RouterStatus,
   SessionStats,
   SessionSummary,
+  SidebarState,
   SlashCommandInfo,
   UiAnswer,
 } from "../shared/protocol";
@@ -42,12 +47,13 @@ import { SettingsDialog, type AppPrefs } from "./components/Settings";
 
 const SIDEBAR_KEY = "pi-gui.sidebar";
 const PREFS_KEY = "pi-gui.prefs";
+const DEFAULT_PREFS: AppPrefs = { notifications: true, closeToTray: true };
 
 function readPrefs(): AppPrefs {
   try {
-    return { notifications: true, ...(JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<AppPrefs>) };
+    return { ...DEFAULT_PREFS, ...(JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<AppPrefs>) };
   } catch {
-    return { notifications: true };
+    return DEFAULT_PREFS;
   }
 }
 
@@ -86,6 +92,10 @@ export default function App() {
   const queuedOpenRef = useRef<string | null>(null);
   const openSessionRef = useRef<(path: string) => void>(() => {});
   const [switching, setSwitching] = useState(false);
+  const [layout, setLayoutState] = useState<SidebarState>({ groups: [], projects: [] });
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  const [deleting, setDeleting] = useState<SessionSummary | null>(null);
   const afterHistoryRef = useRef<({ role: "command"; text: string } | { role: "info"; text: string; level: InfoLevel })[]>([]);
   const appearancePatchRef = useRef<AppearancePatch>({});
   const appearanceTimerRef = useRef<number | undefined>(undefined);
@@ -119,7 +129,7 @@ export default function App() {
   useEffect(() => {
     // In the Tauri shell the sidecar is spawned by Rust (stdio); in the
     // browser we go through the local WS dev bridge.
-    const t: PiTransport = inTauri() ? createTauriTransport() : createWsTransport("ws://127.0.0.1:9877");
+    const t: PiTransport = inTauri() ? createTauriTransport() : createWsTransport(`ws://127.0.0.1:${import.meta.env.VITE_BRIDGE_PORT ?? 9877}`);
     transportRef.current = t;
     imageStore.setFetcher((ref) => t.send({ cmd: "history_image", ref }));
     const off = t.onMessage((msg) => {
@@ -191,6 +201,26 @@ export default function App() {
           }
           afterHistoryRef.current = [];
           return;
+        // sidebar_set replies are ignored like appearance_set: the edit is already on screen.
+        case "sidebar_get":
+          setLayoutState(msg.result as SidebarState);
+          return;
+        case "dir_check": {
+          const { path } = msg.result as { path: string };
+          const next = addProject(layoutRef.current, path);
+          setLayoutState(next);
+          t.send({ cmd: "sidebar_set", state: next });
+          toast(`Dodano projekt ${basename(path)} — „+” przy nim zaczyna nową sesję.`);
+          return;
+        }
+        case "session_delete": {
+          const { path, active } = msg.result as { path: string; active: boolean };
+          setLayoutState((l) => moveToGroup(l, path, null));
+          if (active) resetViewRef.current();
+          t.send({ cmd: "sessions_list" });
+          toast("Czat przeniesiony do kosza systemowego.");
+          return;
+        }
         case "history_image": {
           const img = msg.result as Attachment;
           if (img.ref) imageStore.resolve(img.ref, img);
@@ -294,6 +324,7 @@ export default function App() {
       t.send({ cmd: "history" });
       t.send({ cmd: "sessions_list" });
       t.send({ cmd: "models_list" });
+      t.send({ cmd: "sidebar_get" });
     });
     return () => {
       off();
@@ -467,12 +498,15 @@ export default function App() {
 
   const stop = useCallback(() => send({ cmd: "abort" }), [send]);
 
+  const resetViewRef = useRef<() => void>(() => {});
   const resetView = () => {
     dispatch({ type: "clear" });
     imageStore.clear();
     atBottomRef.current = true;
     setAtBottom(true);
   };
+
+  resetViewRef.current = resetView;
 
   const newSession = useCallback(
     (cwd?: string) => {
@@ -489,6 +523,23 @@ export default function App() {
    * straight from the file) — no empty flash. Clicks during an open coalesce: only
    * the last one is opened next.
    */
+  const setLayout = (next: SidebarState) => {
+    setLayoutState(next);
+    send({ cmd: "sidebar_set", state: next });
+  };
+
+  /** Native folder picker in the app; a typed path in the browser build. Both are checked by the sidecar. */
+  const addProjectFolder = async () => {
+    let dir: string | null = null;
+    if (inTauri()) {
+      const picked = await openDialog({ directory: true, multiple: false, title: "Wybierz folder projektu" }).catch(() => null);
+      dir = typeof picked === "string" ? picked : null;
+    } else {
+      dir = window.prompt("Ścieżka folderu projektu", state.cwd);
+    }
+    if (dir?.trim()) send({ cmd: "dir_check", path: dir.trim() });
+  };
+
   const openSession = (path: string) => {
     if (openingRef.current) {
       queuedOpenRef.current = path;
@@ -504,6 +555,11 @@ export default function App() {
   useEffect(() => {
     if (settingsOpen && state.connected) send({ cmd: "settings_get" });
   }, [settingsOpen, state.connected, state.sessionPath, state.model, send]);
+
+  // Rust owns the close button's behaviour; tell it the user's choice (and on every start).
+  useEffect(() => {
+    if (inTauri()) void invoke("set_close_to_tray", { enabled: prefs.closeToTray }).catch(() => undefined);
+  }, [prefs.closeToTray]);
 
   const savePrefs = (p: AppPrefs) => {
     setPrefs(p);
@@ -858,6 +914,11 @@ export default function App() {
           onSettings={() => setSettingsOpen(true)}
           searchRef={searchRef}
           user={state.user}
+          layout={layout}
+          onLayout={setLayout}
+          onNewIn={(cwd) => newSession(cwd)}
+          onAddProject={() => void addProjectFolder()}
+          onDelete={setDeleting}
         />
       )}
 
@@ -983,6 +1044,21 @@ export default function App() {
           }}
           onClose={() => setChangesOpen(false)}
         />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title="Usunąć czat?"
+          confirmLabel="Usuń"
+          danger
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => {
+            send({ cmd: "session_delete", path: deleting.path });
+            setDeleting(null);
+          }}
+        >
+          „{sessionTitle(deleting)}” ({basename(deleting.cwd)}) trafi do kosza systemowego — da się go stamtąd przywrócić.
+          {deleting.path === state.sessionPath && state.busy && " Model w tym czacie zostanie zatrzymany."}
+        </ConfirmDialog>
       )}
       {settingsOpen && (
         <SettingsDialog

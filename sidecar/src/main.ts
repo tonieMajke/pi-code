@@ -1,5 +1,8 @@
 import readline from "node:readline";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { AppearanceStore } from "./appearance.js";
 import { PiGateway } from "./gateway.js";
 import { gitChanges, gitRevert, listFiles, notify, routerStatus } from "./workspace.js";
@@ -9,6 +12,13 @@ import type { ClientCommand, CommandName, PiEvent, SidecarOut } from "../../shar
 console.log = console.info = console.debug = (...args: unknown[]) => console.error(...args);
 
 const gateway = new PiGateway();
+/** "Dodaj projekt" typed in the browser build: must be an existing directory ("~" allowed). */
+function checkDir(path: string): string {
+  const full = resolve(path.trim().replace(/^~(?=$|\/)/, homedir()));
+  if (!statSync(full, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`nie ma takiego folderu: ${full}`);
+  return full;
+}
+
 const appearance = new AppearanceStore(process.env.PI_GUI_APPEARANCE_DIR ?? getAgentDir());
 
 function out(msg: SidecarOut): void {
@@ -59,6 +69,10 @@ const KNOWN = new Set<CommandName>([
   "ui_response",
   "session_handoff",
   "history_image",
+  "sidebar_get",
+  "sidebar_set",
+  "session_delete",
+  "dir_check",
   "dispose",
 ]);
 
@@ -202,6 +216,21 @@ async function handle(cmd: ClientCommand): Promise<void> {
         requireReady();
         await gateway.clone(emit);
         reply(cmd.id, cmd.cmd, true, { done: true });
+        return;
+      case "sidebar_get":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.sidebar.get());
+        return;
+      case "sidebar_set":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.sidebar.set(cmd.state));
+        return;
+      case "session_delete":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await gateway.deleteSession(emit, cmd.path));
+        return;
+      case "dir_check":
+        reply(cmd.id, cmd.cmd, true, { path: checkDir(cmd.path) });
         return;
       case "history_image":
         requireReady();

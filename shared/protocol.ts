@@ -47,6 +47,12 @@ export type ClientCommand =
   | { id: number; cmd: "session_fork"; entryId: string }
   /** New session with a copy of the active branch. */
   | { id: number; cmd: "session_clone" }
+  | { id: number; cmd: "sidebar_get" }
+  | { id: number; cmd: "sidebar_set"; state: SidebarState }
+  /** Session file to the system trash; reply {path, active} — active = it was open (a new one is started). */
+  | { id: number; cmd: "session_delete"; path: string }
+  /** Is this a directory? reply {path} normalized, or an error. */
+  | { id: number; cmd: "dir_check"; path: string }
   /** One tool-result image left out of history (Attachment.ref); reply Attachment. */
   | { id: number; cmd: "history_image"; ref: string }
   /** Model writes a prompt for a fresh session, then that session starts; reply {prompt, from}. */
@@ -260,6 +266,11 @@ export type HistoryItem =
   | { role: "assistant"; parts: HistoryPart[] };
 
 /** Summary of a persisted pi session (from SessionManager.list). */
+/** User-made sidebar group; sessions by file path, each in at most one group. */
+export type SidebarGroup = { id: string; name: string; sessions: string[] };
+/** Sidebar layout kept by the sidecar: groups + projects added without any session yet. */
+export type SidebarState = { groups: SidebarGroup[]; projects: string[] };
+
 export type SessionSummary = {
   path: string;
   id: string;

@@ -27,7 +27,7 @@ const THINKING_LABELS: Record<string, string> = {
   xhigh: "b. wysokie",
 };
 
-export type AppPrefs = { notifications: boolean };
+export type AppPrefs = { notifications: boolean; closeToTray: boolean };
 
 export function SettingsDialog({
   settings,
@@ -283,6 +283,9 @@ export function SettingsDialog({
                   <h2>Aplikacja</h2>
                   <Row label="Powiadomienia" desc="Systemowe powiadomienie, gdy pi skończy albo czeka na zgodę, a okno jest w tle.">
                     <Toggle value={prefs.notifications} onChange={(v) => onPrefs({ ...prefs, notifications: v })} />
+                  </Row>
+                  <Row label="Zamykanie chowa do zasobnika" desc="Przycisk zamknięcia chowa okno do zasobnika systemowego, a pi pracuje dalej. Zakończ aplikację z menu ikony w zasobniku.">
+                    <Toggle value={prefs.closeToTray} onChange={(v) => onPrefs({ ...prefs, closeToTray: v })} />
                   </Row>
                 </>
               )}
