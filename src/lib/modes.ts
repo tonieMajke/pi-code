@@ -1,5 +1,6 @@
 import { ClipboardList, FilePenLine, ShieldCheck, Zap } from "lucide-react";
 import type { PermissionMode } from "../../shared/protocol";
+import { t } from "../../shared/i18n";
 
 export const MODES: {
   id: PermissionMode;
@@ -7,10 +8,10 @@ export const MODES: {
   desc: string;
   icon: typeof Zap;
 }[] = [
-  { id: "ask", label: "Pytaj", desc: "Zgoda na każdą edycję i polecenie zmieniające coś", icon: ShieldCheck },
-  { id: "acceptEdits", label: "Auto-edycje", desc: "Edycje plików bez pytania, polecenia bash nadal z pytaniem", icon: FilePenLine },
-  { id: "plan", label: "Plan", desc: "Tylko odczyt i analiza — model przygotowuje plan, nic nie zmienia", icon: ClipboardList },
-  { id: "yolo", label: "YOLO", desc: "Wszystko bez pytania. Model ma wolną rękę", icon: Zap },
+  { id: "ask", label: t("Pytaj"), desc: t("Zgoda na każdą edycję i polecenie zmieniające coś"), icon: ShieldCheck },
+  { id: "acceptEdits", label: t("Auto-edycje"), desc: t("Edycje plików bez pytania, polecenia bash nadal z pytaniem"), icon: FilePenLine },
+  { id: "plan", label: t("Plan"), desc: t("Tylko odczyt i analiza — model przygotowuje plan, nic nie zmienia"), icon: ClipboardList },
+  { id: "yolo", label: "YOLO", desc: t("Wszystko bez pytania. Model ma wolną rękę"), icon: Zap },
 ];
 
 export function modeInfo(mode: PermissionMode) {
