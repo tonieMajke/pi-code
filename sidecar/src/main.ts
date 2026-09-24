@@ -5,12 +5,16 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { AppearanceStore } from "./appearance.js";
 import { PiGateway } from "./gateway.js";
+import { OWNER_ENV } from "./permissions.js";
 import { t } from "../../shared/i18n.js";
 import { gitChanges, gitCommit, gitRevert, gitStage, gitUnstage, listFiles, notify, routerStatus } from "./workspace.js";
 import type { ClientCommand, CommandName, PiEvent, SidecarOut } from "../../shared/protocol.js";
 
 // stdout is the JSONL protocol; keep stray logging (pi extensions, libraries) off it.
 console.log = console.info = console.debug = (...args: unknown[]) => console.error(...args);
+
+// Everything the model starts inherits this, so kill can tell our processes from the user's.
+process.env[OWNER_ENV] = String(process.pid);
 
 const gateway = new PiGateway();
 /** "Dodaj projekt" typed in the browser build: must be an existing directory ("~" allowed). */

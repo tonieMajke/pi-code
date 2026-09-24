@@ -31,7 +31,7 @@ import type {
 } from "../../shared/protocol.js";
 import { withMidrunNote } from "../../shared/midrun.js";
 import { ExtensionDialogs } from "./extension-ui.js";
-import { decide, PLAN_PROMPT } from "./permissions.js";
+import { decide, foreignKill, PLAN_PROMPT, startedByApp } from "./permissions.js";
 import { repairEdit } from "./editfix.js";
 import { ProgressWatch } from "./progress.js";
 import { reciteTodo, TODO_DESCRIPTION, TodoList, type TodoItem } from "./todo.js";
@@ -324,10 +324,15 @@ export class SessionHost {
 
   /** pi `tool_call` hook: returns a block result or undefined (allowed). */
   async gate(toolCallId: string, toolName: string, input: Record<string, unknown>) {
-    const verdict = decide(this.mode, toolName, input);
-    if (verdict.kind === "allow") return undefined;
-    if (verdict.kind === "block") return { block: true, reason: verdict.reason };
-    if (this.alwaysAllowed.has(toolName)) return undefined;
+    // Signalling a process this app did not start asks in every mode, "always allow" included.
+    const killing = toolName === "bash" && this.mode !== "plan" && typeof input.command === "string" ? foreignKill(input.command, startedByApp) : null;
+    if (killing) this.emit({ kind: "guard", label: `Zabijanie procesu spoza Pi Code — pytam (${killing})` });
+    else {
+      const verdict = decide(this.mode, toolName, input);
+      if (verdict.kind === "allow") return undefined;
+      if (verdict.kind === "block") return { block: true, reason: verdict.reason };
+      if (this.alwaysAllowed.has(toolName)) return undefined;
+    }
 
     const answer = await new Promise<{ decision: ApprovalDecision; reason?: string }>((resolve) => {
       this.pendingApprovals.set(toolCallId, { resolve, toolName, args: input });
@@ -335,7 +340,7 @@ export class SessionHost {
       this.emit({ kind: "approval_request", toolCallId, toolName, args: input });
     });
     this.emit({ kind: "approval_done", toolCallId, decision: answer.decision });
-    if (answer.decision === "always") this.alwaysAllowed.add(toolName);
+    if (answer.decision === "always" && !killing) this.alwaysAllowed.add(toolName);
     if (answer.decision === "deny") {
       return {
         block: true,

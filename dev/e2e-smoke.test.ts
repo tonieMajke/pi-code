@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { HistoryItem } from "../shared/protocol";
 import WebSocket from "ws";
 
-const PORT = 9899;
+const PORT = Number(process.env.PI_GUI_E2E_PORT ?? 9899);
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 interface Out {

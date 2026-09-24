@@ -1,4 +1,5 @@
 import type { PermissionMode } from "../../shared/protocol.js";
+import { readFileSync } from "node:fs";
 
 /** Tools that only look at things. Allowed in every mode, never prompt. */
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls", "glob", "web_search", "fetch_content", "source_check"]);
@@ -63,3 +64,67 @@ The user enabled plan mode in the GUI. You may only explore: read files, search,
 Do not edit, write or run commands that change anything — those calls will be blocked.
 Investigate what is needed, then answer with a concrete, numbered implementation plan
 (files to change and what changes). The user will review it and switch modes to execute it.`;
+
+/** Marker in the environment of everything Pi Code starts (children inherit it, even when detached). */
+export const OWNER_ENV = "PI_GUI_OWNER";
+
+/** The process was started by this sidecar (one of its bash calls or their descendants). */
+export function startedByApp(pid: number): boolean {
+  try {
+    return readFileSync(`/proc/${pid}/environ`, "latin1").split("\0").includes(`${OWNER_ENV}=${process.pid}`);
+  } catch {
+    return false; // gone, or not ours to read
+  }
+}
+
+const NAME_KILLERS = /\b(pkill|killall|killall5|xkill|skill|slay)\b/;
+
+/**
+ * Why a bash command must be approved by the user because it signals processes this app did
+ * not start, or null. The mode does not matter (yolo included): a model once killed the user's
+ * Godot editor as a "stale instance", and `pkill -f` has killed its own shell.
+ * pkill/killall/fuser -k match by name, so they always count. kill counts unless every target
+ * is `$!`, a job (`%1`), a variable holding `$!` or a PID `isOwn` recognises.
+ */
+export function foreignKill(command: string, isOwn: (pid: number) => boolean): string | null {
+  const flat = command.replace(/\d?>&\d/g, " ").replace(/['"]/g, " ");
+  const byName = flat.match(NAME_KILLERS);
+  if (byName) return `${byName[1]} matches processes by name`;
+  if (/\bfuser\b[^;&|\n]*\s-[a-z]*k/.test(flat)) return "fuser -k kills whatever holds the file";
+  const substituted = /\$\(|`/.test(command);
+  const ownVars = /\$!/.test(command) && !substituted;
+  for (const segment of flat.split(/[;&|\n]+/)) {
+    const words = segment.trim().split(/\s+/);
+    for (let i = 0; i < words.length; i++) {
+      if (words[i] !== "kill" && !words[i].endsWith("/kill")) continue;
+      const viaXargs = words.slice(0, i).includes("xargs");
+      const targets: string[] = [];
+      let listing = false;
+      let options = true;
+      let signal = false;
+      for (let j = i + 1; j < words.length; j++) {
+        const w = words[j];
+        if (options && w === "--") options = false;
+        else if (options && ["-l", "-L", "--list", "--table"].includes(w)) listing = true;
+        else if (options && ["-s", "-n", "--signal"].includes(w)) (j++, (signal = true));
+        else if (options && !signal && /^-\w+$/.test(w)) signal = true; // -9, -KILL, -SIGTERM
+        else targets.push(w); // a second "-1" is a process group (kill -9 -1 = everything)
+      }
+      if (listing) continue;
+      if (viaXargs) return "kill gets its PIDs from another command";
+      for (const t of targets) {
+        if (t === "$!" || t.startsWith("%")) continue;
+        if (/^\$\{?\w+\}?$/.test(t)) {
+          if (ownVars) continue;
+          return `kill ${t}: the variable does not come from $! in this command`;
+        }
+        if (t.startsWith("$(") || t.startsWith("`")) return "kill gets its PIDs from another command";
+        if (/^-\d+$/.test(t)) return `kill ${t} signals a whole process group`;
+        if (/^\d+$/.test(t)) {
+          if (!isOwn(Number(t))) return `PID ${t} was not started by Pi Code`;
+        }
+      }
+    }
+  }
+  return null;
+}
