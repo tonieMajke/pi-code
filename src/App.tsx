@@ -4,6 +4,7 @@ import { addProject, moveToGroup } from "./lib/sidebar";
 import { imageStore } from "./lib/image-store";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { FindBar } from "./components/FindBar";
+import { StatsDialog } from "./components/StatsDialog";
 import { clearFind, findMatches, hitsOf, paintFind } from "./lib/find";
 import { WindowControls } from "./components/WindowControls";
 import { WindowFrame } from "./components/WindowFrame";
@@ -84,6 +85,7 @@ export default function App() {
   const [router, setRouter] = useState<RouterStatus | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SectionId | undefined>(undefined);
   /** First-run welcome: shown while set. */
   const [welcome, setWelcome] = useState<OnboardingState | null>(null);
@@ -942,6 +944,7 @@ export default function App() {
     { id: "memory", group: "Akcje", label: t("Pamięć"), keywords: "memory pamięć zapamiętane agents.md", run: () => openSettings("memory") },
     { id: "welcome", group: "Akcje", label: t("Ekran powitalny"), keywords: "welcome onboarding powitanie start", run: () => void showWelcome() },
     { id: "compact", group: "Akcje", label: "Kompaktuj kontekst", keywords: "compact", run: () => { setCompacting(true); send({ cmd: "compact" }); } },
+    { id: "stats", group: "Akcje", label: t("Statystyki modeli"), keywords: "stats statystyki prędkość t/s tokeny", run: () => setStatsOpen(true) },
     { id: "find", group: "Akcje", label: t("Szukaj w rozmowie"), hint: <kbd>Ctrl F</kbd>, keywords: "find search znajdź", run: openFind },
     { id: "handoff", group: "Akcje", label: "Handoff → nowa sesja", keywords: "handoff podsumowanie przekazanie", run: () => runSlash("handoff", "") },
     ...(state.busy ? [{ id: "stop", group: "Akcje", label: "Przerwij model", hint: <kbd>Esc</kbd>, run: stop }] : []),
@@ -1057,6 +1060,7 @@ export default function App() {
           onNew={() => newSession()}
           onCollapse={toggleSidebar}
           onSettings={() => setSettingsOpen(true)}
+          onStats={() => setStatsOpen(true)}
           searchRef={searchRef}
           user={state.user}
           layout={layout}
@@ -1272,6 +1276,7 @@ export default function App() {
           onDone={finishWelcome}
         />
       )}
+      {statsOpen && <StatsDialog request={request} onClose={() => setStatsOpen(false)} />}
       <Toasts toasts={toasts} onClose={(id) => setToasts((ts) => ts.filter((x) => x.id !== id))} />
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
     </div>

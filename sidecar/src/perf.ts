@@ -1,4 +1,5 @@
-import type { Perf, SamplingConfig } from "../../shared/protocol.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { Perf, RequestRole, SamplingConfig } from "../../shared/protocol.js";
 
 /**
  * Live llama.cpp speed readout without touching pi internals.
@@ -18,9 +19,46 @@ type Timings = {
 };
 type Progress = { total: number; cache: number; processed: number; time_ms: number };
 
-let listener: ((p: Perf) => void) | null = null;
-export function onPerf(fn: ((p: Perf) => void) | null): void {
+/**
+ * Who a model request is for. Set around session.prompt() and side calls (critic, review,
+ * handoff, memory); pi's fetch runs in the same async chain, so the tap sees it even with
+ * several sessions or a critic running at once.
+ */
+export type RequestContext = {
+  sessionId: string;
+  cwd: string;
+  role: RequestRole;
+  /** llama.cpp slot to pin the request to (id_slot); null = the server picks. */
+  slot?: number | null;
+};
+
+const context = new AsyncLocalStorage<RequestContext>();
+
+export function withRequestContext<T>(ctx: RequestContext, fn: () => T): T {
+  return context.run(ctx, fn);
+}
+
+export function requestContext(): RequestContext | undefined {
+  return context.getStore();
+}
+
+/** One finished llama.cpp request, as the stats log stores it. */
+export type RequestRecord = Extract<Perf, { phase: "done" }> & {
+  model: string;
+  /** From sending the request to the first generated token. */
+  ttftMs: number | null;
+  ctx: RequestContext | undefined;
+};
+
+let listener: ((p: Perf, ctx: RequestContext | undefined) => void) | null = null;
+export function onPerf(fn: ((p: Perf, ctx: RequestContext | undefined) => void) | null): void {
   listener = fn;
+}
+
+let recorder: ((r: RequestRecord) => void) | null = null;
+/** Every finished request (all sessions and roles) — the persistent stats log. */
+export function onRequestDone(fn: ((r: RequestRecord) => void) | null): void {
+  recorder = fn;
 }
 
 const EMIT_EVERY_MS = 200;
@@ -51,8 +89,9 @@ export function parseChunk(line: string): { timings?: Timings; progress?: Progre
   }
 }
 
-async function consume(stream: ReadableStream<Uint8Array>): Promise<void> {
+async function consume(stream: ReadableStream<Uint8Array>, req: { ctx: RequestContext | undefined; model: string; sentAt: number }): Promise<void> {
   const reader = stream.getReader();
+  let ttftMs: number | null = null;
   const dec = new TextDecoder();
   const meter = new GenMeter();
   let buf = "";
@@ -62,7 +101,7 @@ async function consume(stream: ReadableStream<Uint8Array>): Promise<void> {
     const now = Date.now();
     if (!force && now - lastEmit < EMIT_EVERY_MS) return;
     lastEmit = now;
-    listener?.(p);
+    listener?.(p, req.ctx);
   };
   try {
     for (;;) {
@@ -90,6 +129,7 @@ async function consume(stream: ReadableStream<Uint8Array>): Promise<void> {
           const n = timings.predicted_n ?? 0;
           const ms = timings.predicted_ms ?? 0;
           if (n > 0) {
+            ttftMs ??= Date.now() - req.sentAt;
             const perSec = meter.add(n, ms);
             emit({ phase: "gen", tokens: n, perSec, avgPerSec: ms > 0 ? (n / ms) * 1000 : 0 });
           }
@@ -104,19 +144,22 @@ async function consume(stream: ReadableStream<Uint8Array>): Promise<void> {
       const promptMs = last.prompt_ms ?? 0;
       const genTokens = last.predicted_n ?? 0;
       const genMs = last.predicted_ms ?? 0;
-      emit(
-        {
-          phase: "done",
-          promptTokens,
-          cacheTokens: last.cache_n ?? 0,
-          promptPerSec: promptMs > 0 ? (promptTokens / promptMs) * 1000 : 0,
-          promptMs,
-          genTokens,
-          genPerSec: genMs > 0 ? (genTokens / genMs) * 1000 : 0,
-          genMs,
-        },
-        true,
-      );
+      const done: Extract<Perf, { phase: "done" }> = {
+        phase: "done",
+        promptTokens,
+        cacheTokens: last.cache_n ?? 0,
+        promptPerSec: promptMs > 0 ? (promptTokens / promptMs) * 1000 : 0,
+        promptMs,
+        genTokens,
+        genPerSec: genMs > 0 ? (genTokens / genMs) * 1000 : 0,
+        genMs,
+      };
+      emit(done, true);
+      try {
+        recorder?.({ ...done, model: req.model, ttftMs, ctx: req.ctx });
+      } catch {
+        /* a broken stats log must not break the session */
+      }
     }
   }
 }
@@ -167,21 +210,15 @@ export function setSampling(cfg: SamplingConfig): void {
   sampling = cfg;
 }
 
-let slot: number | null = null;
-
 /**
  * Run fn with every local chat request pinned to one llama.cpp slot (id_slot). The critic
  * uses slot 1 so it doesn't evict the main conversation's KV cache from slot 0 — only
- * useful when the server runs with --parallel ≥ 2.
+ * useful when the server runs with --parallel ≥ 2. Scoped to fn's async chain (not a
+ * global), so a session running meanwhile keeps its own slot.
  */
-export async function withSlot<T>(id: number | null, fn: () => Promise<T>): Promise<T> {
-  const prev = slot;
-  slot = id;
-  try {
-    return await fn();
-  } finally {
-    slot = prev;
-  }
+export function withSlot<T>(id: number | null, fn: () => Promise<T>): Promise<T> {
+  const cur = context.getStore();
+  return context.run({ sessionId: "", cwd: "", role: "main", ...cur, slot: id }, fn);
 }
 
 const SAMPLING_KEYS = ["temperature", "top_p", "top_k", "min_p", "presence_penalty", "repeat_penalty"] as const;
@@ -209,22 +246,26 @@ export function installFetchTap(): void {
     const origin = chatCompletionOrigin(url);
     if (!origin || typeof init?.body !== "string" || !(await isLlamaServer(origin, orig))) return orig(input, init);
     let body = init.body;
+    const ctx = context.getStore();
+    let model = "";
     try {
       const obj = JSON.parse(body) as Record<string, unknown>;
+      model = typeof obj.model === "string" ? obj.model : "";
       if (obj.stream === true) {
         obj.timings_per_token = true;
         obj.return_progress = true;
         applySampling(obj, sampling);
-        if (slot !== null) obj.id_slot = slot;
+        if (ctx?.slot !== undefined && ctx.slot !== null) obj.id_slot = ctx.slot;
         body = JSON.stringify(obj);
       }
     } catch {
       return orig(input, init);
     }
+    const sentAt = Date.now();
     const res = await orig(input, { ...init, body });
     if (!res.ok || !res.body) return res;
     const [forPi, forUs] = res.body.tee();
-    void consume(forUs);
+    void consume(forUs, { ctx, model, sentAt });
     return new Response(forPi, { status: res.status, statusText: res.statusText, headers: res.headers });
   };
 }

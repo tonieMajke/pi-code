@@ -123,6 +123,8 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "appearance_set", patch: cmd.patch };
     case "appearance_image":
       return { id, cmd: "appearance_image", dataUrl: cmd.dataUrl };
+    case "stats_query":
+      return { id, cmd: "stats_query", range: cmd.range };
     case "dispose":
       return { id, cmd: "dispose" };
   }

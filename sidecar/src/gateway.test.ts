@@ -174,8 +174,16 @@ describe("PiGateway.history", () => {
         ],
       },
       { role: "toolResult", toolCallId: "c1", isError: false, content: [{ type: "text", text: "a\nb" }] },
-      { role: "assistant", content: [{ type: "text", text: "Gotowe." }] },
+      { role: "assistant", content: [{ type: "text", text: "Gotowe." }], timestamp: 42 },
     ];
+    const stats = { phase: "done", promptTokens: 900, cacheTokens: 100, promptPerSec: 1800, promptMs: 500, genTokens: 50, genPerSec: 100, genMs: 500 };
+    // The run's timings, saved at settle and keyed by its last assistant message.
+    (session as unknown as { sessionManager: unknown }).sessionManager = {
+      getEntries: () => [
+        { type: "custom", customType: "other", data: {} },
+        { type: "custom", customType: "pi-gui-stats", data: { after: 42, stats: [stats] } },
+      ],
+    };
     (gw as unknown as { session: unknown }).session = session;
     expect(gw.history()).toEqual([
       { role: "user", text: "zrób ls" },
@@ -187,6 +195,7 @@ describe("PiGateway.history", () => {
           { type: "tool", tool: { id: "c1", name: "bash", args: { command: "ls" }, status: "ok", summary: "a\nb" } },
           { type: "text", text: "Gotowe." },
         ],
+        stats: [stats],
       },
     ]);
   });

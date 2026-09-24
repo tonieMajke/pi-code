@@ -87,6 +87,7 @@ const KNOWN = new Set<CommandName>([
   "endpoint_remove",
   "onboarding_get",
   "onboarding_done",
+  "stats_query",
   "dispose",
 ]);
 
@@ -323,6 +324,10 @@ async function handle(cmd: ClientCommand): Promise<void> {
         requireReady();
         gateway.finishOnboarding();
         reply(cmd.id, cmd.cmd, true, { done: true });
+        return;
+      case "stats_query":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, gateway.statsQuery(cmd.range));
         return;
       case "dispose":
         gateway.dispose();

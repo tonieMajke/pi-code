@@ -12,7 +12,8 @@ import type {
 } from "../../shared/protocol";
 import { stripMidrunNote } from "../../shared/midrun";
 
-export type RequestStats = Extract<Perf, { phase: "done" }>;
+export type { RequestStats } from "../../shared/protocol";
+import type { RequestStats } from "../../shared/protocol";
 export type LivePerf = Exclude<Perf, { phase: "done" }>;
 export type Approval = { toolCallId: string; toolName: string; args: unknown };
 export type Outgoing = { text: string; images?: Attachment[] };
@@ -204,6 +205,7 @@ function historyMessages(items: HistoryItem[]): Msg[] {
           role: "assistant",
           open: false,
           parts: i.parts.map((p): Part => (p.type === "tool" ? { type: "tool", tool: { ...p.tool } } : p)),
+          ...(i.stats?.length ? { stats: i.stats } : {}),
         },
   );
 }
@@ -375,6 +377,8 @@ export function reducer(state: State, action: Action): State {
           return { ...state, dialogs: state.dialogs.filter((d) => d.id !== e.id) };
         case "perf": {
           if (e.perf.phase !== "done") return { ...state, perf: e.perf };
+          // The critic's and reviewer's requests are counted on the stats page, not under the turn.
+          if (e.role && e.role !== "main") return { ...state, perf: null };
           const stats = e.perf;
           return {
             ...state,

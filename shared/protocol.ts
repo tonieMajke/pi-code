@@ -92,6 +92,8 @@ export type ClientCommand =
   /** Is the first-run welcome done? reply OnboardingState. */
   | { id: number; cmd: "onboarding_get" }
   | { id: number; cmd: "onboarding_done" }
+  /** Aggregated llama.cpp request log; reply StatsSummary. */
+  | { id: number; cmd: "stats_query"; range: StatsRange }
   | { id: number; cmd: "dispose" };
 
 export type { Lang } from "./i18n.js";
@@ -381,7 +383,7 @@ export type HistoryPart =
 /** One rendered item of a restored session transcript. */
 export type HistoryItem =
   | { role: "user"; text: string; images?: Attachment[] }
-  | { role: "assistant"; parts: HistoryPart[] };
+  | { role: "assistant"; parts: HistoryPart[]; stats?: RequestStats[] };
 
 /** Summary of a persisted pi session (from SessionManager.list). */
 /** User-made sidebar group; sessions by file path, each in at most one group. */
@@ -425,6 +427,9 @@ export type Usage = {
   breakdown?: { system: number; tools: number; messages: number };
 };
 
+/** Who a model request was for: the session's own agent loop or a side call. */
+export type RequestRole = "main" | "critic" | "reviewer" | "handoff" | "memory" | "compact";
+
 /** Per-request llama.cpp timings (from the streamed `timings` / `prompt_progress`). */
 export type Perf =
   | { phase: "prompt"; processed: number; total: number; cache: number; perSec: number }
@@ -439,6 +444,56 @@ export type Perf =
       genPerSec: number;
       genMs: number;
     };
+
+/** Timings of one finished llama.cpp request (what the turn footer shows). */
+export type RequestStats = Extract<Perf, { phase: "done" }>;
+
+/** One line of ~/.pi/agent/pi-gui-stats.jsonl. */
+export type StatsRecord = {
+  ts: number;
+  sessionId: string;
+  cwd: string;
+  role: RequestRole;
+  model: string;
+  promptTokens: number;
+  cacheTokens: number;
+  promptMs: number;
+  genTokens: number;
+  genMs: number;
+  ttftMs: number | null;
+};
+
+/** Days back, or everything in the log. */
+export type StatsRange = 7 | 30 | "all";
+
+export type ModelStats = {
+  model: string;
+  requests: number;
+  promptTokens: number;
+  cacheTokens: number;
+  genTokens: number;
+  /** cache / (processed + cache), 0..100. */
+  cacheHitPct: number;
+  /** Prompt processing t/s over requests with ≥ 512 fresh tokens (smaller ones are overhead noise); null = none. */
+  ppMedian: number | null;
+  /** 10th percentile — the slow tail. */
+  ppP10: number | null;
+  genMedian: number | null;
+  genP10: number | null;
+  ttftMedianMs: number | null;
+};
+
+export type StatsSummary = {
+  range: StatsRange;
+  file: string;
+  total: { requests: number; promptTokens: number; genTokens: number };
+  models: ModelStats[];
+  /** Local dates "YYYY-MM-DD", oldest first, days without requests included. */
+  days: { day: string; promptTokens: number; genTokens: number; requests: number }[];
+  projects: { cwd: string; requests: number; promptTokens: number; genTokens: number }[];
+  /** Side calls (critic, reviewer, handoff, memory) — what the helpers cost on top of the sessions. */
+  overhead: { role: RequestRole; requests: number; promptTokens: number; genTokens: number }[];
+};
 
 /** Normalized events the sidecar emits to the UI. */
 export type PiEvent =
@@ -476,7 +531,8 @@ export type PiEvent =
   | { kind: "stuck"; label: string; suggest: string }
   /** Files a run changed, restorable to the snapshot taken when it started. */
   | { kind: "checkpoint"; checkpoint: string; files: string[] }
-  | { kind: "perf"; perf: Perf }
+  /** role: side calls (critic…) show live progress but their timings stay out of the turn footer. */
+  | { kind: "perf"; perf: Perf; role?: RequestRole }
   | { kind: "mode"; mode: PermissionMode }
   | { kind: "approval_request"; toolCallId: string; toolName: string; args: unknown }
   | { kind: "approval_done"; toolCallId: string; decision: ApprovalDecision }

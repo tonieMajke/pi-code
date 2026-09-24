@@ -33,6 +33,10 @@ import type {
   SessionSummary,
   SlashCommandInfo,
   Usage,
+  RequestRole,
+  RequestStats,
+  StatsRange,
+  StatsSummary,
   CustomEndpoint,
   EndpointProbe,
   MemoryEntry,
@@ -56,7 +60,8 @@ import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
 import { elideOldToolOutput } from "./elide.js";
 import { HANDOFF_SYSTEM_PROMPT, handoffMessages, handoffUserText } from "./handoff.js";
 import { changedLines, parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
-import { installFetchTap, onPerf, setSampling, withSlot } from "./perf.js";
+import { installFetchTap, onPerf, onRequestDone, setSampling, withRequestContext, withSlot, type RequestContext } from "./perf.js";
+import { aggregate, appendStats, readStats } from "./stats.js";
 import { look, LOOK_COMPARE_DESCRIPTION, LOOK_DESCRIPTION, lookCompare } from "./look.js";
 import { AUDIT_DESCRIPTION, countBySeverity, formatAudit, uiAudit } from "./audit.js";
 import { designRefs, DESIGN_REFS_DESCRIPTION, hasRefs, refsRoot, topicSlug } from "./refs.js";
@@ -86,6 +91,10 @@ const SKILLS_DIR = fileURLToPath(new URL("../../skills", import.meta.url));
 
 /** Meta-tool that loads deferred tools. */
 const ENABLE_TOOLS = "enable_tools";
+
+/** Custom session entry with a run's request timings — the turn footer survives reopening. */
+const STATS_ENTRY = "pi-gui-stats";
+type StatsEntryData = { after: number; stats: RequestStats[] };
 
 function firstSentence(text: string): string {
   const line = text.replace(/\s+/g, " ").trim();
@@ -139,6 +148,21 @@ export class PiGateway {
   private learnAbort: AbortController | null = null;
   /** Per session id: user messages already learned from, so leaving twice doesn't learn twice. */
   private learnedUpTo = new Map<string, number>();
+  /** Timings of the current run's own requests (not the critic's), saved into the session at settle. */
+  private runStats: RequestStats[] = [];
+
+  private get statsFile(): string {
+    return process.env.PI_GUI_STATS ?? join(this.requireServices().agentDir, "pi-gui-stats.jsonl");
+  }
+
+  /** Request context for side calls made on behalf of the active session. */
+  private ctx(role: RequestRole): RequestContext {
+    return { sessionId: this.session?.sessionId ?? "", cwd: this.cwd, role };
+  }
+
+  statsQuery(range: StatsRange): StatsSummary {
+    return aggregate(readStats(this.statsFile), range, this.statsFile);
+  }
 
   /** The UI answered an extension dialog. */
   answerDialog(requestId: string, answer: Parameters<ExtensionDialogs["answer"]>[1]): void {
@@ -617,7 +641,7 @@ export class PiGateway {
     });
     this.reviewer = session;
     try {
-      await session.prompt(reviewPrompt(task, diff));
+      await withRequestContext(this.ctx("reviewer"), () => session.prompt(reviewPrompt(task, diff)));
       const last = [...session.state.messages].reverse().find((m) => m.role === "assistant");
       const text =
         last && last.role === "assistant"
@@ -696,7 +720,9 @@ export class PiGateway {
     this.reviewer = session;
     try {
       const prompt = criticPrompt({ task, kind, hasReference: !!ref && vision, audit, outline });
-      await withSlot(cfg.criticSlot, () => session.prompt(prompt, images.length ? { images } : undefined));
+      await withRequestContext(this.ctx("critic"), () =>
+        withSlot(cfg.criticSlot, () => session.prompt(prompt, images.length ? { images } : undefined)),
+      );
       const last = [...session.state.messages].reverse().find((m) => m.role === "assistant");
       const text = last && last.role === "assistant" ? last.content.map((c) => (c.type === "text" ? c.text : "")).join("") : "";
       return parseVerdict(text);
@@ -750,7 +776,15 @@ export class PiGateway {
     this.cwd = workingDir;
     this.emit = onEvent;
     installFetchTap();
-    onPerf((perf) => this.emit({ kind: "perf", perf }));
+    onPerf((perf, ctx) => this.emit({ kind: "perf", perf, role: ctx?.role }));
+    onRequestDone((r) => {
+      const { ctx, model, ttftMs, phase: _phase, promptPerSec: _pp, genPerSec: _gp, ...timings } = r;
+      appendStats(this.statsFile, { ts: Date.now(), sessionId: ctx?.sessionId ?? "", cwd: ctx?.cwd ?? "", role: ctx?.role ?? "main", model, ttftMs, ...timings });
+      if (ctx?.role === "main" && ctx.sessionId && ctx.sessionId === this.session?.sessionId) {
+        const { model: _m, ttftMs: _t, ctx: _c, ...stats } = r;
+        this.runStats.push(stats);
+      }
+    });
     this.services = await createAgentSessionServices({ cwd: workingDir });
     // pi's main() does this for every mode; extensions with a UI format text with the theme.
     initTheme(this.services.settingsManager.getTheme(), false);
@@ -766,13 +800,27 @@ export class PiGateway {
   /** Rendered transcript of the active session, blocks kept in model order. */
   history(): HistoryItem[] {
     const s = this.requireSession();
-    return this.historyOf(s.sessionId, s.state.messages);
+    return this.historyOf(s.sessionId, s.state.messages, statsEntries(s.sessionManager));
+  }
+
+  /** Run's request timings → a custom entry keyed by the run's last assistant message. */
+  private saveRunStats(session: AgentSession): void {
+    const stats = this.runStats;
+    this.runStats = [];
+    if (!stats.length) return;
+    const last = [...session.state.messages].reverse().find((m) => m.role === "assistant");
+    if (!last) return;
+    try {
+      session.sessionManager.appendCustomEntry(STATS_ENTRY, { after: last.timestamp, stats } satisfies StatsEntryData);
+    } catch {
+      /* stats are a nicety — never fail a run over them */
+    }
   }
 
   /** Messages last rendered by historyOf — historyImage looks images up here. */
   private shown: { sessionId: string; messages: readonly AgentMessage[] } | null = null;
 
-  private historyOf(sessionId: string, messages: readonly AgentMessage[]): HistoryItem[] {
+  private historyOf(sessionId: string, messages: readonly AgentMessage[], stats?: Map<number, RequestStats[]>): HistoryItem[] {
     this.shown = { sessionId, messages };
     const items: HistoryItem[] = [];
     const toolIndex = new Map<string, Extract<HistoryPart, { type: "tool" }>>();
@@ -799,6 +847,8 @@ export class PiGateway {
             last.parts.push(part);
           }
         }
+        const saved = stats?.get(msg.timestamp);
+        if (saved) last.stats = [...(last.stats ?? []), ...saved];
       } else if (msg.role === "custom" && msg.customType === CONSTITUTION_MESSAGE_TYPE) {
         const last = items[items.length - 1];
         const label = (msg.details as { label?: string } | undefined)?.label ?? "Konstytucja";
@@ -926,14 +976,15 @@ export class PiGateway {
     const abort = (this.learnAbort = new AbortController());
     try {
       const existing = this.memory!.read();
-      const res = await this.requireServices().modelRuntime.complete(
-        snap.model,
+      const ctx: RequestContext = { sessionId: snap.id, cwd: this.cwd, role: "memory" };
+      const res = await withRequestContext(ctx, () => this.requireServices().modelRuntime.complete(
+        snap.model!,
         {
           systemPrompt: LEARN_SYSTEM_PROMPT,
           messages: [{ role: "user", content: [{ type: "text", text: learnUserText(existing, text) }], timestamp: Date.now() }],
         },
         { signal: abort.signal, cacheRetention: "none", sessionId: randomUUID(), maxTokens: 6000 },
-      );
+      ));
       if (res.stopReason === "aborted" || res.stopReason === "error") return [];
       const out = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
       this.learnedUpTo.set(snap.id, userMessages);
@@ -1184,7 +1235,7 @@ export class PiGateway {
     const s = this.requireSession();
     if (this.busy) throw new Error("model pracuje — kompaktowanie po zakończeniu");
     await this.extensionsReady;
-    await s.compact(instructions?.trim() || undefined);
+    await withRequestContext(this.ctx("compact"), () => s.compact(instructions?.trim() || undefined));
     this.emitUsage(onEvent);
   }
 
@@ -1281,14 +1332,15 @@ export class PiGateway {
     const abort = (this.handoffAbort = new AbortController());
     let prompt: string;
     try {
-      const res = await s.modelRuntime.complete(
-        s.model,
+      const model = s.model;
+      const res = await withRequestContext(this.ctx("handoff"), () => s.modelRuntime.complete(
+        model,
         {
           systemPrompt: HANDOFF_SYSTEM_PROMPT,
           messages: [{ role: "user", content: [{ type: "text", text: handoffUserText(conversation, goal) }], timestamp: Date.now() }],
         },
         { signal: abort.signal, cacheRetention: "none", sessionId: randomUUID() },
-      );
+      ));
       if (res.stopReason === "aborted" || abort.signal.aborted) throw new Error("handoff przerwany");
       if (res.stopReason === "error") throw new Error(res.errorMessage || "model zwrócił błąd");
       prompt = res.content
@@ -1369,7 +1421,7 @@ export class PiGateway {
     onEvent({
       kind: "history",
       sessionPath: sessionManager.getSessionFile() ?? path,
-      items: this.historyOf(sessionManager.getSessionId(), sessionManager.buildSessionContext().messages),
+      items: this.historyOf(sessionManager.getSessionId(), sessionManager.buildSessionContext().messages, statsEntries(sessionManager)),
     });
     // Tools must run in the session's own project, not wherever the GUI started.
     const cwd = sessionManager.getCwd() || this.cwd;
@@ -1571,7 +1623,10 @@ export class PiGateway {
     const runs = this.settledRuns;
     try {
       await this.extensionsReady;
-      await s.prompt(text, imgs?.length ? { images: imgs } : undefined);
+      this.runStats = [];
+      await withRequestContext({ sessionId: s.sessionId, cwd: this.cwd, role: "main" }, () =>
+        s.prompt(text, imgs?.length ? { images: imgs } : undefined),
+      );
     } finally {
       this.running = false;
       // An extension command may finish without an agent run — the UI still waits for "settled".
@@ -1658,6 +1713,7 @@ export class PiGateway {
         case "agent_settled": {
           this.settledRuns++;
           this.emitUsage(onEvent);
+          this.saveRunStats(session);
           const cp = this.runCheckpoint;
           this.runCheckpoint = null;
           // Report restorable file changes before "settled" so the UI attaches them to this turn.
@@ -1683,6 +1739,17 @@ export class PiGateway {
       }
     });
   }
+}
+
+/** Saved run timings by the timestamp of the assistant message they follow. */
+function statsEntries(sm: SessionManager): Map<number, RequestStats[]> {
+  const out = new Map<number, RequestStats[]>();
+  for (const e of sm.getEntries()) {
+    if (e.type !== "custom" || e.customType !== STATS_ENTRY) continue;
+    const d = e.data as StatsEntryData | undefined;
+    if (d && typeof d.after === "number" && Array.isArray(d.stats)) out.set(d.after, [...(out.get(d.after) ?? []), ...d.stats]);
+  }
+  return out;
 }
 
 async function gitBranch(cwd: string): Promise<string> {

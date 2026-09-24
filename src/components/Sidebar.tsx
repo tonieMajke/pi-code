@@ -15,7 +15,9 @@ import {
   SquarePen,
   Trash2,
   Layers,
+  BarChart3,
 } from "lucide-react";
+import { t } from "../../shared/i18n";
 import type { SessionSummary, SidebarState } from "../../shared/protocol";
 import { basename, groupSessions, relativeTime, sessionTitle } from "../lib/format";
 import { createGroup, deleteGroup, groupOf, moveToGroup, newGroupId, projectEntries, removeProject, renameGroup } from "../lib/sidebar";
@@ -55,6 +57,7 @@ export function Sidebar({
   onNew,
   onCollapse,
   onSettings,
+  onStats,
   searchRef,
   user,
   layout,
@@ -71,6 +74,7 @@ export function Sidebar({
   onNew: () => void;
   onCollapse: () => void;
   onSettings: () => void;
+  onStats?: () => void;
   searchRef: RefObject<HTMLInputElement | null>;
   user: string;
   /** Groups and added projects (kept by the sidecar). */
@@ -418,6 +422,11 @@ export function Sidebar({
           <span className="who-name">{user || "…"}</span>
           <span className="who-sub">pi · lokalnie</span>
         </span>
+        {onStats && (
+          <button className="icon-btn" onClick={onStats} title={t("Statystyki modeli")}>
+            <BarChart3 size={16} />
+          </button>
+        )}
         <button className="icon-btn" onClick={onSettings} title="Ustawienia (Ctrl+,)">
           <Settings size={16} />
         </button>
