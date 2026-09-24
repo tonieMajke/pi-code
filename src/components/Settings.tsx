@@ -256,6 +256,19 @@ export function SettingsDialog({
                   <Row label="Blokuj obrazy" desc="Nie wysyłaj obrazów do modelu wcale.">
                     <Toggle value={s.images.blockImages} onChange={(v) => onPatch({ blockImages: v })} />
                   </Row>
+                  <h3>{t("Sesje w tle")}</h3>
+                  <p className="settings-note">
+                    {t("Gdy przełączysz się na inny czat, pracująca sesja nie jest zatrzymywana, tylko pracuje dalej w tle. Na modelach z API nie ma limitu.")}
+                  </p>
+                  <Row
+                    label={t("Sesje w tle na modelach lokalnych")}
+                    desc={t("Ile sesji na lokalnym serwerze (llama.cpp, vLLM, Ollama…) może pracować, gdy patrzysz na inny czat. 0 = opuszczenie czatu zatrzymuje model, jak dawniej. Po osiągnięciu limitu Pi Code zapyta, którą sesję zatrzymać.")}
+                  >
+                    <NumberField value={s.gui.background.localLimit} min={0} max={8} onCommit={(v) => onPatch({ background: { localLimit: v } })} />
+                  </Row>
+                  <p className="settings-note warn">
+                    {t("Uczciwie: przy jednym slocie w llama.cpp (parallel = 1) dwie sesje na tym samym modelu nie liczą równolegle, tylko na zmianę — druga „czeka na slot”. Każda zmiana sesji w slocie wyrzuca KV cache poprzedniej, więc przy długim kontekście każda tura zaczyna czytanie promptu od nowa i trwa dłużej. Równolegle idą naprawdę tylko sesje na różnych modelach, jeśli router trzyma oba w VRAM.")}
+                  </p>
                 </>
               )}
 

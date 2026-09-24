@@ -189,7 +189,7 @@ describe("PiGateway event normalization", () => {
     old.push({ type: "turn_start" });
     old.push({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
     oldHost.setStatus("approval");
-    expect(all).toEqual([{ e: { kind: "session_status", session: "old", path: "", title: "", status: "approval" }, session: "old" }]);
+    expect(all).toEqual([{ e: { kind: "session_status", session: "old", path: "", cwd: "/w", title: "", status: "approval" }, session: "old" }]);
     // on screen: everything, tagged with the session
     internal.active = oldHost;
     old.push({ type: "turn_start" });
@@ -549,5 +549,35 @@ describe("PiGateway background sessions", () => {
     });
     await new Promise((r) => setTimeout(r, 20)); // emitInit reads the git branch
     expect(events).toContainEqual({ kind: "approval_request", toolCallId: "t1", toolName: "bash", args: { command: "touch x" } });
+  });
+});
+
+describe("PiGateway switching", () => {
+  it("a run in the session being left does not stream into the new view while that one starts", async () => {
+    const { internal, add, all } = gateway();
+    const old = { ...fakeSession(), sessionId: "old" };
+    old.state.isStreaming = true;
+    add(old);
+    let release!: () => void;
+    const started = new Promise<void>((r) => (release = r));
+    const orig = SessionHost.start;
+    const next = { ...fakeSession(), sessionId: "new" };
+    SessionHost.start = (async (env: HostEnv) => {
+      await started; // extensions of the new session still loading
+      return SessionHost.adopt(env, "/w", next as never);
+    }) as typeof SessionHost.start;
+    try {
+      internal.services = { settingsManager: { getDefaultProvider: () => undefined, getDefaultModel: () => undefined }, modelRuntime: { getAvailableSnapshot: () => [], getModel: () => undefined } };
+      const switching = (internal as unknown as { startSession(cwd: string, sm: unknown): Promise<void> }).startSession("/w", {});
+      await Promise.resolve();
+      old.push({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "7\n28" } });
+      release();
+      await switching;
+      expect(all.filter((x) => x.e.kind === "text_delta")).toEqual([]);
+      expect(internal.active?.id).toBe("new");
+      expect(internal.hosts.has("old")).toBe(true); // still working, in the background
+    } finally {
+      SessionHost.start = orig;
+    }
   });
 });

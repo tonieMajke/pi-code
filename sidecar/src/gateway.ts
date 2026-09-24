@@ -192,7 +192,7 @@ export class PiGateway {
     // and where every session in memory stands.
     if (this.active) {
       await this.active.emitInit();
-      for (const h of this.hosts.values()) onEvent({ kind: "session_status", session: h.id, path: h.path, title: h.title, status: h.status }, h.id);
+      for (const h of this.hosts.values()) onEvent(h.statusEvent(), h.id);
       return;
     }
     const workingDir = cwd ?? process.cwd();
@@ -224,20 +224,30 @@ export class PiGateway {
 
   // ── Sessions: create, show, leave, release ────────────────────────────────
 
-  /** A fresh agent for a session file (or a new one) becomes the session on screen. */
-  private async startSession(cwd: string, sessionManager: SessionManager): Promise<void> {
-    const prev = this.active;
+  /**
+   * A fresh agent for a session file (or a new one) becomes the session on screen.
+   * `prev` = the session being left (already detached by openSession).
+   */
+  private async startSession(cwd: string, sessionManager: SessionManager, prev = this.active): Promise<void> {
     await prev?.extensionsReady; // never leave a session its extensions are still starting on
+    // From here on the session being left is not on screen: while the new one starts
+    // (~0.2–0.5 s), a run still going there must not stream into the new, empty view.
+    this.active = null;
     const model = (prev && this.isReal(prev.session.model) ? prev.session.model : undefined) ?? this.resolveDefaultModel();
-    const host = await SessionHost.start(this.env, cwd, sessionManager, model ?? undefined);
+    let host: SessionHost;
+    try {
+      host = await SessionHost.start(this.env, cwd, sessionManager, model ?? undefined);
+    } catch (err) {
+      this.active = prev;
+      throw err;
+    }
     this.hosts.set(host.id, host);
-    this.show(host);
+    this.show(host, prev);
     await host.emitInit();
     host.emitUsage();
   }
 
-  private show(host: SessionHost): void {
-    const prev = this.active;
+  private show(host: SessionHost, prev = this.active): void {
     this.active = host;
     this.cwd = host.cwd;
     host.lastSeen = Date.now();
@@ -323,6 +333,9 @@ export class PiGateway {
       return;
     }
     const sessionManager = SessionManager.open(path);
+    // The session being left stops talking to the view before the new transcript goes out.
+    const prev = this.active;
+    this.active = null;
     // Show the transcript straight from the file (~20 ms); the agent session with its
     // extensions takes up to ~0.5 s more when the project changes.
     const messages = sessionManager.buildSessionContext().messages;
@@ -331,7 +344,7 @@ export class PiGateway {
     this.out({ kind: "history", sessionPath: sessionManager.getSessionFile() ?? path, items });
     // Tools must run in the session's own project, not wherever the GUI started.
     const cwd = sessionManager.getCwd() || this.cwd;
-    await this.startSession(cwd, sessionManager);
+    await this.startSession(cwd, sessionManager, prev);
   }
 
   /** A session from memory back on screen: transcript (with the message still streaming), then its state. */

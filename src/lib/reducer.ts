@@ -278,11 +278,17 @@ export function reducer(state: State, action: Action): State {
       const e = action.event;
       const at = action.at;
       switch (e.kind) {
-        case "history":
-          // A session being opened: its transcript replaces whatever was on screen.
+        case "history": {
+          // A session being opened: its transcript replaces whatever was on screen. A session
+          // brought back from the background mid-run keeps working: its last turn stays open.
+          const messages = historyMessages(e.items);
+          const last = messages[messages.length - 1];
+          if (e.busy && last?.role === "assistant") messages[messages.length - 1] = { ...last, open: true };
           return {
             ...state,
-            messages: historyMessages(e.items),
+            messages,
+            busy: e.busy ?? false,
+            busySince: e.busy ? (e.since ?? action.at ?? null) : null,
             sessionPath: e.sessionPath,
             error: null,
             pending: [],
@@ -291,9 +297,17 @@ export function reducer(state: State, action: Action): State {
             perf: null,
             stuck: null,
           };
+        }
         case "init_done":
           return {
             ...state,
+            // A different session without a history event first (new, fork, handoff): the old
+            // one's run — maybe still going on in the background — is not this view's any more.
+            ...(e.sessionPath !== state.sessionPath || !e.sessionPath
+              ? e.sessionId !== state.sessionId
+                ? { busy: false, busySince: null, perf: null, approvals: [], dialogs: [], pending: [] }
+                : {}
+              : {}),
             model: e.model,
             provider: e.provider,
             cwd: e.cwd,

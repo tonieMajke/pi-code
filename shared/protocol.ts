@@ -591,7 +591,7 @@ export type PiEvent =
   /** The dialog was closed from the sidecar side (timeout, abort). */
   | { kind: "ui_done"; id: string }
   /** A session kept in memory changed state (sent for background and on-screen sessions). */
-  | { kind: "session_status"; session: string; path: string; title: string; status: SessionStatus }
+  | { kind: "session_status"; session: string; path: string; cwd: string; title: string; status: SessionStatus }
   /** A session was released from memory (stopped, evicted, deleted). */
   | { kind: "session_closed"; session: string; path: string };
 

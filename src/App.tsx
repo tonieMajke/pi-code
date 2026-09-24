@@ -5,13 +5,14 @@ import { imageStore } from "./lib/image-store";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { FindBar } from "./components/FindBar";
 import { StatsDialog } from "./components/StatsDialog";
+import { LimitDialog } from "./components/LimitDialog";
 import { clearFind, findMatches, hitsOf, paintFind } from "./lib/find";
 import { WindowControls } from "./components/WindowControls";
 import { WindowFrame } from "./components/WindowFrame";
 import { Logo } from "./components/Logo";
 import { ArrowDown, FileDiff, FolderOpen, ImagePlus, PanelLeftOpen, X } from "lucide-react";
 import { Welcome } from "./components/Welcome";
-import type { OnboardingState } from "../shared/protocol";
+import type { BackgroundBlock, ClientCommandInput, OnboardingState, SessionStatus } from "../shared/protocol";
 import { initialState, reducer, type InfoLevel, type LivePerf } from "./lib/reducer";
 import { createWsTransport, type PiRequest, type PiTransport } from "./lib/transport";
 import { lang, plural, t } from "../shared/i18n";
@@ -128,6 +129,19 @@ export default function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const transportRef = useRef<PiTransport | null>(null);
+  /** Sessions the sidecar keeps in memory, by sessionId: background runs and finished-unseen ones. */
+  const [bg, setBg] = useState<Record<string, { path: string; cwd: string; title: string; status: SessionStatus }>>({});
+  /** Switching would exceed the local background limit: which run to stop, and the switch to retry. */
+  const [limitAsk, setLimitAsk] = useState<{ block: BackgroundBlock; retry: ClientCommandInput } | null>(null);
+  const sessionIdRef = useRef("");
+  sessionIdRef.current = state.sessionId;
+  const lastOpenRef = useRef("");
+  /**
+   * Session being left: its events already in the pipe when the switch started would land in
+   * the next session's view. Dropped until the next session's history / init_done arrives.
+   */
+  const leavingRef = useRef("");
+  const lastNewRef = useRef<string | undefined>(undefined);
   /** Find in transcript (Ctrl+F): null = closed; focus bumps on every Ctrl+F. */
   const [find, setFind] = useState<{ query: string; cur: number; focus: number } | null>(null);
 
@@ -167,6 +181,31 @@ export default function App() {
     const off = tp.onMessage((msg) => {
       if ("event" in msg) {
         const e = msg.event;
+        if (e.kind === "session_status") {
+          setBg((b) => ({ ...b, [e.session]: { path: e.path, cwd: e.cwd, title: e.title, status: e.status } }));
+          if (e.session === sessionIdRef.current) return;
+          // Background session: the sidebar shows it; these need the user.
+          const name = e.title || t("Sesja w tle");
+          const notifyOn = prefsRef.current.notifications;
+          if (e.status === "approval") {
+            toast(t("Sesja „{name}” w tle czeka na zgodę.", { name }), "warning");
+            if (notifyOn) tp.send({ cmd: "notify", title: t("pi czeka na zgodę"), body: t("Sesja „{name}” w tle prosi o zgodę.", { name }) });
+          } else if (e.status === "done" || e.status === "error") {
+            toast(e.status === "done" ? t("Sesja „{name}” skończyła w tle.", { name }) : t("Sesja „{name}” w tle skończyła z błędem.", { name }), e.status === "done" ? "info" : "warning");
+            if (notifyOn && !document.hasFocus()) tp.send({ cmd: "notify", title: t("pi skończył w tle"), body: name });
+            tp.send({ cmd: "sessions_list" });
+          }
+          return;
+        }
+        if (msg.session && msg.session === leavingRef.current && e.kind !== "history" && e.kind !== "init_done") return;
+        if (e.kind === "history" || e.kind === "init_done") leavingRef.current = "";
+        if (e.kind === "session_closed") {
+          setBg((b) => {
+            const { [e.session]: _gone, ...rest } = b;
+            return rest;
+          });
+          return;
+        }
         switch (e.kind) {
           case "notice":
             if (commandOutputRef.current) dispatch({ type: "info", text: e.text, level: e.level });
@@ -207,6 +246,17 @@ export default function App() {
       if (pending) {
         if (msg.ok) pending.resolve(msg.result);
         else pending.reject(new Error(msg.error));
+        return;
+      }
+      const blocked = msg.ok && (msg.cmd === "session_open" || msg.cmd === "session_new") ? (msg.result as { blocked?: BackgroundBlock }).blocked : undefined;
+      if (blocked) {
+        // Nothing switched: the limit dialog decides. session_new already cleared the view — restore it.
+        openingRef.current = false;
+        queuedOpenRef.current = null;
+        leavingRef.current = "";
+        setSwitching(false);
+        setLimitAsk({ block: blocked, retry: msg.cmd === "session_open" ? { cmd: "session_open", path: lastOpenRef.current } : { cmd: "session_new", cwd: lastNewRef.current } });
+        if (msg.cmd === "session_new") tp.send({ cmd: "history" });
         return;
       }
       if (msg.cmd === "session_open") {
@@ -594,6 +644,8 @@ export default function App() {
   const newSession = useCallback(
     (cwd?: string) => {
       resetView();
+      leavingRef.current = sessionIdRef.current;
+      lastNewRef.current = cwd;
       send({ cmd: "session_new", cwd });
       send({ cmd: "sessions_list" });
       requestAnimationFrame(() => inputRef.current?.focus());
@@ -653,6 +705,8 @@ export default function App() {
     }
     openingRef.current = true;
     setSwitching(true);
+    lastOpenRef.current = path;
+    leavingRef.current = sessionIdRef.current;
     send({ cmd: "session_open", path });
   };
   openSessionRef.current = openSession;
@@ -1056,10 +1110,15 @@ export default function App() {
       )}
       {sidebarOpen && (
         <Sidebar
-          sessions={state.sessions}
+          sessions={withLiveSessions(state.sessions, bg)}
           loading={state.loadingSessions}
           activePath={state.sessionPath}
           busyPath={state.busy ? state.sessionPath : ""}
+          statuses={Object.fromEntries(Object.values(bg).map((b) => [b.path, b.status]))}
+          onStop={(path) => {
+            const id = Object.entries(bg).find(([, b]) => b.path === path)?.[0];
+            if (id) send({ cmd: "abort", session: id });
+          }}
           onOpen={openSession}
           onNew={() => newSession()}
           onCollapse={toggleSidebar}
@@ -1289,6 +1348,27 @@ export default function App() {
           onDone={finishWelcome}
         />
       )}
+      {limitAsk && (
+        <LimitDialog
+          block={limitAsk.block}
+          onCancel={() => setLimitAsk(null)}
+          onStop={(session) => {
+            const retry = limitAsk.retry;
+            setLimitAsk(null);
+            if (retry.cmd === "session_open") {
+              leavingRef.current = sessionIdRef.current;
+              openingRef.current = true;
+              setSwitching(true);
+              send({ ...retry, stop: session });
+            } else if (retry.cmd === "session_new") {
+              resetView();
+              leavingRef.current = sessionIdRef.current;
+              send({ ...retry, stop: session });
+              send({ cmd: "sessions_list" });
+            }
+          }}
+        />
+      )}
       {statsOpen && <StatsDialog request={request} onClose={() => setStatsOpen(false)} />}
       <Toasts toasts={toasts} onClose={(id) => setToasts((ts) => ts.filter((x) => x.id !== id))} />
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
@@ -1352,7 +1432,10 @@ function Working({ since, now, perf }: { since: number | null; now: number; perf
   let label = "Pracuje…";
   let detail: string | null = null;
   let progress: number | null = null;
-  if (perf?.phase === "prompt") {
+  if (perf?.phase === "waiting") {
+    label = t("Czeka na slot…");
+    detail = t("model liczy teraz dla innej sesji; ta ruszy, gdy tamta skończy zapytanie");
+  } else if (perf?.phase === "prompt") {
     const fresh = perf.total - perf.cache;
     const done = perf.processed - perf.cache;
     progress = fresh > 0 ? Math.min(1, done / fresh) : 1;
@@ -1422,4 +1505,19 @@ function SessionTitle({ title, onRename }: { title: string; onRename: (name: str
       }}
     />
   );
+}
+
+/**
+ * pi writes a session file only after the first answer, so a session sent to the background
+ * during its first run is not in sessions_list yet — it still needs a row to come back to.
+ */
+function withLiveSessions(
+  sessions: SessionSummary[],
+  bg: Record<string, { path: string; cwd: string; title: string; status: SessionStatus }>,
+): SessionSummary[] {
+  const known = new Set(sessions.map((s) => s.path));
+  const extra = Object.entries(bg)
+    .filter(([, b]) => b.path && !known.has(b.path) && b.status !== "idle")
+    .map(([id, b]): SessionSummary => ({ path: b.path, id, cwd: b.cwd, modified: new Date().toISOString(), messageCount: 1, firstMessage: b.title }));
+  return extra.length ? [...extra, ...sessions] : sessions;
 }

@@ -253,3 +253,44 @@ describe("reducer: slash commands and extension dialogs", () => {
     expect(s.dialogs).toEqual([]);
   });
 });
+
+describe("background sessions", () => {
+  const init = (sessionId: string, sessionPath: string) =>
+    ({ kind: "init_done", cwd: "/w", model: "m", provider: "p", sessionId, sessionPath, sessionName: "", branch: "", mode: "ask", user: "u" }) as const;
+
+  it("a session back from the background mid-run: busy, last turn open, deltas continue it", () => {
+    let s = reducer(initialState, { type: "event", event: init("a", "/a"), at: 1 });
+    s = reducer(s, { type: "user", text: "go", at: 1 }); // a works…
+    s = reducer(s, {
+      type: "event",
+      at: 5,
+      event: { kind: "history", sessionPath: "/b", busy: true, since: 3, items: [{ role: "user", text: "zrób" }, { role: "assistant", parts: [{ type: "text", text: "Rob" }] }] },
+    });
+    s = reducer(s, { type: "event", event: init("b", "/b"), at: 6 });
+    expect(s.busy).toBe(true);
+    expect(s.busySince).toBe(3);
+    s = reducer(s, { type: "event", event: { kind: "text_delta", delta: "ię" }, at: 7 });
+    expect(s.messages).toHaveLength(2);
+    expect(s.messages[1]).toMatchObject({ role: "assistant", open: true, parts: [{ type: "text", text: "Robię" }] });
+  });
+
+  it("leaving a working session for a new one: the old run is not this view's any more", () => {
+    let s = reducer(initialState, { type: "event", event: init("a", "/a"), at: 1 });
+    s = reducer(s, { type: "user", text: "go", at: 1 });
+    s = reducer(s, { type: "event", event: { kind: "approval_request", toolCallId: "t", toolName: "bash", args: {} }, at: 2 });
+    s = reducer(s, { type: "clear" });
+    s = reducer(s, { type: "event", event: init("c", "/c"), at: 3 });
+    expect(s.busy).toBe(false);
+    expect(s.approvals).toEqual([]);
+    // a rename of the same session keeps its run
+    s = reducer(s, { type: "user", text: "go", at: 4 });
+    s = reducer(s, { type: "event", event: init("c", "/c"), at: 5 });
+    expect(s.busy).toBe(true);
+  });
+
+  it("opening a finished session from its file is not busy", () => {
+    let s = reducer(initialState, { type: "user", text: "go", at: 1 });
+    s = reducer(s, { type: "event", event: { kind: "history", sessionPath: "/x", items: [] }, at: 2 });
+    expect(s.busy).toBe(false);
+  });
+});

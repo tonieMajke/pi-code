@@ -16,7 +16,9 @@ import {
   Trash2,
   Layers,
   BarChart3,
+  Square,
 } from "lucide-react";
+import type { SessionStatus } from "../../shared/protocol";
 import { t } from "../../shared/i18n";
 import type { SessionSummary, SidebarState } from "../../shared/protocol";
 import { basename, groupSessions, relativeTime, sessionTitle } from "../lib/format";
@@ -53,6 +55,8 @@ export function Sidebar({
   loading,
   activePath,
   busyPath,
+  statuses = {},
+  onStop,
   onOpen,
   onNew,
   onCollapse,
@@ -70,6 +74,10 @@ export function Sidebar({
   loading: boolean;
   activePath: string;
   busyPath: string;
+  /** Sessions kept in memory by path: working in the background, waiting, finished unseen. */
+  statuses?: Record<string, SessionStatus>;
+  /** Stop a background session's run. */
+  onStop?: (path: string) => void;
   onOpen: (path: string) => void;
   onNew: () => void;
   onCollapse: () => void;
@@ -166,9 +174,21 @@ export function Sidebar({
         title={`${sessionTitle(s)}\n${s.cwd}`}
       >
         <span className="s-title">
-          {s.path === busyPath && <span className="s-busy" />}
+          <StatusMark status={s.path === busyPath ? "working" : active ? undefined : statuses[s.path]} />
           <span className="s-text">{sessionTitle(s)}</span>
           {!showProject && <span className="s-time">{relativeTime(s.modified)}</span>}
+          {!active && onStop && ["working", "slot", "approval"].includes(statuses[s.path] ?? "") && (
+            <button
+              className="s-stop icon-btn"
+              title={t("Zatrzymaj sesję w tle")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStop(s.path);
+              }}
+            >
+              <Square size={11} />
+            </button>
+          )}
           <button
             className="s-more icon-btn"
             title="Więcej"
@@ -527,4 +547,19 @@ function FloatingMenu({ menu, onClose }: { menu: FloatMenu; onClose: () => void 
       )}
     </div>
   );
+}
+
+const MARK_TITLES: Record<SessionStatus, string> = {
+  working: t("pracuje"),
+  slot: t("czeka na slot — model zajęty przez inną sesję"),
+  approval: t("czeka na zgodę"),
+  done: t("skończyła — jeszcze nie widziana"),
+  error: t("skończyła z błędem"),
+  idle: "",
+};
+
+/** Dot before the title: pulsing = working, hollow = waiting for the model, terracotta = needs you. */
+function StatusMark({ status }: { status?: SessionStatus }) {
+  if (!status || status === "idle") return null;
+  return <span className={status === "working" ? "s-busy" : `s-mark s-${status}`} title={MARK_TITLES[status]} />;
 }

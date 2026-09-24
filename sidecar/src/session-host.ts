@@ -137,6 +137,8 @@ export class SessionHost {
   busySince: number | null = null;
   /** Last time the user had it on screen — the oldest idle one is released first. */
   lastSeen = Date.now();
+  /** First message of a run on an empty session: the title before pi adds it to the messages. */
+  private firstPrompt = "";
   /** Last queue sizes, replayed when the session comes back on screen. */
   private queue = { steering: 0, followUp: 0 };
 
@@ -206,7 +208,7 @@ export class SessionHost {
   get title(): string {
     if (this.session.sessionName) return this.session.sessionName;
     const first = this.session.state.messages.find((m) => m.role === "user");
-    const text = first?.role === "user" ? userText(first.content as Parameters<typeof userText>[0]) : "";
+    const text = first?.role === "user" ? userText(first.content as Parameters<typeof userText>[0]) : this.firstPrompt;
     return text.replace(/\s+/g, " ").trim().slice(0, 80);
   }
 
@@ -245,7 +247,11 @@ export class SessionHost {
   setStatus(status: SessionStatus): void {
     if (this.disposed || status === this.status) return;
     this.status = status;
-    this.env.emit(this, { kind: "session_status", session: this.id, path: this.path, title: this.title, status });
+    this.env.emit(this, this.statusEvent());
+  }
+
+  statusEvent(): Extract<PiEvent, { kind: "session_status" }> {
+    return { kind: "session_status", session: this.id, path: this.path, cwd: this.cwd, title: this.title, status: this.status };
   }
 
   /** The last answer ended in an error (API refused, server down…). */
@@ -1128,6 +1134,7 @@ export class SessionHost {
       return;
     }
     this.running = true;
+    if (!s.state.messages.length) this.firstPrompt = text;
     this.busySince = Date.now();
     this.setStatus("working");
     // Learning shares the model server with this run (llama.cpp often has one slot) — the user wins.
