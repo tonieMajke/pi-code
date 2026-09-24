@@ -91,6 +91,9 @@ export default function App() {
   const openingRef = useRef(false);
   const queuedOpenRef = useRef<string | null>(null);
   const openSessionRef = useRef<(path: string) => void>(() => {});
+  const newSessionRef = useRef<(cwd: string) => void>(() => {});
+  /** Set when the composer's "Inny folder…" asked: the checked folder starts a session right away. */
+  const startInPickedRef = useRef(false);
   const [switching, setSwitching] = useState(false);
   const [layout, setLayoutState] = useState<SidebarState>({ groups: [], projects: [] });
   const layoutRef = useRef(layout);
@@ -210,7 +213,10 @@ export default function App() {
           const next = addProject(layoutRef.current, path);
           setLayoutState(next);
           t.send({ cmd: "sidebar_set", state: next });
-          toast(`Dodano projekt ${basename(path)} — „+” przy nim zaczyna nową sesję.`);
+          if (startInPickedRef.current) {
+            startInPickedRef.current = false;
+            newSessionRef.current(path);
+          } else toast(`Dodano projekt ${basename(path)} — „+” przy nim zaczyna nową sesję.`);
           return;
         }
         case "session_delete": {
@@ -517,6 +523,7 @@ export default function App() {
     },
     [send],
   );
+  newSessionRef.current = newSession;
 
   /**
    * The old transcript stays until the sidecar sends the new one (a "history" event,
@@ -529,7 +536,7 @@ export default function App() {
   };
 
   /** Native folder picker in the app; a typed path in the browser build. Both are checked by the sidecar. */
-  const addProjectFolder = async () => {
+  const addProjectFolder = async (start = false) => {
     let dir: string | null = null;
     if (inTauri()) {
       const picked = await openDialog({ directory: true, multiple: false, title: "Wybierz folder projektu" }).catch(() => null);
@@ -537,7 +544,9 @@ export default function App() {
     } else {
       dir = window.prompt("Ścieżka folderu projektu", state.cwd);
     }
-    if (dir?.trim()) send({ cmd: "dir_check", path: dir.trim() });
+    if (!dir?.trim()) return;
+    startInPickedRef.current = start;
+    send({ cmd: "dir_check", path: dir.trim() });
   };
 
   const openSession = (path: string) => {
@@ -863,6 +872,7 @@ export default function App() {
       branch={state.branch}
       sessions={state.sessions}
       onProject={(cwd) => newSession(cwd)}
+      onPickFolder={() => void addProjectFolder(true)}
       usage={state.usage}
       inputRef={inputRef}
       hero={empty}

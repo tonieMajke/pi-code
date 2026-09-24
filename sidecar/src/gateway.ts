@@ -77,6 +77,7 @@ export class PiGateway {
   private session: AgentSession | null = null;
   /** True from prompt() call until it resolves — covers the gap before isStreaming flips. */
   private running = false;
+  private taste: TasteGuard | null = null;
 
   get ready(): boolean {
     return this.session !== null;
@@ -164,6 +165,8 @@ export class PiGateway {
     // One guard per session: the factory runs once per resource loader.
     const guard = new ConstitutionGuard(() => this.cwd);
     const taste = new TasteGuard(() => this.cwd);
+    this.taste = taste;
+    let stopNoted = false;
     let task = "";
     let reviewed = false;
     const tasteOn = () => cfg().taste.enabled;
@@ -323,6 +326,7 @@ export class PiGateway {
     pi.on("before_agent_start", async (event) => {
       guard.startRun();
       taste.startRun();
+      stopNoted = false;
       if (hasRefs(this.cwd)) taste.markResearched();
       // A picture the user attached is the reference — no search needed.
       if (tasteOn() && event.images?.length) {
@@ -384,6 +388,10 @@ export class PiGateway {
       if (tasteOn()) {
         const t = cfg().taste;
         const step = taste.beforeSettle({ requireAudit: t.requireAudit, critic: t.critic, maxRounds: t.maxRounds, maxAuditNudges: cfg().constitution.maxNudges });
+        if (taste.stoppedByUser && !stopNoted) {
+          stopNoted = true;
+          this.emit({ kind: "guard", label: "Gust: wstrzymany — użytkownik przejął" });
+        }
         if (step?.kind === "nudge") return back(step.nudge.content, step.nudge.label);
         if (step?.kind === "critic") {
           const verdict = await this.critic(task, step.visual, step.target, taste.image).catch((err: unknown) => {
@@ -1233,6 +1241,8 @@ export class PiGateway {
     const s = this.requireSession();
     const imgs = images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
     if (this.busy) {
+      // The user is steering: the taste loop stops pushing its own agenda.
+      this.taste?.userSpoke();
       // SDK rejects guessing while streaming: default to followUp (don't interrupt).
       if ((behavior ?? "followUp") === "steer") await s.steer(text, imgs);
       else await s.followUp(text, imgs);

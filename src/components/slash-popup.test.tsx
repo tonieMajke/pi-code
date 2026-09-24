@@ -34,6 +34,7 @@ function Harness({ onCommand, onNeedPick }: { onCommand: (n: string, a: string) 
       branch=""
       sessions={[]}
       onProject={vi.fn()}
+      onPickFolder={vi.fn()}
       usage={null}
       inputRef={ref}
       hero={false}

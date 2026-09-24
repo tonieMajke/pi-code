@@ -64,6 +64,13 @@ export class TasteGuard {
   private rounds = 0;
   private critiqued = 0;
   private lastImage: { data: string; mimeType: string } | null = null;
+  /** The user wrote during this run (steer / follow-up, "enough, finish"): no more nudges or critic. */
+  private stopped = false;
+  /**
+   * Across runs: a critic loop that ended in ISSUES and was never closed (OK or rounds
+   * used up). The user's next message then means "I've seen it" — not a fresh budget.
+   */
+  private loopOpen = false;
 
   constructor(private readonly cwd: () => string) {}
 
@@ -76,7 +83,13 @@ export class TasteGuard {
     return this.researched;
   }
 
+  /**
+   * A new user message starts a run. If the critic loop was still open, the user has
+   * taken over ("kończ już") — this run gets no audit nudges or critic, and the loop closes.
+   */
   startRun(): void {
+    this.stopped = this.loopOpen;
+    this.loopOpen = false;
     this.seq = 0;
     this.visualSeq = 0;
     this.visual = null;
@@ -110,6 +123,17 @@ export class TasteGuard {
       `Call ${how}. Pick the ones that look best for this task, write the brief.md it asks for, then build to it. ` +
       "If references make no sense here (the user gave one, it's a chart or diagram), say why in one sentence and retry. design_refs is loaded now."
     );
+  }
+
+  /** The user wrote mid-run (steer / follow-up): stop pushing, do what they say. */
+  userSpoke(): void {
+    this.stopped = true;
+    this.loopOpen = false;
+  }
+
+  /** The loop was cut short by the user in this run (for a one-line note in the UI). */
+  get stoppedByUser(): boolean {
+    return this.stopped && this.visual !== null;
   }
 
   /** tool_result: record visual changes, what was looked at, audit results. */
@@ -163,7 +187,7 @@ export class TasteGuard {
    * then one critic round. `criticDone` tells the guard the critic ran (and its verdict).
    */
   beforeSettle(opts: { requireAudit: boolean; critic: boolean; maxRounds: number; maxAuditNudges: number }): SettleStep {
-    if (!this.visual || this.visualSeq === 0) return null;
+    if (this.stopped || !this.visual || this.visualSeq === 0) return null;
     if (this.visual === "ui" && opts.requireAudit && this.auditNudges < opts.maxAuditNudges) {
       const stale = this.auditSeq < this.visualSeq;
       if (stale || this.auditHigh > 0) {
@@ -193,6 +217,7 @@ export class TasteGuard {
     this.critiqued = this.visualSeq;
     this.rounds++;
     if (ok) this.rounds = Number.POSITIVE_INFINITY;
+    this.loopOpen = !ok;
     return { round: this.rounds };
   }
 

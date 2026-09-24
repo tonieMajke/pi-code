@@ -105,4 +105,28 @@ describe("TasteGuard", () => {
     g.afterTool("write", bigWrite("main.py"), false);
     expect(g.beforeSettle(OPTS)).toBeNull();
   });
+
+  it("stops when the user steers mid-run, and the next message after open ISSUES is a takeover", () => {
+    const NO_AUDIT = { ...OPTS, requireAudit: false };
+    const { g } = setup();
+    g.afterTool("write", bigWrite("index.html"), false);
+    expect(g.beforeSettle(NO_AUDIT)).toMatchObject({ kind: "critic" });
+    g.criticDone(false);
+    g.afterTool("write", bigWrite("index.html"), false);
+    g.userSpoke(); // "dobra, kończ już"
+    expect(g.beforeSettle(OPTS)).toBeNull();
+    expect(g.stoppedByUser).toBe(true);
+
+    // Critic said ISSUES, the run ended, the user answers: no fresh budget for that run.
+    const h = setup().g;
+    h.afterTool("write", bigWrite("index.html"), false);
+    h.criticDone(false);
+    h.startRun(); // "kończ i odpal w firefox"
+    h.afterTool("edit", { path: "index.html", edits: [{ newText: "a" }] }, false);
+    expect(h.beforeSettle(OPTS)).toBeNull();
+    // The loop is closed now: the message after that is a new task with the full budget.
+    h.startRun();
+    h.afterTool("write", bigWrite("index.html"), false);
+    expect(h.beforeSettle(NO_AUDIT)).toMatchObject({ kind: "critic" });
+  });
 });

@@ -96,6 +96,16 @@ function prepare(task: string): string {
   return dir;
 }
 
+/** npx → tsx → node: killing only npx orphans the sidecar, so kill the whole group. */
+function killTree(pid: number | undefined): void {
+  if (!pid) return;
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    /* already gone */
+  }
+}
+
 /** One sidecar process per task: clean session state, no cross-talk. */
 async function runTask(task: string, spec: Task, cfgFile: string, runDir: string, n: number): Promise<Result> {
   const cwd = prepare(task);
@@ -103,6 +113,7 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
     cwd: ROOT,
     env: { ...process.env, PI_GUI_CONFIG: cfgFile, PI_GUI_EPHEMERAL: "1" },
     stdio: ["pipe", "pipe", "ignore"],
+    detached: true,
   });
   let id = 0;
   const send = (c: object) => child.stdin.write(`${JSON.stringify({ id: ++id, ...c })}\n`);
@@ -165,7 +176,7 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
   } finally {
     r.seconds = Math.round((Date.now() - t0) / 1000);
     child.stdin.end();
-    child.kill();
+    killTree(child.pid);
   }
   // Hidden tests arrive only now — the model could not tailor code (or tests) to them.
   const hidden = join(TASKS, task, "hidden");
@@ -198,6 +209,7 @@ async function toolNames(): Promise<string[]> {
     cwd: ROOT,
     env: { ...process.env, PI_GUI_EPHEMERAL: "1" },
     stdio: ["pipe", "pipe", "ignore"],
+    detached: true,
   });
   const send = (c: object) => child.stdin.write(`${JSON.stringify(c)}\n`);
   try {
@@ -212,7 +224,7 @@ async function toolNames(): Promise<string[]> {
       send({ id: 1, cmd: "init", cwd });
     });
   } finally {
-    child.kill();
+    killTree(child.pid);
   }
 }
 

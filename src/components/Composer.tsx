@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ArrowUp, Check, ChevronDown, Clock, Cpu, Folder, GitBranch, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Clock, Cpu, Folder, FolderPlus, GitBranch, Paperclip, Square, X } from "lucide-react";
 import type { Attachment, ModelSummary, PermissionMode, SessionSummary, Usage } from "../../shared/protocol";
 import { Menu, type MenuItem } from "./Menu";
 import { basename, formatTokens } from "../lib/format";
@@ -39,6 +39,7 @@ export function Composer({
   branch,
   sessions,
   onProject,
+  onPickFolder,
   usage,
   inputRef,
   hero,
@@ -70,6 +71,8 @@ export function Composer({
   branch: string;
   sessions: SessionSummary[];
   onProject: (cwd: string) => void;
+  /** Pick any folder (native dialog) and start a new session there. */
+  onPickFolder: () => void;
   usage: Usage | null;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   hero: boolean;
@@ -215,6 +218,16 @@ export function Composer({
     active: p === cwd,
     onSelect: () => p !== cwd && onProject(p),
   }));
+  projectItems.push({
+    key: "__pick",
+    label: (
+      <span className="proj-item">
+        <span className="proj-name">Inny folder…</span>
+      </span>
+    ),
+    hint: <FolderPlus size={14} />,
+    onSelect: onPickFolder,
+  });
 
   const modelItems: MenuItem[] = models.map((m) => ({
     key: `${m.provider}/${m.id}`,
