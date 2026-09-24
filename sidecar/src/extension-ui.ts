@@ -13,6 +13,8 @@ type UiRequestBody = WithoutId<UiRequest>;
  */
 export class ExtensionDialogs {
   private pending = new Map<string, (a: UiAnswer) => void>();
+  /** Open questions, so a session brought back from the background can show them again. */
+  private requests = new Map<string, UiRequest>();
 
   constructor(private readonly emit: (e: PiEvent) => void) {}
 
@@ -21,7 +23,16 @@ export class ExtensionDialogs {
     const resolve = this.pending.get(id);
     if (!resolve) return;
     this.pending.delete(id);
+    this.requests.delete(id);
     resolve(answer);
+  }
+
+  get open(): UiRequest[] {
+    return [...this.requests.values()];
+  }
+
+  has(id: string): boolean {
+    return this.pending.has(id);
   }
 
   /** Cancel every open dialog (run aborted, session swapped). */
@@ -48,7 +59,9 @@ export class ExtensionDialogs {
         opts?.signal?.removeEventListener("abort", onAbort);
         resolve(a);
       });
-      this.emit({ kind: "ui_request", request: { id, ...request } as UiRequest });
+      const full = { id, ...request } as UiRequest;
+      this.requests.set(id, full);
+      this.emit({ kind: "ui_request", request: full });
     });
   }
 

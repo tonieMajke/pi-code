@@ -26,7 +26,7 @@ function out(msg: SidecarOut): void {
   process.stdout.write(`${JSON.stringify(msg)}\n`);
 }
 
-const emit = (e: PiEvent) => out({ event: e });
+const emit = (e: PiEvent, session?: string) => out(session ? { event: e, session } : { event: e });
 
 function reply(id: number, cmd: CommandName | undefined, ok: boolean, result?: unknown, error?: string): void {
   out(ok ? { id, cmd, ok: true, result } : { id, cmd, ok: false, error: error ?? "unknown error" });
@@ -111,7 +111,7 @@ async function handle(cmd: ClientCommand): Promise<void> {
         // prompt() resolves only when the whole run ends. Don't hold the command
         // queue for that long — abort/steer/sessions_list must get through meanwhile.
         gateway
-          .prompt(cmd.text, cmd.images, cmd.behavior)
+          .prompt(cmd.text, cmd.images, cmd.behavior, cmd.session)
           .then(() => reply(cmd.id, cmd.cmd, true, { done: true }))
           .catch((err) => reply(cmd.id, cmd.cmd, false, undefined, errText(err)));
         return;
@@ -124,7 +124,9 @@ async function handle(cmd: ClientCommand): Promise<void> {
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
       case "abort":
-        await gateway.abort();
+        // From the sidebar: a background session is also released from memory.
+        if (cmd.session) await gateway.stopSession(cmd.session);
+        else await gateway.abort();
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
       case "status":
@@ -133,21 +135,26 @@ async function handle(cmd: ClientCommand): Promise<void> {
       case "sessions_list":
         reply(cmd.id, cmd.cmd, true, await gateway.listSessions());
         return;
-      case "session_open":
+      case "session_open": {
         requireReady();
-        await gateway.abort();
-        await gateway.openSession(emit, cmd.path);
+        // A working session goes to the background, unless that exceeds the local-model limit.
+        const blocked = await gateway.prepareSwitch(cmd.stop);
+        if (blocked) return reply(cmd.id, cmd.cmd, true, { blocked });
+        await gateway.openSession(cmd.path);
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
-      case "session_new":
+      }
+      case "session_new": {
         requireReady();
-        await gateway.abort();
-        await gateway.newSession(emit, cmd.cwd);
+        const blocked = await gateway.prepareSwitch(cmd.stop);
+        if (blocked) return reply(cmd.id, cmd.cmd, true, { blocked });
+        await gateway.newSession(cmd.cwd);
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
+      }
       case "session_rename":
         requireReady();
-        await gateway.rename(emit, cmd.name);
+        await gateway.rename(cmd.name);
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
       case "history":
@@ -160,12 +167,12 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "model_set":
         requireReady();
-        await gateway.setModel(emit, cmd.provider, cmd.modelId);
+        await gateway.setModel(cmd.provider, cmd.modelId);
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
       case "rewind":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, { text: await gateway.rewind(emit, cmd.fromEnd) });
+        reply(cmd.id, cmd.cmd, true, { text: await gateway.rewind(cmd.fromEnd) });
         return;
       case "git_changes":
         reply(cmd.id, cmd.cmd, true, await gitChanges(gateway.workingDir));
@@ -221,11 +228,11 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "settings_set":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, await gateway.updateSettings(emit, cmd.patch));
+        reply(cmd.id, cmd.cmd, true, await gateway.updateSettings(cmd.patch));
         return;
       case "compact":
         requireReady();
-        await gateway.compact(emit, cmd.instructions);
+        await gateway.compact(cmd.instructions);
         reply(cmd.id, cmd.cmd, true, gateway.settings());
         return;
       case "escalate":
@@ -250,11 +257,11 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "session_fork":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, { text: await gateway.fork(emit, cmd.entryId) });
+        reply(cmd.id, cmd.cmd, true, { text: await gateway.fork(cmd.entryId) });
         return;
       case "session_clone":
         requireReady();
-        await gateway.clone(emit);
+        await gateway.clone();
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
       case "sidebar_get":
@@ -267,7 +274,7 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "session_delete":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, await gateway.deleteSession(emit, cmd.path));
+        reply(cmd.id, cmd.cmd, true, await gateway.deleteSession(cmd.path));
         return;
       case "dir_check":
         reply(cmd.id, cmd.cmd, true, { path: checkDir(cmd.path) });
@@ -278,7 +285,7 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "session_handoff":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, await gateway.handoff(emit, cmd.goal ?? ""));
+        reply(cmd.id, cmd.cmd, true, await gateway.handoff(cmd.goal ?? ""));
         return;
       case "session_stats":
         requireReady();
@@ -290,7 +297,7 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "reload":
         requireReady();
-        await gateway.reload(emit);
+        await gateway.reload();
         reply(cmd.id, cmd.cmd, true, gateway.commands());
         return;
       case "ui_response":
@@ -323,11 +330,11 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "provider_key":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, await gateway.providerKey(emit, cmd.provider, cmd.key));
+        reply(cmd.id, cmd.cmd, true, await gateway.providerKey(cmd.provider, cmd.key));
         return;
       case "provider_logout":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, await gateway.providerLogout(emit, cmd.provider));
+        reply(cmd.id, cmd.cmd, true, await gateway.providerLogout(cmd.provider));
         return;
       case "endpoint_probe":
         requireReady();
@@ -335,11 +342,11 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "endpoint_add":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, await gateway.addEndpoint(emit, cmd.endpoint));
+        reply(cmd.id, cmd.cmd, true, await gateway.addEndpoint(cmd.endpoint));
         return;
       case "endpoint_remove":
         requireReady();
-        reply(cmd.id, cmd.cmd, true, await gateway.removeEndpoint(emit, cmd.name));
+        reply(cmd.id, cmd.cmd, true, await gateway.removeEndpoint(cmd.name));
         return;
       case "onboarding_get":
         requireReady();

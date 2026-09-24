@@ -44,21 +44,21 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
     case "onboarding_done":
       return { id, cmd: "onboarding_done" };
     case "prompt":
-      return { id, cmd: "prompt", text: cmd.text, images: cmd.images, behavior: cmd.behavior };
+      return { id, cmd: "prompt", text: cmd.text, images: cmd.images, behavior: cmd.behavior, session: cmd.session };
     case "mode_set":
       return { id, cmd: "mode_set", mode: cmd.mode };
     case "approve":
-      return { id, cmd: "approve", toolCallId: cmd.toolCallId, decision: cmd.decision, reason: cmd.reason };
+      return { id, cmd: "approve", toolCallId: cmd.toolCallId, decision: cmd.decision, reason: cmd.reason, session: cmd.session };
     case "abort":
-      return { id, cmd: "abort" };
+      return { id, cmd: "abort", session: cmd.session };
     case "status":
       return { id, cmd: "status" };
     case "sessions_list":
       return { id, cmd: "sessions_list", cwd: cmd.cwd };
     case "session_open":
-      return { id, cmd: "session_open", path: cmd.path };
+      return { id, cmd: "session_open", path: cmd.path, stop: cmd.stop };
     case "session_new":
-      return { id, cmd: "session_new", cwd: cmd.cwd };
+      return { id, cmd: "session_new", cwd: cmd.cwd, stop: cmd.stop };
     case "session_rename":
       return { id, cmd: "session_rename", name: cmd.name };
     case "history":
@@ -120,7 +120,7 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
     case "reload":
       return { id, cmd: "reload" };
     case "ui_response":
-      return { id, cmd: "ui_response", requestId: cmd.requestId, answer: cmd.answer };
+      return { id, cmd: "ui_response", requestId: cmd.requestId, answer: cmd.answer, session: cmd.session };
     case "escalate":
       return { id, cmd: "escalate", model: cmd.model, reason: cmd.reason };
     case "checkpoint_restore":

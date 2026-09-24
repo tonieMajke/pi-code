@@ -181,4 +181,7 @@ export const EN: Record<string, string> = {
   "Commit": "Commit",
   "opis commitu": "commit message",
   "Zatwierdzono {commit}: {subject}": "Committed {commit}: {subject}",
+  "Nowa sesja": "New session",
+  "tej sesji nie ma już w pamięci": "this session is no longer in memory",
+  "inna sesja pracuje na tym modelu — spróbuj, gdy skończy": "another session is working on this model — try when it finishes",
 };

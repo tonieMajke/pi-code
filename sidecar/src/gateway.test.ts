@@ -5,15 +5,19 @@ import { describe, expect, it } from "vitest";
 import type { PiEvent } from "../../shared/protocol";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PiGateway } from "./gateway";
+import { SessionHost, type HostEnv } from "./session-host";
 
 /** Fake AgentSession: captures the subscriber, lets tests push SDK events. */
 function fakeSession() {
   let listener: ((e: unknown) => void) | null = null;
   return {
-    state: { isStreaming: false },
-    model: { id: "test/model" },
+    state: { isStreaming: false, messages: [] as unknown[] },
+    model: { id: "test/model" } as Record<string, unknown>,
     sessionId: "fake-id",
+    sessionFile: undefined as string | undefined,
+    sessionName: "",
     dispose() {},
+    abort: async () => undefined,
     getContextUsage: () => ({ tokens: 1200, contextWindow: 8000, percent: 15 }),
     getSessionStats: () => ({ tokens: { input: 900, output: 300 } }),
     systemPrompt: "x".repeat(400),
@@ -34,14 +38,45 @@ function fakeSession() {
   };
 }
 
-/** Wire a fake session into the gateway and return [session, events]. */
-function wire(): { session: ReturnType<typeof fakeSession>; events: PiEvent[] } {
+type Internal = {
+  env: HostEnv;
+  hosts: Map<string, SessionHost>;
+  active: SessionHost | null;
+  out: (e: PiEvent, session?: string) => void;
+  services: unknown;
+  config: unknown;
+  startSession: (...a: unknown[]) => Promise<void>;
+  newSession: (...a: unknown[]) => Promise<void>;
+};
+
+/** Gateway with its output captured; session_status (sidebar markers) kept apart from the transcript events. */
+function gateway(limit = 2) {
   const gw = new PiGateway();
-  const session = fakeSession();
+  const internal = gw as unknown as Internal;
   const events: PiEvent[] = [];
-  const internal = gw as unknown as { session: unknown; subscribe(s: unknown, cb: (e: PiEvent) => void): void };
-  internal.session = session; // events from a non-active session are dropped
-  internal.subscribe(session, (e: PiEvent) => events.push(e));
+  const statuses: { session?: string; status: string }[] = [];
+  const all: { e: PiEvent; session?: string }[] = [];
+  internal.out = (e, session) => {
+    all.push({ e, session });
+    if (e.kind === "session_status") statuses.push({ session, status: e.status });
+    else events.push(e);
+  };
+  internal.config = { get: () => ({ background: { localLimit: limit }, memory: { enabled: false, learn: false } }) };
+  /** A fake session as a live host; the first one added (or `active`) is on screen. */
+  const add = (session: ReturnType<typeof fakeSession> & Record<string, unknown>, active = !internal.active) => {
+    const host = SessionHost.adopt(internal.env, "/w", session as never);
+    internal.hosts.set(host.id, host);
+    if (active) internal.active = host;
+    return host;
+  };
+  return { gw, internal, events, statuses, all, add };
+}
+
+/** Wire a fake session into the gateway as the session on screen. */
+function wire(): { session: ReturnType<typeof fakeSession>; events: PiEvent[] } {
+  const { events, add } = gateway();
+  const session = fakeSession();
+  add(session);
   return { session, events };
 }
 
@@ -146,22 +181,24 @@ describe("PiGateway event normalization", () => {
     expect(events).toEqual([]);
   });
 
-  it("drops events from a session that is no longer active", () => {
-    const gw = new PiGateway();
-    const old = fakeSession();
-    const events: PiEvent[] = [];
-    const internal = gw as unknown as { session: unknown; subscribe(s: unknown, cb: (e: PiEvent) => void): void };
-    internal.session = old;
-    internal.subscribe(old, (e: PiEvent) => events.push(e));
-    internal.session = fakeSession(); // user switched sessions
+  it("a background session's transcript events stay in the sidecar; its status goes out", () => {
+    const { internal, all, add } = gateway();
+    const old = { ...fakeSession(), sessionId: "old" };
+    const oldHost = add(old);
+    add({ ...fakeSession(), sessionId: "new" }, true); // user switched sessions
     old.push({ type: "turn_start" });
-    expect(events).toEqual([]);
+    old.push({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } });
+    oldHost.setStatus("approval");
+    expect(all).toEqual([{ e: { kind: "session_status", session: "old", path: "", title: "", status: "approval" }, session: "old" }]);
+    // on screen: everything, tagged with the session
+    internal.active = oldHost;
+    old.push({ type: "turn_start" });
+    expect(all[1]).toEqual({ e: { kind: "turn_start" }, session: "old" });
   });
 });
 
 describe("PiGateway.history", () => {
   it("keeps thinking/text/tool order and merges consecutive assistant messages into one turn", () => {
-    const gw = new PiGateway();
     const session = fakeSession();
     (session.state as unknown as { messages: unknown[] }).messages = [
       { role: "user", content: "zrób ls" },
@@ -184,8 +221,9 @@ describe("PiGateway.history", () => {
         { type: "custom", customType: "pi-gui-stats", data: { after: 42, stats: [stats] } },
       ],
     };
-    (gw as unknown as { session: unknown }).session = session;
-    expect(gw.history()).toEqual([
+    const g = gateway();
+    g.add(session);
+    expect(g.gw.history()).toEqual([
       { role: "user", text: "zrób ls" },
       {
         role: "assistant",
@@ -203,13 +241,9 @@ describe("PiGateway.history", () => {
 
 describe("PiGateway slash commands", () => {
   function withSession(extra: Record<string, unknown>) {
-    const gw = new PiGateway();
+    const { gw, events, add } = gateway();
     const session = { ...fakeSession(), ...extra };
-    const events: PiEvent[] = [];
-    const internal = gw as unknown as { session: unknown; emit: (e: PiEvent) => void; subscribe(s: unknown, cb: (e: PiEvent) => void): void };
-    internal.session = session;
-    internal.emit = (e) => events.push(e);
-    internal.subscribe(session, (e) => events.push(e));
+    add(session);
     return { gw, session, events };
   }
 
@@ -254,10 +288,9 @@ describe("PiGateway slash commands", () => {
 describe("PiGateway handoff", () => {
   function setup(complete: (ctx: unknown, opts: { signal: AbortSignal }) => Promise<unknown>) {
     const dir = mkdtempSync(join(tmpdir(), "pi-gui-handoff-"));
-    const gw = new PiGateway();
+    const { gw, internal, add } = gateway();
     const started: unknown[] = [];
-    const internal = gw as unknown as { session: unknown; startSession: (...a: unknown[]) => Promise<void> };
-    internal.session = {
+    add({
       ...fakeSession(),
       sessionName: "Stara sesja",
       sessionFile: undefined,
@@ -267,7 +300,7 @@ describe("PiGateway handoff", () => {
         getSessionDir: () => dir,
       },
       modelRuntime: { complete: (_m: unknown, ctx: unknown, opts: { signal: AbortSignal }) => complete(ctx, opts) },
-    };
+    });
     internal.startSession = async (...a: unknown[]) => {
       started.push(a);
     };
@@ -281,7 +314,7 @@ describe("PiGateway handoff", () => {
       return { stopReason: "stop", content: [{ type: "text", text: "## Kontekst\nparser CSV" }] };
     });
     try {
-      const res = await gw.handoff(() => {}, "dodaj testy");
+      const res = await gw.handoff("dodaj testy");
       expect(res).toEqual({ prompt: "## Kontekst\nparser CSV", from: "Stara sesja" });
       expect(seen).toContain("Zrób parser CSV");
       expect(seen).toContain("dodaj testy");
@@ -296,7 +329,7 @@ describe("PiGateway handoff", () => {
       (_ctx, { signal }) => new Promise((resolve) => signal.addEventListener("abort", () => resolve({ stopReason: "aborted", content: [] }))),
     );
     try {
-      const run = gw.handoff(() => {}, "");
+      const run = gw.handoff("");
       await gw.abort();
       await expect(run).rejects.toThrow(/przerwany/);
       expect(started).toHaveLength(0);
@@ -331,15 +364,13 @@ describe("PiGateway opening a session", () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-gui-open-"));
     try {
       const file = sessionFile(dir);
-      const gw = new PiGateway();
-      const internal = gw as unknown as { services: unknown; startSession: () => Promise<void> };
+      const { gw, internal, events } = gateway();
       internal.services = {};
       let startedAfter = -1;
-      const events: PiEvent[] = [];
       internal.startSession = async () => {
         startedAfter = events.length;
       };
-      await gw.openSession((e) => events.push(e), file);
+      await gw.openSession(file);
       expect(startedAfter).toBe(1);
       const h = events[0];
       if (h.kind !== "history") throw new Error("expected history first");
@@ -366,22 +397,21 @@ describe("PiGateway deleting a session", () => {
     const file = join(dir, "s.jsonl");
     writeFileSync(file, "{}\n");
     process.env.PI_GUI_SIDEBAR = join(agentDir, "sidebar.json");
-    const gw = new PiGateway();
-    const internal = gw as unknown as { services: unknown; newSession: () => Promise<void>; session: unknown };
+    const { gw, internal, add } = gateway();
     internal.services = { agentDir };
     gw.trashFile = async (f) => rmSync(f);
     let fresh = 0;
     internal.newSession = async () => {
       fresh++;
     };
-    return { gw, internal, agentDir, file, fresh: () => fresh, cleanup: () => rmSync(agentDir, { recursive: true, force: true }) };
+    return { gw, internal, add, agentDir, file, fresh: () => fresh, cleanup: () => rmSync(agentDir, { recursive: true, force: true }) };
   }
 
   it("refuses anything that is not a pi session file", async () => {
     const { gw, agentDir, cleanup } = setup();
     try {
-      await expect(gw.deleteSession(() => {}, join(agentDir, "settings.json"))).rejects.toThrow(/nie jest plik sesji/);
-      await expect(gw.deleteSession(() => {}, join(agentDir, "sessions", "..", "x.jsonl"))).rejects.toThrow(/nie jest plik sesji/);
+      await expect(gw.deleteSession(join(agentDir, "settings.json"))).rejects.toThrow(/nie jest plik sesji/);
+      await expect(gw.deleteSession(join(agentDir, "sessions", "..", "x.jsonl"))).rejects.toThrow(/nie jest plik sesji/);
     } finally {
       cleanup();
       delete process.env.PI_GUI_SIDEBAR;
@@ -389,11 +419,12 @@ describe("PiGateway deleting a session", () => {
   });
 
   it("moves the file to the trash, leaves groups, and replaces the open session", async () => {
-    const { gw, internal, file, fresh, cleanup } = setup();
+    const { gw, internal, add, file, fresh, cleanup } = setup();
     try {
       gw.sidebar.set({ groups: [{ id: "g", name: "G", sessions: [file] }], projects: [] });
-      internal.session = { ...fakeSession(), sessionFile: file, abort: async () => {} };
-      expect(await gw.deleteSession(() => {}, file)).toEqual({ path: file, active: true });
+      const host = add({ ...fakeSession(), sessionFile: file });
+      expect(await gw.deleteSession(file)).toEqual({ path: file, active: true });
+      expect(internal.hosts.has(host.id)).toBe(false); // released, not kept as an idle session
       expect(existsSync(file)).toBe(false);
       expect(gw.sidebar.get().groups[0].sessions).toEqual([]);
       expect(fresh()).toBe(1);
@@ -404,3 +435,119 @@ describe("PiGateway deleting a session", () => {
   });
 });
 
+
+describe("PiGateway background sessions", () => {
+  const LOCAL = { id: "swift", provider: "llama", baseUrl: "http://127.0.0.1:8080/v1" };
+  const API = { id: "claude", provider: "anthropic", baseUrl: "https://api.anthropic.com" };
+  /** A session in the middle of a run (isStreaming) on the given model. */
+  const working = (id: string, model: Record<string, unknown>, extra: Record<string, unknown> = {}) => {
+    const s = { ...fakeSession(), sessionId: id, model, ...extra };
+    s.state.isStreaming = true;
+    let aborted = false;
+    Object.assign(s, {
+      abort: async () => {
+        aborted = true;
+        s.state.isStreaming = false;
+      },
+    });
+    return Object.assign(s, { wasAborted: () => aborted });
+  };
+
+  it("an API-model run always goes to the background", async () => {
+    const { gw, add } = gateway(0);
+    add(working("a", API));
+    expect(await gw.prepareSwitch()).toBeNull();
+  });
+
+  it("local runs: up to the limit in the background, then the user picks one to stop", async () => {
+    const { gw, add } = gateway(2);
+    add(working("cur", LOCAL, { sessionName: "Na ekranie" }));
+    add(working("bg1", LOCAL, { sessionName: "Pierwsza" }), false);
+    expect(await gw.prepareSwitch()).toBeNull(); // 1 of 2 in the background
+    add(working("bg2", LOCAL, { sessionName: "Druga" }), false);
+    add(working("api", API), false); // API runs don't count
+    expect(await gw.prepareSwitch()).toEqual({
+      limit: 2,
+      running: [
+        { session: "cur", title: "Na ekranie", active: true },
+        { session: "bg1", title: "Pierwsza", active: false },
+        { session: "bg2", title: "Druga", active: false },
+      ],
+    });
+  });
+
+  it("the chosen one is stopped and released; limit 0 stops the one being left, like before", async () => {
+    const { gw, internal, add, events } = gateway(1);
+    const cur = working("cur", LOCAL);
+    const bg = working("bg", LOCAL);
+    add(cur);
+    add(bg, false);
+    expect(await gw.prepareSwitch("bg")).toBeNull();
+    expect(bg.wasAborted()).toBe(true);
+    expect(internal.hosts.has("bg")).toBe(false);
+    expect(events).toContainEqual({ kind: "session_closed", session: "bg", path: "" });
+
+    const zero = gateway(0);
+    const leaving = working("x", LOCAL);
+    zero.add(leaving);
+    expect(await zero.gw.prepareSwitch()).toBeNull();
+    expect(leaving.wasAborted()).toBe(true);
+  });
+
+  it("an approval answer reaches the session that asked, even in the background", async () => {
+    const { gw, internal, add } = gateway();
+    add({ ...fakeSession(), sessionId: "front" });
+    const bg = add({ ...fakeSession(), sessionId: "back" }, false);
+    const answer = (bg as unknown as { gate(id: string, tool: string, input: object): Promise<unknown> }).gate("call-1", "bash", { command: "rm -rf x" });
+    await Promise.resolve();
+    expect(bg.status).toBe("approval");
+    expect(internal.active?.hasApproval("call-1")).toBe(false);
+    gw.approve("call-1", "deny", "nie");
+    await expect(answer).resolves.toMatchObject({ block: true });
+  });
+
+  it("finished sessions beyond two are released, oldest first", async () => {
+    const { internal, add } = gateway();
+    add({ ...fakeSession(), sessionId: "front" });
+    const idle = ["i1", "i2", "i3"].map((id, n) => {
+      const h = add({ ...fakeSession(), sessionId: id }, false);
+      h.lastSeen = 1000 + n; // i1 oldest
+      return h;
+    });
+    (internal as unknown as { trimIdle(): void }).trimIdle();
+    await new Promise((r) => setTimeout(r, 0));
+    expect([...internal.hosts.keys()].sort()).toEqual(["front", "i2", "i3"]);
+    expect(idle[0].isDisposed).toBe(true);
+  });
+
+  it("a session from memory comes back with its live transcript, open turn and pending approval", async () => {
+    const { gw, internal, add, events } = gateway();
+    internal.services = {};
+    add({ ...fakeSession(), sessionId: "front" });
+    const s = working("back", LOCAL, { sessionFile: "/s/back.jsonl" });
+    s.state.messages = [{ role: "user", content: "zrób to", timestamp: 1 }];
+    Object.assign(s.state, {
+      streamingMessage: { role: "assistant", content: [{ type: "text", text: "Robię" }, { type: "toolCall", id: "t1", name: "bash", arguments: {} }], timestamp: 2 },
+      pendingToolCalls: new Set(["t1"]),
+    });
+    (s as unknown as { sessionManager: unknown }).sessionManager = { getEntries: () => [] };
+    const host = add(s, false);
+    void (host as unknown as { gate(id: string, tool: string, input: object): Promise<unknown> }).gate("t1", "bash", { command: "touch x" });
+    await Promise.resolve();
+    events.length = 0;
+    await gw.openSession("/s/back.jsonl");
+    expect(internal.active).toBe(host);
+    const h = events[0];
+    if (h.kind !== "history") throw new Error("expected history first");
+    expect(h.busy).toBe(true);
+    expect(h.items[1]).toEqual({
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Robię" },
+        { type: "tool", tool: { id: "t1", name: "bash", args: {}, status: "running", summary: "" } },
+      ],
+    });
+    await new Promise((r) => setTimeout(r, 20)); // emitInit reads the git branch
+    expect(events).toContainEqual({ kind: "approval_request", toolCallId: "t1", toolName: "bash", args: { command: "touch x" } });
+  });
+});

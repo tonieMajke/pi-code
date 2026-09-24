@@ -21,6 +21,7 @@ export const DEFAULT_CONFIG: GuiConfig = {
   },
   taste: { enabled: true, research: "auto", critic: true, criticModel: "", maxRounds: 2, requireAudit: true, criticSlot: null },
   memory: { enabled: true, learn: true },
+  background: { localLimit: 2 },
   onboarded: false,
 };
 
@@ -58,6 +59,7 @@ export class GuiConfigStore {
       sampling: { ...DEFAULT_CONFIG.sampling, ...raw.sampling },
       taste: { ...DEFAULT_CONFIG.taste, ...raw.taste },
       memory: { ...DEFAULT_CONFIG.memory, ...raw.memory },
+      background: { ...DEFAULT_CONFIG.background, ...raw.background },
       onboarded: raw.onboarded === true,
     };
   }

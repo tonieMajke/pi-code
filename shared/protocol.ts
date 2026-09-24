@@ -20,14 +20,20 @@ export type ClientCommand =
   | { id: number; cmd: "init"; cwd?: string; sessionFile?: string; lang?: Lang }
   /** UI language changed: sidecar messages and tool labels follow. */
   | { id: number; cmd: "lang_set"; lang: Lang }
-  | { id: number; cmd: "prompt"; text: string; images?: Attachment[]; behavior?: "steer" | "followUp" }
+  /** `session` (sessionId) on prompt/abort/approve/ui_response: default = the session on screen. */
+  | { id: number; cmd: "prompt"; text: string; images?: Attachment[]; behavior?: "steer" | "followUp"; session?: string }
   | { id: number; cmd: "mode_set"; mode: PermissionMode }
-  | { id: number; cmd: "approve"; toolCallId: string; decision: ApprovalDecision; reason?: string }
-  | { id: number; cmd: "abort" }
+  | { id: number; cmd: "approve"; toolCallId: string; decision: ApprovalDecision; reason?: string; session?: string }
+  | { id: number; cmd: "abort"; session?: string }
   | { id: number; cmd: "status" }
   | { id: number; cmd: "sessions_list"; cwd?: string }
-  | { id: number; cmd: "session_open"; path: string }
-  | { id: number; cmd: "session_new"; cwd?: string }
+  /**
+   * Switch sessions. A working session on screen goes to the background unless the local-model
+   * limit is reached: then the reply is {blocked} and nothing happens until the UI sends the
+   * command again with `stop` = the session the user chose to stop. Otherwise {done: true}.
+   */
+  | { id: number; cmd: "session_open"; path: string; stop?: string }
+  | { id: number; cmd: "session_new"; cwd?: string; stop?: string }
   | { id: number; cmd: "session_rename"; name: string }
   | { id: number; cmd: "history" }
   | { id: number; cmd: "models_list" }
@@ -72,7 +78,7 @@ export type ClientCommand =
   /** Re-read extensions, skills, prompt templates and context files. */
   | { id: number; cmd: "reload" }
   /** Answer to an extension dialog (ui_request). */
-  | { id: number; cmd: "ui_response"; requestId: string; answer: UiAnswer }
+  | { id: number; cmd: "ui_response"; requestId: string; answer: UiAnswer; session?: string }
   /** Hand the current task to a stronger model ("provider/id"). */
   | { id: number; cmd: "escalate"; model: string; reason: string }
   | { id: number; cmd: "checkpoint_restore"; checkpoint: string }
@@ -105,6 +111,16 @@ export type ClientCommand =
 
 export type { Lang } from "./i18n.js";
 import type { Lang } from "./i18n.js";
+
+/** What a session in memory is doing — the sidebar marker. done/error = finished while not on screen. */
+export type SessionStatus = "working" | "slot" | "approval" | "done" | "error" | "idle";
+
+/** Reply to session_open/session_new when switching would exceed the local background limit. */
+export type BackgroundBlock = {
+  limit: number;
+  /** Working sessions on local models the user may stop, the one on screen first. */
+  running: { session: string; title: string; active: boolean }[];
+};
 
 /** One remembered fact about the user (see sidecar/src/memory.ts). */
 export type MemoryEntry = { id: string; date: string; text: string };
@@ -263,6 +279,13 @@ export type GuiConfig = {
   };
   sampling: SamplingConfig;
   taste: TasteConfig;
+  background: {
+    /**
+     * Working sessions on local models (private-network servers) that may run while another
+     * session is on screen; 0 = leaving a working session stops it. API models have no limit.
+     */
+    localLimit: number;
+  };
   memory: {
     /** Remembered facts go into every session's system prompt. */
     enabled: boolean;
@@ -344,6 +367,7 @@ export type SettingsPatch = {
   taste?: Partial<TasteConfig>;
   sampling?: Partial<SamplingConfig>;
   memory?: Partial<GuiConfig["memory"]>;
+  background?: Partial<GuiConfig["background"]>;
   /** Auto-compact threshold for the current model; 0 = pi's default. */
   compactAt?: number;
 };
@@ -376,7 +400,8 @@ export type HistoryTool = {
   id: string;
   name: string;
   args: unknown;
-  status: "ok" | "error";
+  /** running: a background session is executing it right now. */
+  status: "ok" | "error" | "running";
   summary: string;
   images?: Attachment[];
 };
@@ -441,6 +466,8 @@ export type RequestRole = "main" | "critic" | "reviewer" | "handoff" | "memory" 
 
 /** Per-request llama.cpp timings (from the streamed `timings` / `prompt_progress`). */
 export type Perf =
+  /** Sent, but the server is busy with another session's request on the same model (one slot). */
+  | { phase: "waiting" }
   | { phase: "prompt"; processed: number; total: number; cache: number; perSec: number }
   | { phase: "gen"; tokens: number; perSec: number; avgPerSec: number }
   | {
@@ -530,7 +557,15 @@ export type PiEvent =
   | { kind: "agent_end" }
   | { kind: "settled" }
   /** Transcript of a session being opened, sent before the session itself is ready. */
-  | { kind: "history"; sessionPath: string; items: HistoryItem[] }
+  | {
+      kind: "history";
+      sessionPath: string;
+      items: HistoryItem[];
+      /** A background session brought back mid-run: the last turn is still open. */
+      busy?: boolean;
+      /** ms timestamp the run started. */
+      since?: number;
+    }
   | { kind: "queue"; steering: number; followUp: number }
   | { kind: "usage"; usage: Usage }
   | { kind: "guard"; label: string }
@@ -554,9 +589,14 @@ export type PiEvent =
   /** An extension switched or rewound the session — reload the transcript and the session list. */
   | { kind: "session_changed" }
   /** The dialog was closed from the sidecar side (timeout, abort). */
-  | { kind: "ui_done"; id: string };
+  | { kind: "ui_done"; id: string }
+  /** A session kept in memory changed state (sent for background and on-screen sessions). */
+  | { kind: "session_status"; session: string; path: string; title: string; status: SessionStatus }
+  /** A session was released from memory (stopped, evicted, deleted). */
+  | { kind: "session_closed"; session: string; path: string };
 
 export type SidecarOut =
   | { id: number; cmd?: CommandName; ok: true; result?: unknown }
   | { id: number; cmd?: CommandName; ok: false; error: string }
-  | { event: PiEvent };
+  /** session: sessionId of the session the event belongs to (absent for global events). */
+  | { event: PiEvent; session?: string };

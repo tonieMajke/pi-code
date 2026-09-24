@@ -172,6 +172,32 @@ function isPrivateHost(host: string): boolean {
   );
 }
 
+/** A model served from this machine or the private network (llama.cpp, vLLM, Ollama…), not a paid API. */
+export function isLocalBaseUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    return isPrivateHost(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Requests in flight per server+model. With --parallel 1 a second request waits for the
+ * first to finish; the UI says so ("czeka na slot") instead of looking frozen.
+ */
+const inFlight = new Map<string, number>();
+
+export function slotBusy(key: string): boolean {
+  return (inFlight.get(key) ?? 0) > 0;
+}
+
+function track(key: string, delta: 1 | -1): void {
+  const n = (inFlight.get(key) ?? 0) + delta;
+  if (n > 0) inFlight.set(key, n);
+  else inFlight.delete(key);
+}
+
 export function chatCompletionOrigin(url: string): string | null {
   try {
     const u = new URL(url);
@@ -262,10 +288,22 @@ export function installFetchTap(): void {
       return orig(input, init);
     }
     const sentAt = Date.now();
-    const res = await orig(input, { ...init, body });
-    if (!res.ok || !res.body) return res;
+    const key = `${origin}|${model}`;
+    if (slotBusy(key)) listener?.({ phase: "waiting" }, ctx);
+    track(key, 1);
+    let res: Response;
+    try {
+      res = await orig(input, { ...init, body });
+    } catch (err) {
+      track(key, -1);
+      throw err;
+    }
+    if (!res.ok || !res.body) {
+      track(key, -1);
+      return res;
+    }
     const [forPi, forUs] = res.body.tee();
-    void consume(forUs, { ctx, model, sentAt });
+    void consume(forUs, { ctx, model, sentAt }).finally(() => track(key, -1));
     return new Response(forPi, { status: res.status, statusText: res.statusText, headers: res.headers });
   };
 }
