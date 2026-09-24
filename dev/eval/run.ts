@@ -57,7 +57,13 @@ const PROFILES: Record<string, Partial<GuiConfig>> = {
     tools: Object.fromEntries(["*"].map((k) => [k, "always" as const])),
   },
   "no-review": { review: { enabled: false, model: "" } },
+  "no-editfix": {},
   "no-taste": { taste: { enabled: false, research: "off", critic: false, criticModel: "", maxRounds: 3, requireAudit: false, criticSlot: null } },
+};
+
+/** Switches that live in the environment, not the config (eval-only A/B knobs). */
+const PROFILE_ENV: Record<string, Record<string, string>> = {
+  "no-editfix": { PI_GUI_NO_EDITFIX: "1" },
 };
 
 /** One folder per eval run: the JSON plus screenshots of visual tasks. */
@@ -107,11 +113,11 @@ function killTree(pid: number | undefined): void {
 }
 
 /** One sidecar process per task: clean session state, no cross-talk. */
-async function runTask(task: string, spec: Task, cfgFile: string, runDir: string, n: number): Promise<Result> {
+async function runTask(task: string, spec: Task, cfgFile: string, runDir: string, n: number, extraEnv: Record<string, string> = {}): Promise<Result> {
   const cwd = prepare(task);
   const child = spawn("npx", ["tsx", join(ROOT, "sidecar/src/main.ts")], {
     cwd: ROOT,
-    env: { ...process.env, PI_GUI_CONFIG: cfgFile, PI_GUI_EPHEMERAL: "1" },
+    env: { ...process.env, ...extraEnv, PI_GUI_CONFIG: cfgFile, PI_GUI_EPHEMERAL: "1" },
     stdio: ["pipe", "pipe", "ignore"],
     detached: true,
   });
@@ -240,7 +246,7 @@ async function main() {
   for (let i = 0; i < repeat; i++) {
     for (const task of tasks) {
       const spec = JSON.parse(readFileSync(join(TASKS, task, "task.json"), "utf8")) as Task;
-      const r = await runTask(task, spec, cfg, runDir, i);
+      const r = await runTask(task, spec, cfg, runDir, i, PROFILE_ENV[profile]);
       results.push(r);
       console.log(
         `${r.pass ? "PASS" : "FAIL"}  ${task.padEnd(16)} ${String(r.seconds).padStart(4)}s  tools ${String(r.toolCalls).padStart(2)} (err ${r.toolErrors})` +

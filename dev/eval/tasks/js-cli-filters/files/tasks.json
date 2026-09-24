@@ -1,0 +1,7 @@
+[
+  { "title": "Kupić mleko", "due": "2026-03-01", "tags": ["dom"] },
+  { "title": "Oddać książkę", "done": true, "due": "2026-02-10", "tags": ["miasto"] },
+  { "title": "Naprawić rower", "due": "2026-04-15", "tags": ["dom", "warsztat"] },
+  { "title": "Zadzwonić do Ani" },
+  { "title": "Opłacić prąd", "due": "2026-03-10", "tags": ["dom", "rachunki"] }
+]

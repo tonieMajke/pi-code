@@ -1,0 +1,1 @@
+{ "prompt": "python3 cli.py wydatki.csv pokazuje RAZEM 41.26, a paragony sumują się do 41.29. Znajdź przyczynę i napraw ją u źródła (nie dopasowuj wyniku w raporcie).", "check": "python3 hidden_test.py" }

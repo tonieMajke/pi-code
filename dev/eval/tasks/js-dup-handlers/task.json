@@ -1,0 +1,1 @@
+{ "prompt": "W handlers.mjs: dla users, orders i invoices (tylko tych trzech!) przycinaj białe znaki z pola name/title przed walidacją i zapisem — pusty po przycięciu ma dawać błąd \"... is required\", a limit 80 znaków liczy się po przycięciu. Pozostałe encje mają działać dokładnie jak teraz.", "check": "node --test hidden.test.mjs" }

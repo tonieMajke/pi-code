@@ -37,6 +37,7 @@ import type {
 import { ExtensionDialogs } from "./extension-ui.js";
 import { SidebarStore } from "./sidebar-store.js";
 import { decide, PLAN_PROMPT } from "./permissions.js";
+import { repairEdit } from "./editfix.js";
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, DEFAULT_CONSTITUTION, finishIntent } from "./constitution.js";
 import { GuiConfigStore } from "./config.js";
 import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
@@ -230,6 +231,15 @@ export class PiGateway {
           this.emit({ kind: "guard", label: "Gust: najpierw wzorce, potem budowanie" });
           return { block: true, reason: tasteReason };
         }
+      }
+      if (event.toolName === "edit" && !process.env.PI_GUI_NO_EDITFIX) {
+        // Small models get the code right and the whitespace wrong, or edit from memory.
+        const fix = repairEdit(input, this.cwd);
+        if (fix && "block" in fix) {
+          this.emit({ kind: "guard", label: "Edycja: tekstu nie ma w pliku — pokazano najbliższy fragment" });
+          return { block: true, reason: fix.block };
+        }
+        if (fix) this.emit({ kind: "guard", label: `Edycja: poprawiono wcięcia (${fix.fixed})` });
       }
       return this.gate(event.toolCallId, event.toolName, input);
     });
