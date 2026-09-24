@@ -1,49 +1,144 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { initialState, reducer, type Msg, type State } from "./lib/reducer";
-import { markdownComponents } from "./lib/code-block";
-import { ToolCard } from "./lib/tool-card";
+import { WindowControls } from "./components/WindowControls";
+import { Logo } from "./components/Logo";
+import { ArrowDown, FileDiff, ImagePlus, PanelLeftOpen, X } from "lucide-react";
+import { initialState, reducer, type LivePerf } from "./lib/reducer";
 import { createWsTransport, type PiTransport } from "./lib/transport";
 import { createTauriTransport, inTauri } from "./lib/tauri";
-import type { HistoryItem, SessionSummary } from "../shared/protocol";
+import { formatDuration, formatTokens, sessionTitle } from "./lib/format";
+import type {
+  Attachment,
+  GitChanges,
+  HistoryItem,
+  ModelSummary,
+  PiSettings,
+  RouterStatus,
+  SessionSummary,
+} from "../shared/protocol";
+import { ChangesPanel } from "./components/ChangesPanel";
+import { GpuStatus } from "./components/GpuStatus";
+import { CommandPalette, type Command } from "./components/CommandPalette";
+import { MODES } from "./lib/modes";
+import { ApprovalCard } from "./components/Approval";
+import { fileToAttachment, imageFiles } from "./lib/images";
+import { modeInfo, nextMode } from "./lib/modes";
+import { Sidebar } from "./components/Sidebar";
+import { Transcript } from "./components/Transcript";
+import { Composer } from "./components/Composer";
+import { SettingsDialog, type AppPrefs } from "./components/Settings";
+
+const SIDEBAR_KEY = "pi-gui.sidebar";
+const PREFS_KEY = "pi-gui.prefs";
+
+function readPrefs(): AppPrefs {
+  try {
+    return { notifications: true, ...(JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<AppPrefs>) };
+  } catch {
+    return { notifications: true };
+  }
+}
+
+function readSidebarPref(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) !== "closed";
+  } catch {
+    return true;
+  }
+}
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [input, setInput] = useState("");
-  const [transportKind, setTransportKind] = useState("…");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [changes, setChanges] = useState<GitChanges | null>(null);
+  const [changesLoading, setChangesLoading] = useState(false);
+  const [files, setFiles] = useState<string[] | null>(null);
+  const [router, setRouter] = useState<RouterStatus | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<PiSettings | null>(null);
+  const [compacting, setCompacting] = useState(false);
+  const [prefs, setPrefs] = useState(readPrefs);
+  const restoringRef = useRef<string | null>(null);
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  const [sidebarOpen, setSidebarOpen] = useState(readSidebarPref);
+  const [atBottom, setAtBottom] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const transportRef = useRef<PiTransport | null>(null);
 
-  const refreshSessions = useCallback(() => {
-    const t = transportRef.current;
-    if (!t) return;
-    t.send({ cmd: "sessions_list" });
-  }, []);
+  const send = useCallback((cmd: Parameters<PiTransport["send"]>[0]) => transportRef.current?.send(cmd), []);
 
   // A run may have created/renamed a session — refresh the sidebar after every settled.
   useEffect(() => {
-    if (state.settledCount > 0) refreshSessions();
-  }, [state.settledCount, refreshSessions]);
+    if (state.settledCount > 0) send({ cmd: "sessions_list" });
+  }, [state.settledCount, send]);
 
   useEffect(() => {
     // In the Tauri shell the sidecar is spawned by Rust (stdio); in the
     // browser we go through the local WS dev bridge.
-    const t: PiTransport = inTauri() ? createTauriTransport() : createWsTransport("ws://127.0.0.1:9876");
-    setTransportKind(inTauri() ? "tauri" : "ws");
+    const t: PiTransport = inTauri() ? createTauriTransport() : createWsTransport("ws://127.0.0.1:9877");
     transportRef.current = t;
     const off = t.onMessage((msg) => {
       if ("event" in msg) {
-        dispatch({ type: "event", event: msg.event });
+        dispatch({ type: "event", event: msg.event, at: Date.now() });
         return;
       }
-      if (!msg.ok || !Array.isArray(msg.result)) return;
-      const arr = msg.result as (SessionSummary | HistoryItem)[];
-      if (arr.length > 0 && "path" in arr[0]) {
-        dispatch({ type: "sessions", sessions: arr as SessionSummary[], loading: false });
-      } else if (arr.length > 0 && "role" in arr[0]) {
-        dispatch({ type: "history", items: arr as HistoryItem[] });
+      if (!msg.ok) {
+        if (msg.cmd === "compact") setCompacting(false);
+        dispatch({ type: "error", error: `${msg.cmd ?? "pi"}: ${msg.error}` });
+        return;
+      }
+      switch (msg.cmd) {
+        case "sessions_list":
+          dispatch({ type: "sessions", sessions: msg.result as SessionSummary[], loading: false });
+          return;
+        case "history":
+          dispatch({ type: "history", items: msg.result as HistoryItem[] });
+          return;
+        case "models_list":
+          dispatch({ type: "models", models: msg.result as ModelSummary[] });
+          return;
+        case "session_rename":
+          t.send({ cmd: "sessions_list" });
+          return;
+        case "git_changes":
+        case "git_revert":
+          setChanges(msg.result as GitChanges);
+          setChangesLoading(false);
+          return;
+        case "files_list":
+          setFiles(msg.result as string[]);
+          return;
+        case "router_status":
+          setRouter(msg.result as RouterStatus);
+          return;
+        case "settings_get":
+        case "settings_set":
+          setSettings(msg.result as PiSettings);
+          return;
+        case "checkpoint_restore":
+          if (restoringRef.current) dispatch({ type: "restored", checkpoint: restoringRef.current });
+          restoringRef.current = null;
+          t.send({ cmd: "git_changes" });
+          return;
+        case "compact":
+          setSettings(msg.result as PiSettings);
+          setCompacting(false);
+          t.send({ cmd: "history" });
+          return;
+        case "rewind":
+          setInput((msg.result as { text: string }).text);
+          t.send({ cmd: "history" });
+          requestAnimationFrame(() => inputRef.current?.focus());
+          return;
       }
     });
     const offOpen = t.onOpen(() => {
@@ -51,6 +146,7 @@ export default function App() {
       t.send({ cmd: "init" });
       t.send({ cmd: "history" });
       t.send({ cmd: "sessions_list" });
+      t.send({ cmd: "models_list" });
     });
     return () => {
       off();
@@ -60,166 +156,586 @@ export default function App() {
     };
   }, []);
 
+  // Changes panel: refresh when opened, after every run, and when a mutating tool finishes.
+  const toolEnds = state.messages.reduce(
+    (n, m) => n + (m.role === "assistant" ? m.parts.filter((p) => p.type === "tool" && p.tool.status !== "running").length : 0),
+    0,
+  );
+  const refreshChanges = useCallback(() => {
+    setChangesLoading(true);
+    send({ cmd: "git_changes" });
+  }, [send]);
+  useEffect(() => {
+    if (changesOpen) refreshChanges();
+  }, [changesOpen, toolEnds, state.settledCount, state.cwd, refreshChanges]);
+
+  // @-mention file list belongs to the session's project.
+  useEffect(() => setFiles(null), [state.cwd]);
+
+  // GPU / router status: cheap (nvidia-smi + GET /v1/models), poll every 5 s.
+  useEffect(() => {
+    if (!state.connected) return;
+    send({ cmd: "router_status" });
+    const id = setInterval(() => send({ cmd: "router_status" }), 5000);
+    return () => clearInterval(id);
+  }, [state.connected, send]);
+
+  // Desktop notification when a run ends or pi waits for approval while the window is in the background.
+  const lastSettled = useRef(0);
+  useEffect(() => {
+    if (state.settledCount === lastSettled.current) return;
+    lastSettled.current = state.settledCount;
+    if (document.hasFocus() || !prefsRef.current.notifications) return;
+    const last = [...state.messages].reverse().find((m) => m.role === "assistant");
+    const text =
+      last?.role === "assistant"
+        ? last.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join(" ")
+        : "";
+    send({ cmd: "notify", title: "pi skończył", body: text.replace(/\s+/g, " ").slice(0, 140) || "Gotowe." });
+  }, [state.settledCount, state.messages, send]);
+  const approvalCount = state.approvals.length;
+  useEffect(() => {
+    if (approvalCount > 0 && !document.hasFocus() && prefsRef.current.notifications) {
+      send({ cmd: "notify", title: "pi czeka na zgodę", body: `${state.approvals[0].toolName}: ${JSON.stringify(state.approvals[0].args).slice(0, 120)}` });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- notify once per new request
+  }, [approvalCount]);
+
+  // Live clock for durations — only ticks while the model works.
+  useEffect(() => {
+    if (!state.busy) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [state.busy]);
+
   // Autoscroll only while the user is pinned to the bottom (don't fight their scroll).
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    atBottomRef.current = bottom;
+    setAtBottom(bottom);
   };
+  // Follow content growth from any source (deltas, async shiki, expanding cards)
+  // while pinned to the bottom — a messages-only effect misses async layout.
+  const empty = state.messages.length === 0;
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && atBottomRef.current) el.scrollTo({ top: el.scrollHeight });
-  }, [state.messages]);
+    const col = columnRef.current;
+    if (!el || !col) return;
+    const ro = new ResizeObserver(() => {
+      if (atBottomRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(col);
+    ro.observe(el); // composer growth shrinks the viewport
+    return () => ro.disconnect();
+  }, [empty]);
 
-  const send = () => {
-    const text = input.trim();
-    const t = transportRef.current;
-    if (!text || !t) return;
-    setInput("");
-    dispatch({ type: "user", text });
-    t.send({ cmd: "prompt", text, behavior: state.busy ? "steer" : undefined });
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    atBottomRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
-  const stop = () => transportRef.current?.send({ cmd: "abort" });
+  const submit = () => {
+    const text = input.trim();
+    const images = attachments.length ? attachments : undefined;
+    if ((!text && !images) || !state.connected) return;
+    setInput("");
+    setAttachments([]);
+    atBottomRef.current = true;
+    setAtBottom(true);
+    dispatch({ type: "user", text, images, at: Date.now() });
+    send({ cmd: "prompt", text, images, behavior: state.busy ? "steer" : undefined });
+  };
 
-  const newSession = () => {
+  const addFiles = useCallback(async (files: File[]) => {
+    for (const f of files) {
+      try {
+        const a = await fileToAttachment(f);
+        setAttachments((cur) => [...cur, a]);
+      } catch (err) {
+        dispatch({ type: "error", error: `obraz: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+  }, []);
+
+  const setMode = useCallback(
+    (mode: typeof state.mode) => {
+      // Optimistic: rapid Shift+Tab presses must cycle from the new mode, not the stale one.
+      dispatch({ type: "event", event: { kind: "mode", mode } });
+      send({ cmd: "mode_set", mode });
+    },
+    [send],
+  );
+
+  const executePlan = () => {
+    setMode("acceptEdits");
+    const text = "Wykonaj ten plan.";
+    dispatch({ type: "user", text, at: Date.now() });
+    send({ cmd: "prompt", text });
+  };
+
+  const stop = useCallback(() => send({ cmd: "abort" }), [send]);
+
+  const resetView = () => {
     dispatch({ type: "clear" });
     atBottomRef.current = true;
-    transportRef.current?.send({ cmd: "session_new" });
-    refreshSessions();
+    setAtBottom(true);
   };
+
+  const newSession = useCallback(
+    (cwd?: string) => {
+      resetView();
+      send({ cmd: "session_new", cwd });
+      send({ cmd: "sessions_list" });
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
+    [send],
+  );
 
   const openSession = (path: string) => {
-    dispatch({ type: "clear" });
-    atBottomRef.current = true;
-    const t = transportRef.current;
-    t?.send({ cmd: "session_open", path });
-    t?.send({ cmd: "history" });
+    resetView();
+    send({ cmd: "session_open", path });
+    send({ cmd: "history" });
   };
 
+  // Settings are per session in part (thinking level, tools) — refetch on open and on session swap.
+  useEffect(() => {
+    if (settingsOpen && state.connected) send({ cmd: "settings_get" });
+  }, [settingsOpen, state.connected, state.sessionPath, state.model, send]);
+
+  const savePrefs = (p: AppPrefs) => {
+    setPrefs(p);
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+    } catch {
+      /* storage unavailable — preference lasts until reload */
+    }
+  };
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((o) => {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, o ? "closed" : "open");
+      } catch {
+        /* storage unavailable — preference just won't persist */
+      }
+      return !o;
+    });
+  }, []);
+
+  // Global shortcuts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        newSession();
+      } else if (mod && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        toggleSidebar();
+      } else if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (!sidebarOpen) toggleSidebar();
+        requestAnimationFrame(() => searchRef.current?.focus());
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      } else if (mod && e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen((o) => !o);
+      } else if (mod && e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        setChangesOpen((o) => !o);
+      } else if (e.key === "Tab" && e.shiftKey && !mod) {
+        e.preventDefault();
+        setMode(nextMode(state.mode));
+      } else if (e.key === "Escape" && state.busy && !e.defaultPrevented) {
+        stop();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newSession, toggleSidebar, stop, setMode, state.busy, state.mode, sidebarOpen]);
+
+  const approval = state.approvals[0];
+  const awaiting = new Set(state.approvals.map((a) => a.toolCallId));
+  const decide = (decision: "allow" | "always" | "deny", reason?: string) => {
+    if (!approval) return;
+    if (reason) setInput("");
+    send({ cmd: "approve", toolCallId: approval.toolCallId, decision, reason });
+  };
+  const editMessage = (fromEnd: number) => send({ cmd: "rewind", fromEnd });
+
+  const commands: Command[] = [
+    { id: "new", group: "Akcje", label: "Nowa sesja", hint: <kbd>Ctrl N</kbd>, run: () => newSession() },
+    { id: "changes", group: "Akcje", label: changesOpen ? "Ukryj panel zmian" : "Pokaż panel zmian", hint: <kbd>Ctrl Shift D</kbd>, run: () => setChangesOpen((o) => !o) },
+    { id: "sidebar", group: "Akcje", label: sidebarOpen ? "Zwiń panel sesji" : "Pokaż panel sesji", hint: <kbd>Ctrl B</kbd>, run: toggleSidebar },
+    { id: "settings", group: "Akcje", label: "Ustawienia", hint: <kbd>Ctrl ,</kbd>, keywords: "settings konfiguracja", run: () => setSettingsOpen(true) },
+    { id: "compact", group: "Akcje", label: "Kompaktuj kontekst", keywords: "compact", run: () => { setCompacting(true); send({ cmd: "compact" }); } },
+    ...(state.busy ? [{ id: "stop", group: "Akcje", label: "Przerwij model", hint: <kbd>Esc</kbd>, run: stop }] : []),
+    ...MODES.map((m) => ({
+      id: `mode-${m.id}`,
+      group: "Tryb uprawnień",
+      label: m.label,
+      hint: m.id === state.mode ? "aktywny" : m.desc,
+      keywords: "tryb mode",
+      run: () => setMode(m.id),
+    })),
+    ...state.models.map((m) => ({
+      id: `model-${m.provider}/${m.id}`,
+      group: "Model",
+      label: m.id,
+      hint: m.id === state.model ? "aktywny" : formatTokens(m.contextWindow),
+      keywords: "model",
+      run: () => send({ cmd: "model_set", provider: m.provider, modelId: m.id }),
+    })),
+    ...state.sessions.slice(0, 200).map((s) => ({
+      id: `session-${s.path}`,
+      group: "Sesje",
+      label: sessionTitle(s),
+      hint: s.cwd.replace(/^\/home\/[^/]+/, "~"),
+      keywords: s.cwd,
+      run: () => openSession(s.path),
+    })),
+  ];
+
+  const lastMsg = state.messages[state.messages.length - 1];
+  const planDone =
+    state.mode === "plan" && !state.busy && lastMsg?.role === "assistant" && !lastMsg.open &&
+    lastMsg.parts.some((p) => p.type === "text");
+
+  const active = state.sessions.find((s) => s.path === state.sessionPath);
+  const title = state.sessionName || (active ? sessionTitle(active) : "") || firstUserText(state) || "Nowa sesja";
+
+  const composer = (
+    <Composer
+      value={input}
+      onChange={setInput}
+      onSend={submit}
+      onStop={stop}
+      busy={state.busy}
+      connected={state.connected}
+      pending={state.pending}
+      mode={state.mode}
+      onMode={setMode}
+      attachments={attachments}
+      onAddFiles={(f) => void addFiles(f)}
+      onRemoveAttachment={(i) => setAttachments((cur) => cur.filter((_, j) => j !== i))}
+      blocked={Boolean(approval)}
+      files={files}
+      onNeedFiles={() => send({ cmd: "files_list" })}
+      model={state.model}
+      provider={state.provider}
+      models={state.models}
+      onModel={(m) => send({ cmd: "model_set", provider: m.provider, modelId: m.id })}
+      cwd={state.cwd}
+      branch={state.branch}
+      sessions={state.sessions}
+      onProject={(cwd) => newSession(cwd)}
+      usage={state.usage}
+      inputRef={inputRef}
+      hero={empty}
+    />
+  );
+
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <button className="new-btn" onClick={newSession}>
-          + Nowa
-        </button>
-        <div className="side-label">Sesje</div>
-        <div className="session-list">
-          {state.sessions.map((s) => (
-            <button
-              key={s.path}
-              className={`session ${s.path === activePath(state) ? "active" : ""}`}
-              onClick={() => openSession(s.path)}
-              title={s.cwd}
-            >
-              <span className="s-dot" />
-              <span className="s-title">{s.name || s.firstMessage || s.id.slice(0, 8)}</span>
-            </button>
-          ))}
-          {state.loadingSessions && <div className="s-empty">wczytywanie…</div>}
-          {!state.loadingSessions && state.sessions.length === 0 && (
-            <div className="s-empty">brak sesji</div>
-          )}
+    <div
+      className={`app ${sidebarOpen ? "" : "side-closed"}`}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void addFiles(imageFiles(e.dataTransfer.files));
+      }}
+    >
+      {dragging && (
+        <div className="drop-overlay">
+          <ImagePlus size={28} />
+          <span>Upuść obraz, żeby dołączyć go do wiadomości</span>
         </div>
-        <div className="side-footer">
-          <span className="chip">
-            <span className="avatar">M</span> majke · pi
-          </span>
-        </div>
-      </aside>
+      )}
+      {sidebarOpen && (
+        <Sidebar
+          sessions={state.sessions}
+          loading={state.loadingSessions}
+          activePath={state.sessionPath}
+          busyPath={state.busy ? state.sessionPath : ""}
+          onOpen={openSession}
+          onNew={() => newSession()}
+          onCollapse={toggleSidebar}
+          onSettings={() => setSettingsOpen(true)}
+          searchRef={searchRef}
+          user={state.user}
+        />
+      )}
 
       <main className="main">
-        {state.messages.length === 0 ? (
-          <div className="greeting">
-            <h1>Co dalej, Majku?</h1>
-            <p className="sub">lokalny pi · {state.model || "—"}</p>
-          </div>
-        ) : (
-          <div className="scroll" ref={scrollRef} onScroll={onScroll}>
-            <div className="column">
-              {state.messages.map((m, i) => (
-                <Message key={i} msg={m} />
-              ))}
-              {state.error && <div className="error">{state.error}</div>}
-            </div>
+        <header className="topbar" data-tauri-drag-region>
+          {!sidebarOpen && (
+            <button className="icon-btn" onClick={toggleSidebar} title="Pokaż panel (Ctrl+B)">
+              <PanelLeftOpen size={16} />
+            </button>
+          )}
+          {!empty && (
+            <SessionTitle
+              key={state.sessionPath}
+              title={title}
+              onRename={(name) => send({ cmd: "session_rename", name })}
+            />
+          )}
+          <span className="topbar-spacer" data-tauri-drag-region />
+          <GpuStatus status={router} model={state.model} />
+          <button
+            className={`icon-btn ${changesOpen ? "on" : ""}`}
+            onClick={() => setChangesOpen((o) => !o)}
+            title="Zmiany w projekcie (Ctrl+Shift+D)"
+          >
+            <FileDiff size={16} />
+            {changes && changes.files.length > 0 && <span className="badge">{changes.files.length}</span>}
+          </button>
+          {state.mode !== "ask" && (
+            <span className={`mode-badge mode-${state.mode}`} title={modeInfo(state.mode).desc}>
+              {modeInfo(state.mode).label}
+            </span>
+          )}
+          <span className={`conn ${state.connected ? "on" : ""}`} title={inTauri() ? "transport: tauri" : "transport: ws"}>
+            <span className="conn-dot" />
+            {state.connected ? "pi" : "łączenie…"}
+          </span>
+          {inTauri() && <WindowControls />}
+        </header>
+
+        {state.error && (
+          <div className="error-bar">
+            <span>{state.error}</span>
+            <button className="icon-btn" onClick={() => dispatch({ type: "error", error: null })} title="Zamknij">
+              <X size={14} />
+            </button>
           </div>
         )}
 
-        <footer className="composer">
-          <div className="composer-box">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              placeholder="Opisz zadanie albo zadaj pytanie"
-              rows={1}
-              autoFocus
-            />
-            {state.busy ? (
-              <button className="send stop" onClick={stop} title="Przerwij">■</button>
-            ) : (
-              <button className="send" onClick={send} disabled={!state.connected || !input.trim()} title="Wyślij">
-                ↑
-              </button>
-            )}
+        {empty ? (
+          <div className="hero">
+            <Logo size={60} className="hero-mark" />
+            <h1>Co dalej, Majku?</h1>
+            {composer}
+            <div className="hero-hints">
+              <kbd>Ctrl N</kbd> nowa sesja · <kbd>Ctrl K</kbd> szukaj · <kbd>Ctrl B</kbd> panel
+            </div>
           </div>
-          <div className="composer-meta">
-            <span className="dot" data-on={state.connected} />
-            <span className="transport">{transportKind}</span>
-            <span>
-              {state.busy ? "model pracuje — Enter = steering" : "pi działa lokalnie (llama-server)"}
-            </span>
-            <span className="spacer" />
-            <span className="model">{state.model || "pi"}</span>
-          </div>
-        </footer>
+        ) : (
+          <>
+            <div className="scroll" ref={scrollRef} onScroll={onScroll}>
+              <div className="column" ref={columnRef}>
+                <Transcript
+                  messages={state.messages}
+                  cwd={state.cwd}
+                  now={now}
+                  awaiting={awaiting}
+                  onEdit={state.busy ? undefined : editMessage}
+                  onRestore={
+                    state.busy
+                      ? undefined
+                      : (checkpoint) => {
+                          restoringRef.current = checkpoint;
+                          send({ cmd: "checkpoint_restore", checkpoint });
+                        }
+                  }
+                  onExecutePlan={planDone ? executePlan : undefined}
+                />
+                {state.busy && !approval && <Working since={state.busySince} now={now} perf={state.perf} />}
+              </div>
+            </div>
+            <div className="dock">
+              {!atBottom && (
+                <button className="to-bottom" onClick={scrollToBottom} title="Przewiń na dół">
+                  <ArrowDown size={16} />
+                </button>
+              )}
+              {state.stuck && !state.busy && (
+                <StuckCard
+                  stuck={state.stuck}
+                  onEscalate={() => {
+                    const model = state.stuck!.suggest;
+                    dispatch({ type: "user", text: `↗ Przekaż zadanie modelowi ${model.split("/").pop()} (poprzedni utknął)`, at: Date.now() });
+                    send({ cmd: "escalate", model, reason: state.stuck!.label });
+                  }}
+                  onSettings={() => setSettingsOpen(true)}
+                  onDismiss={() => dispatch({ type: "unstuck" })}
+                />
+              )}
+              {approval && (
+                <ApprovalCard
+                  approval={approval}
+                  queued={state.approvals.length - 1}
+                  cwd={state.cwd}
+                  onDecide={decide}
+                  reasonDraft={input}
+                />
+              )}
+              {composer}
+            </div>
+          </>
+        )}
       </main>
+      {changesOpen && (
+        <ChangesPanel
+          changes={changes}
+          loading={changesLoading}
+          onRefresh={refreshChanges}
+          onRevert={(path) => {
+            setChangesLoading(true);
+            send({ cmd: "git_revert", path });
+          }}
+          onClose={() => setChangesOpen(false)}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsDialog
+          settings={settings}
+          models={state.models}
+          model={state.model}
+          provider={state.provider}
+          busy={state.busy}
+          prefs={prefs}
+          onPrefs={savePrefs}
+          onPatch={(patch) => send({ cmd: "settings_set", patch })}
+          onCompact={() => {
+            setCompacting(true);
+            send({ cmd: "compact" });
+          }}
+          compacting={compacting}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
     </div>
   );
 }
 
-function activePath(state: State): string {
-  // best-effort: match session by id from init_done
-  const s = state.sessions.find((x) => x.id === state.sessionId);
-  return s?.path ?? "";
+function StuckCard({
+  stuck,
+  onEscalate,
+  onSettings,
+  onDismiss,
+}: {
+  stuck: { label: string; suggest: string };
+  onEscalate: () => void;
+  onSettings: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="stuck-card">
+      <div className="stuck-text">
+        <b>Model utknął.</b> {stuck.label}.{" "}
+        {stuck.suggest ? "Możesz przekazać zadanie mocniejszemu modelowi." : "Nie ustawiono modelu do eskalacji."}
+      </div>
+      <div className="stuck-actions">
+        {stuck.suggest ? (
+          <button className="btn primary" onClick={onEscalate}>
+            Przekaż do {stuck.suggest.split("/").pop()}
+          </button>
+        ) : (
+          <button className="btn" onClick={onSettings}>
+            Ustaw model do eskalacji
+          </button>
+        )}
+        <button className="btn" onClick={onDismiss}>
+          Zamknij
+        </button>
+      </div>
+    </div>
+  );
 }
 
-function Message({ msg }: { msg: Msg }) {
-  if (msg.role === "user") {
-    return (
-      <div className="msg user">
-        <div className="bubble">{msg.text}</div>
-      </div>
-    );
+function firstUserText(state: { messages: { role: string; text?: string }[] }): string {
+  const m = state.messages.find((x) => x.role === "user");
+  return m?.text?.replace(/\s+/g, " ").slice(0, 80) ?? "";
+}
+
+function Working({ since, now, perf }: { since: number | null; now: number; perf: LivePerf | null }) {
+  let label = "Pracuje…";
+  let detail: string | null = null;
+  let progress: number | null = null;
+  if (perf?.phase === "prompt") {
+    const fresh = perf.total - perf.cache;
+    const done = perf.processed - perf.cache;
+    progress = fresh > 0 ? Math.min(1, done / fresh) : 1;
+    label = "Czyta kontekst…";
+    detail =
+      `${Math.round(progress * 100)}% z ${formatTokens(fresh)} tok` +
+      (perf.cache > 0 ? ` (cache ${formatTokens(perf.cache)})` : "") +
+      (perf.perSec > 0 ? ` · PP ${Math.round(perf.perSec)} t/s` : "");
+  } else if (perf?.phase === "gen") {
+    label = "Generuje…";
+    detail = `${perf.perSec.toFixed(1).replace(".", ",")} t/s · ${perf.tokens} tok`;
   }
   return (
-    <div className="msg assistant">
-      {msg.thinking && <Thinking text={msg.thinking} active={msg.open} />}
-      {msg.tools.map((t) => (
-        <ToolCard key={t.id} tool={t} />
-      ))}
-      {msg.text && (
-        <div className="md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-            {msg.text}
-          </ReactMarkdown>
-        </div>
+    <div className="working">
+      <span className="working-star">✻</span>
+      <span className="shimmer">{label}</span>
+      {since !== null && <span className="working-time">{formatDuration(now - since)}</span>}
+      {detail && <span className="working-perf">{detail}</span>}
+      {progress !== null && (
+        <span className="working-bar">
+          <span style={{ width: `${progress * 100}%` }} />
+        </span>
       )}
+      <span className="working-hint">
+        <kbd>Esc</kbd> przerwij
+      </span>
     </div>
   );
 }
 
-function Thinking({ text, active }: { text: string; active: boolean }) {
+function SessionTitle({ title, onRename }: { title: string; onRename: (name: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  if (!editing) {
+    return (
+      <button
+        className="session-title"
+        onClick={() => {
+          setDraft(title);
+          setEditing(true);
+        }}
+        title="Kliknij, aby zmienić nazwę"
+      >
+        {title}
+      </button>
+    );
+  }
+  const commit = () => {
+    setEditing(false);
+    const name = draft.trim();
+    if (name && name !== title) onRename(name);
+  };
   return (
-    <details className="thinking" open={active}>
-      <summary>{active ? "myśli…" : "pomyślano"}</summary>
-      <pre className="thinking-text">{text}</pre>
-    </details>
+    <input
+      className="session-title-input"
+      value={draft}
+      autoFocus
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setEditing(false);
+        }
+      }}
+    />
   );
 }
-

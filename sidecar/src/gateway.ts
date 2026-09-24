@@ -1,10 +1,55 @@
+import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   createAgentSession,
   createAgentSessionServices,
+  DefaultResourceLoader,
   SessionManager,
   type AgentSession,
+  type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { HistoryItem, PiEvent, SessionSummary } from "../../shared/protocol.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import type {
+  ApprovalDecision,
+  Attachment,
+  HistoryItem,
+  HistoryPart,
+  ModelSummary,
+  PermissionMode,
+  PiEvent,
+  PiSettings,
+  SettingsPatch,
+  SessionSummary,
+  Usage,
+} from "../../shared/protocol.js";
+import { decide, PLAN_PROMPT } from "./permissions.js";
+import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, DEFAULT_CONSTITUTION } from "./constitution.js";
+import { GuiConfigStore } from "./config.js";
+import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
+import { elideOldToolOutput } from "./elide.js";
+import { parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
+import { installFetchTap, onPerf, setSampling } from "./perf.js";
+import { look, LOOK_DESCRIPTION } from "./look.js";
+
+const run = promisify(execFile);
+
+/** Tool output kept for the UI (bash logs can be long; the card scrolls). */
+const TOOL_TEXT_MAX = 8000;
+
+const SKILLS_DIR = fileURLToPath(new URL("../../skills", import.meta.url));
+
+/** Meta-tool that loads deferred tools. */
+const ENABLE_TOOLS = "enable_tools";
+
+function firstSentence(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  const m = /^(.{20,160}?[.!?])(\s|$)/.exec(line);
+  return m ? m[1] : line.slice(0, 140);
+}
 
 /**
  * Thin wrapper around a pi AgentSession: one command surface in,
@@ -12,72 +57,379 @@ import type { HistoryItem, PiEvent, SessionSummary } from "../../shared/protocol
  */
 export class PiGateway {
   private session: AgentSession | null = null;
+  /** True from prompt() call until it resolves — covers the gap before isStreaming flips. */
+  private running = false;
 
   get ready(): boolean {
     return this.session !== null;
   }
 
   get busy(): boolean {
-    return this.session?.state.isStreaming ?? false;
+    return this.running || (this.session?.state.isStreaming ?? false);
   }
 
-  private initCwd = process.cwd();
-  private services: Awaited<ReturnType<typeof createAgentSessionServices>> | null =
-    null;
+  private cwd = process.cwd();
+  private services: Awaited<ReturnType<typeof createAgentSessionServices>> | null = null;
+
+  /** Permission mode — GUI-wide, survives session switches like Claude Code's. */
+  private mode: PermissionMode = "ask";
+  /** Tool names the user approved "always" for the current session. */
+  private alwaysAllowed = new Set<string>();
+  private pendingApprovals = new Map<string, (d: { decision: ApprovalDecision; reason?: string }) => void>();
+  private emit: (e: PiEvent) => void = () => undefined;
+  private config: GuiConfigStore | null = null;
+  /** Deferred tools the model loaded in this session. */
+  private onDemand = new Set<string>();
+  /** Worktree snapshot taken when the current run started (git projects only). */
+  private runCheckpoint: string | null = null;
+  private reviewer: AgentSession | null = null;
+
+  get permissionMode(): PermissionMode {
+    return this.mode;
+  }
+
+  setMode(mode: PermissionMode): void {
+    this.mode = mode;
+    this.emit({ kind: "mode", mode });
+  }
+
+  /** Resolve a pending approval prompt from the UI. Unknown ids are ignored (already settled). */
+  approve(toolCallId: string, decision: ApprovalDecision, reason?: string): void {
+    const resolve = this.pendingApprovals.get(toolCallId);
+    if (!resolve) return;
+    this.pendingApprovals.delete(toolCallId);
+    resolve({ decision, reason });
+  }
+
+  private denyAllPending(): void {
+    for (const id of [...this.pendingApprovals.keys()]) this.approve(id, "deny", "run aborted");
+  }
+
+  /** pi `tool_call` hook: returns a block result or undefined (allowed). */
+  async gate(toolCallId: string, toolName: string, input: Record<string, unknown>) {
+    const verdict = decide(this.mode, toolName, input);
+    if (verdict.kind === "allow") return undefined;
+    if (verdict.kind === "block") return { block: true, reason: verdict.reason };
+    if (this.alwaysAllowed.has(toolName)) return undefined;
+
+    const answer = await new Promise<{ decision: ApprovalDecision; reason?: string }>((resolve) => {
+      this.pendingApprovals.set(toolCallId, resolve);
+      this.emit({ kind: "approval_request", toolCallId, toolName, args: input });
+    });
+    this.emit({ kind: "approval_done", toolCallId, decision: answer.decision });
+    if (answer.decision === "always") this.alwaysAllowed.add(toolName);
+    if (answer.decision === "deny") {
+      return {
+        block: true,
+        reason: answer.reason
+          ? `The user denied this tool call and said: ${answer.reason}`
+          : "The user denied this tool call. Ask what they want instead of retrying it.",
+      };
+    }
+    return undefined;
+  }
+
+  /** Inline extension: the GUI's hooks into pi's agent loop. */
+  private extension = (pi: ExtensionAPI) => {
+    // One guard per session: the factory runs once per resource loader.
+    const guard = new ConstitutionGuard(() => this.cwd);
+    let task = "";
+    let reviewed = false;
+    const cfg = () => this.config!.get();
+    const hard = () => cfg().constitution.enabled && cfg().constitution.hard;
+
+    // Deferred tools: listed by name in the system prompt, loaded on request.
+    pi.registerTool({
+      name: ENABLE_TOOLS,
+      label: "Włącz narzędzia",
+      description:
+        "Load tools that are available on demand (see 'On-demand tools' in the system prompt). " +
+        "Their full definitions become usable from your next step.",
+      parameters: Type.Object({
+        names: Type.Array(Type.String(), { description: "Tool names to load" }),
+      }),
+      execute: async (_id, params) => {
+        const known = new Set(this.session?.getAllTools().map((t) => t.name));
+        const ok = params.names.filter((n) => known.has(n) && this.config!.toolPolicy(n) !== "off");
+        const bad = params.names.filter((n) => !ok.includes(n));
+        ok.forEach((n) => this.onDemand.add(n));
+        pi.setActiveTools([...new Set([...pi.getActiveTools(), ...ok])]);
+        const text =
+          (ok.length ? `Loaded: ${ok.join(", ")}. Use them from your next step.` : "Nothing loaded.") +
+          (bad.length ? ` Unknown or disabled: ${bad.join(", ")}.` : "");
+        return { content: [{ type: "text", text }], details: undefined };
+      },
+    });
+
+    pi.on("tool_call", (event) => {
+      const input = event.input as Record<string, unknown>;
+      // Constitution first: no point asking the user to approve a call that gets blocked anyway.
+      const reason = hard() ? guard.beforeTool(event.toolName, input) : null;
+      if (reason) return { block: true, reason };
+      return this.gate(event.toolCallId, event.toolName, input);
+    });
+    pi.on("tool_result", (event) => {
+      const hasImage = event.content.some((c) => c.type === "image");
+      guard.afterTool(event.toolName, event.input, event.isError, hasImage);
+    });
+
+    pi.registerTool({
+      name: "look",
+      label: "Podgląd",
+      description: LOOK_DESCRIPTION,
+      parameters: Type.Object({
+        target: Type.String({ description: "URL (http://localhost:5173/…) or a file path: .html, .svg, .dot/.gv, .mmd, .png/.jpg" }),
+        width: Type.Optional(Type.Number({ description: "Viewport width in px (default 1280)" })),
+        height: Type.Optional(Type.Number({ description: "Viewport height in px (default 800)" })),
+      }),
+      execute: async (_id, params) => {
+        const r = await look(params, this.cwd);
+        return {
+          content: [
+            { type: "image", data: r.data, mimeType: r.mimeType },
+            { type: "text", text: `${r.note}. Look critically: alignment, spacing, contrast, overlaps, anything cut off, and whether it matches the request.` },
+          ],
+          details: undefined,
+        };
+      },
+    });
+
+    pi.on("before_agent_start", async (event) => {
+      guard.startRun();
+      task = event.prompt;
+      reviewed = false;
+      this.runCheckpoint = await snapshot(this.cwd, task.slice(0, 60)).catch(() => null);
+      const extra = [
+        cfg().constitution.enabled ? this.config!.constitutionText : "",
+        this.toolCatalog(),
+      ].filter(Boolean);
+      return {
+        systemPrompt: extra.length ? `${event.systemPrompt}\n\n${extra.join("\n\n")}` : undefined,
+        message:
+          this.mode === "plan" ? { customType: "pi-gui-plan-mode", content: PLAN_PROMPT, display: false } : undefined,
+      };
+    });
+
+    // The run may not end with unverified edits, a failing check, or unreviewed changes.
+    pi.on("agent_before_settle", async (event) => {
+      if (event.outcome !== "completed" || this.mode === "plan") return undefined;
+      const back = (content: string, label: string) => {
+        this.emit({ kind: "guard", label });
+        return {
+          entries: [
+            { type: "custom_message" as const, customType: CONSTITUTION_MESSAGE_TYPE, content, display: true, details: { label } },
+          ],
+          continue: true,
+        };
+      };
+      if (hard()) {
+        const verdict = guard.beforeSettle(cfg().constitution.maxNudges);
+        if (verdict && "stuck" in verdict) {
+          this.emit({ kind: "stuck", label: verdict.stuck, suggest: cfg().escalation.model });
+          return undefined;
+        }
+        if (verdict) return back(verdict.content, verdict.label);
+      }
+      if (cfg().review.enabled && !reviewed && guard.changedFiles.length > 0) {
+        reviewed = true;
+        const result = await this.review(task, guard.changedFiles).catch((err: unknown) => {
+          this.emit({ kind: "guard", label: `Recenzja nie wyszła: ${err instanceof Error ? err.message : String(err)}` });
+          return null;
+        });
+        if (result && !result.ok) {
+          const n = result.issues.split("\n").filter((l) => l.trim()).length;
+          return back(reviewNudge(result.issues), `Recenzja: ${n} ${n === 1 ? "uwaga" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "uwagi" : "uwag"} — model poprawia`);
+        }
+        if (result) this.emit({ kind: "guard", label: "Recenzja: bez uwag" });
+      }
+      return undefined;
+    });
+
+    pi.on("context", (event) => {
+      // Stale plan-mode instructions must not leak into later, non-plan turns.
+      let messages =
+        this.mode === "plan"
+          ? event.messages
+          : event.messages.filter((m) => (m as { customType?: string }).customType !== "pi-gui-plan-mode");
+      const c = cfg().context;
+      if (c.elideOldToolOutput) messages = elideOldToolOutput(messages, c.elideAboveChars);
+      return messages === event.messages ? undefined : { messages };
+    });
+  };
+
+  /** "On-demand tools" section: stable text (only the policy changes it) so the prompt cache survives. */
+  private toolCatalog(): string {
+    const s = this.session;
+    if (!s) return "";
+    const deferred = s
+      .getAllTools()
+      .filter((t) => t.name !== ENABLE_TOOLS && this.config!.toolPolicy(t.name) === "deferred")
+      .map((t) => `- ${t.name}: ${firstSentence(t.description)}`);
+    if (!deferred.length) return "";
+    return (
+      "## On-demand tools\nThese tools exist but are not loaded, to keep your context small. " +
+      `If the task needs one, call ${ENABLE_TOOLS} with its name first.\n${deferred.join("\n")}`
+    );
+  }
+
+  /** Active set = "always" tools + deferred ones the model loaded + the loader itself. */
+  private applyToolPolicy(): void {
+    const s = this.session;
+    if (!s) return;
+    const names = s.getAllTools().map((t) => t.name);
+    const policy = (n: string) => this.config!.toolPolicy(n);
+    const hasDeferred = names.some((n) => n !== ENABLE_TOOLS && policy(n) === "deferred");
+    const active = names.filter((n) =>
+      n === ENABLE_TOOLS ? hasDeferred : policy(n) === "always" || (policy(n) === "deferred" && this.onDemand.has(n)),
+    );
+    s.setActiveToolsByName(active);
+  }
+
+  /** Fresh-context review of the run's changes by a tool-less session. */
+  private async review(task: string, changed: string[]): Promise<ReviewVerdict> {
+    const diff = this.runCheckpoint
+      ? await diffSince(this.cwd, this.runCheckpoint)
+      : changed
+          .map((f) => {
+            try {
+              return `--- ${f} (full content after the change)\n${readFileSync(f, "utf8")}`;
+            } catch {
+              return `--- ${f} (deleted)`;
+            }
+          })
+          .join("\n\n");
+    if (!diff.trim()) return { ok: true, issues: "" };
+    this.emit({ kind: "guard", label: "Niezależna recenzja zmian…" });
+    const services = this.requireServices();
+    const key = this.config!.get().review.model;
+    const model = key ? this.modelByKey(key) : this.session!.model!;
+    const loader = new DefaultResourceLoader({
+      cwd: this.cwd,
+      agentDir: services.agentDir,
+      settingsManager: services.settingsManager,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noContextFiles: true,
+      systemPrompt: "You are a meticulous senior code reviewer. You only see a task and a diff.",
+    });
+    await loader.reload();
+    const { session } = await createAgentSession({
+      cwd: this.cwd,
+      model,
+      modelRuntime: services.modelRuntime,
+      settingsManager: services.settingsManager,
+      sessionManager: SessionManager.inMemory(this.cwd),
+      resourceLoader: loader,
+      noTools: "all",
+    });
+    this.reviewer = session;
+    try {
+      await session.prompt(reviewPrompt(task, diff));
+      const last = [...session.state.messages].reverse().find((m) => m.role === "assistant");
+      const text =
+        last && last.role === "assistant"
+          ? last.content.map((c) => (c.type === "text" ? c.text : "")).join("")
+          : "";
+      return parseVerdict(text);
+    } finally {
+      this.reviewer = null;
+      session.dispose();
+    }
+  }
+
+  private modelByKey(key: string) {
+    const slash = key.indexOf("/");
+    const model = this.requireServices().modelRuntime.getModel(key.slice(0, slash), key.slice(slash + 1));
+    if (!model) throw new Error(`model not found: ${key}`);
+    return model;
+  }
+
+  /** Stuck run → a stronger model takes over the same session, then (optionally) hands back. */
+  async escalate(key: string, reason: string): Promise<void> {
+    const s = this.requireSession();
+    const previous = s.model;
+    await s.setModel(this.modelByKey(key));
+    await this.emitInit(this.emit);
+    try {
+      await this.prompt(
+        `The previous model got stuck on this task (${reason}). You are taking over. ` +
+          "Re-read the relevant files, check the current state with a real check (tests, build, or running it), then finish the task and report how you verified it.",
+      );
+    } finally {
+      if (this.config!.get().escalation.revert && previous && this.session === s) {
+        await s.setModel(previous);
+        await this.emitInit(this.emit);
+      }
+    }
+  }
+
+  async restoreCheckpoint(checkpoint: string): Promise<string[]> {
+    if (this.busy) throw new Error("model pracuje — cofnij po zakończeniu");
+    const changes = await restore(this.cwd, checkpoint);
+    return changes.map((c) => c.path);
+  }
 
   async init(onEvent: (e: PiEvent) => void, cwd?: string): Promise<void> {
     // Idempotent: a re-init (e.g. a second UI client) re-emits init_done
     // so the caller can always learn the current model/cwd.
     if (this.session) {
-      this.emitInit(onEvent);
+      await this.emitInit(onEvent);
       return;
     }
     const workingDir = cwd ?? process.cwd();
-    this.initCwd = workingDir;
+    this.cwd = workingDir;
+    this.emit = onEvent;
+    installFetchTap();
+    onPerf((perf) => this.emit({ kind: "perf", perf }));
     this.services = await createAgentSessionServices({ cwd: workingDir });
-    const model = this.resolveDefaultModel();
-    const { session } = await createAgentSession({
-      cwd: workingDir,
-      model,
-      modelRuntime: this.services.modelRuntime,
-      settingsManager: this.services.settingsManager,
-    });
-    this.session = session;
-    this.subscribe(session, onEvent);
-    this.emitInit(onEvent);
+    // PI_GUI_CONFIG lets the eval harness run profiles without touching the user's file.
+    this.config = new GuiConfigStore(process.env.PI_GUI_CONFIG ?? `${this.services.agentDir}/pi-gui.json`);
+    setSampling(this.config.get().sampling);
+    // PI_GUI_EPHEMERAL (eval harness): keep throwaway runs out of the user's session history.
+    const sm = process.env.PI_GUI_EPHEMERAL ? SessionManager.inMemory(workingDir) : SessionManager.create(workingDir);
+    await this.startSession(onEvent, workingDir, sm);
   }
 
-  /** Rendered transcript of the active session (system/tool plumbing collapsed). */
+  /** Rendered transcript of the active session, blocks kept in model order. */
   history(): HistoryItem[] {
     const s = this.requireSession();
     const items: HistoryItem[] = [];
+    const toolIndex = new Map<string, Extract<HistoryPart, { type: "tool" }>>();
     for (const msg of s.state.messages) {
       if (msg.role === "user") {
-        items.push({ role: "user", text: userText(msg.content) });
+        const images = userImages(msg.content);
+        items.push(images.length ? { role: "user", text: userText(msg.content), images } : { role: "user", text: userText(msg.content) });
       } else if (msg.role === "assistant") {
-        const item: HistoryItem = {
-          role: "assistant",
-          thinking: msg.content
-            .filter((c): c is Extract<typeof c, { type: "thinking" }> => c.type === "thinking")
-            .map((c) => c.thinking)
-            .join("\n"),
-          text: msg.content
-            .filter((c): c is Extract<typeof c, { type: "text" }> => c.type === "text")
-            .map((c) => c.text)
-            .join("\n"),
-          tools: msg.content
-            .filter((c): c is Extract<typeof c, { type: "toolCall" }> => c.type === "toolCall")
-            .map((c) => ({ id: c.id, name: c.name, args: c.arguments, status: "ok" as const, summary: "" })),
-        };
-        items.push(item);
-      } else if (msg.role === "toolResult") {
-        const assistant = [...items].reverse().find((i) => i.role === "assistant");
-        if (assistant && assistant.role === "assistant") {
-          const tool = assistant.tools.find((t) => t.id === msg.toolCallId);
-          if (tool) {
-            tool.status = msg.isError ? "error" : "ok";
-            tool.summary = summarizeToolResult({ content: msg.content }, 400);
+        // Consecutive assistant messages (text → tool → text) form one visual turn.
+        let last = items[items.length - 1];
+        if (!last || last.role !== "assistant") {
+          last = { role: "assistant", parts: [] };
+          items.push(last);
+        }
+        for (const c of msg.content) {
+          if (c.type === "thinking" && c.thinking.trim()) last.parts.push({ type: "thinking", text: c.thinking });
+          else if (c.type === "text" && c.text.trim()) last.parts.push({ type: "text", text: c.text });
+          else if (c.type === "toolCall") {
+            const part: Extract<HistoryPart, { type: "tool" }> = {
+              type: "tool",
+              tool: { id: c.id, name: c.name, args: c.arguments, status: "ok", summary: "" },
+            };
+            toolIndex.set(c.id, part);
+            last.parts.push(part);
           }
+        }
+      } else if (msg.role === "custom" && msg.customType === CONSTITUTION_MESSAGE_TYPE) {
+        const last = items[items.length - 1];
+        const label = (msg.details as { label?: string } | undefined)?.label ?? "Konstytucja";
+        if (last?.role === "assistant") last.parts.push({ type: "notice", text: label });
+      } else if (msg.role === "toolResult") {
+        const part = toolIndex.get(msg.toolCallId);
+        if (part) {
+          part.tool.status = msg.isError ? "error" : "ok";
+          part.tool.summary = summarizeToolResult({ content: msg.content });
+          const images = toolImages({ content: msg.content });
+          if (images.length) part.tool.images = images;
         }
       }
     }
@@ -87,30 +439,197 @@ export class PiGateway {
   async listSessions(): Promise<SessionSummary[]> {
     // All sessions across all project dirs (sidebar is global, like Claude desktop).
     const infos = await SessionManager.listAll();
-    return infos.map((s) => ({
-      path: s.path,
-      id: s.id,
-      cwd: s.cwd,
-      name: s.name,
-      modified: s.modified.toISOString(),
-      messageCount: s.messageCount,
-      firstMessage: s.firstMessage,
+    return infos
+      .map((s) => ({
+        path: s.path,
+        id: s.id,
+        cwd: s.cwd,
+        name: s.name,
+        modified: s.modified.toISOString(),
+        messageCount: s.messageCount,
+        firstMessage: s.firstMessage,
+      }))
+      .sort((a, b) => b.modified.localeCompare(a.modified));
+  }
+
+  async listModels(): Promise<ModelSummary[]> {
+    const services = this.requireServices();
+    const models = await services.modelRuntime.getAvailable();
+    return models.map((m) => ({
+      provider: m.provider,
+      id: m.id,
+      name: m.name ?? m.id,
+      contextWindow: m.contextWindow ?? 0,
     }));
+  }
+
+  /** Session-only model switch (does not touch the global default — lesson 2). */
+  async setModel(onEvent: (e: PiEvent) => void, provider: string, modelId: string): Promise<void> {
+    const s = this.requireSession();
+    const model = this.requireServices().modelRuntime.getModel(provider, modelId);
+    if (!model) throw new Error(`model not found: ${provider}/${modelId}`);
+    await s.setModel(model);
+    await this.emitInit(onEvent);
+    this.emitUsage(onEvent);
+  }
+
+  /** Snapshot for the settings dialog: pi's global settings + what this session loaded. */
+  settings(): PiSettings {
+    const s = this.requireSession();
+    const services = this.requireServices();
+    const sm = services.settingsManager;
+    const compaction = sm.getCompactionSettings();
+    const retry = sm.getRetrySettings();
+    const active = new Set(s.getActiveToolNames());
+    const loader = s.resourceLoader;
+    const src = (i: { source: string; scope: string }) => {
+      if (i.source === "builtin") return "wbudowane";
+      if (i.source === "auto") return "lokalne";
+      const name = i.source.replace(/^npm:/, "");
+      return i.scope === "project" ? `projekt · ${name}` : name;
+    };
+    return {
+      settingsFile: `${services.agentDir}/settings.json`,
+      defaultModel: `${sm.getDefaultProvider() ?? "?"}/${sm.getDefaultModel() ?? "?"}`,
+      thinking: {
+        level: s.thinkingLevel,
+        available: s.supportsThinking() ? s.getAvailableThinkingLevels() : [],
+        defaultLevel: sm.getDefaultThinkingLevel() ?? "",
+      },
+      steeringMode: sm.getSteeringMode(),
+      followUpMode: sm.getFollowUpMode(),
+      compaction,
+      retry: { enabled: retry.enabled, maxRetries: retry.maxRetries, baseDelayMs: retry.baseDelayMs },
+      images: { autoResize: sm.getImageAutoResize(), blockImages: sm.getBlockImages() },
+      shellPath: sm.getShellPath() ?? "",
+      shellCommandPrefix: sm.getShellCommandPrefix() ?? "",
+      tools: s
+        .getAllTools()
+        .filter((t) => t.name !== ENABLE_TOOLS)
+        .map((t) => ({
+          name: t.name,
+          description: t.description,
+          active: active.has(t.name),
+          source: src(t.sourceInfo),
+          tokens: Math.ceil(JSON.stringify({ name: t.name, description: t.description, parameters: t.parameters }).length / 4),
+          policy: this.config!.toolPolicy(t.name),
+        })),
+      extensions: loader
+        .getExtensions()
+        .extensions.filter((e) => !e.hidden)
+        .map((e) => ({ name: extensionName(e.resolvedPath), path: e.resolvedPath, source: src(e.sourceInfo) })),
+      skills: loader.getSkills().skills.map((k) => ({ name: k.name, description: k.description, source: src(k.sourceInfo) })),
+      contextFiles: loader.getAgentsFiles().agentsFiles.map((f) => f.path),
+      constitution: {
+        ...this.config!.get().constitution,
+        defaultText: DEFAULT_CONSTITUTION,
+        file: this.config!.path,
+      },
+      gui: this.config!.get(),
+      contextWindow: s.model?.contextWindow ?? 0,
+      compactAt: s.model ? (s.model.contextWindow ?? 0) - sm.getCompactionReserveTokens(s.model) : 0,
+    };
+  }
+
+  async updateSettings(onEvent: (e: PiEvent) => void, patch: SettingsPatch): Promise<PiSettings> {
+    const s = this.requireSession();
+    const sm = this.requireServices().settingsManager;
+    if (patch.thinkingLevel !== undefined) s.setThinkingLevel(patch.thinkingLevel as Parameters<AgentSession["setThinkingLevel"]>[0]);
+    if (patch.defaultThinkingLevel !== undefined) sm.setDefaultThinkingLevel(patch.defaultThinkingLevel as Parameters<AgentSession["setThinkingLevel"]>[0]);
+    if (patch.defaultModel !== undefined) {
+      const slash = patch.defaultModel.indexOf("/");
+      sm.setDefaultModelAndProvider(patch.defaultModel.slice(0, slash), patch.defaultModel.slice(slash + 1));
+    }
+    if (patch.steeringMode) sm.setSteeringMode(patch.steeringMode);
+    if (patch.followUpMode) sm.setFollowUpMode(patch.followUpMode);
+    if (patch.compactionEnabled !== undefined) sm.setCompactionEnabled(patch.compactionEnabled);
+    if (patch.reserveTokens !== undefined) setNested(sm, "compaction", "reserveTokens", patch.reserveTokens);
+    if (patch.keepRecentTokens !== undefined) setNested(sm, "compaction", "keepRecentTokens", patch.keepRecentTokens);
+    if (patch.retryEnabled !== undefined) sm.setRetryEnabled(patch.retryEnabled);
+    if (patch.maxRetries !== undefined) setNested(sm, "retry", "maxRetries", patch.maxRetries);
+    if (patch.baseDelayMs !== undefined) setNested(sm, "retry", "baseDelayMs", patch.baseDelayMs);
+    if (patch.imageAutoResize !== undefined) sm.setImageAutoResize(patch.imageAutoResize);
+    if (patch.blockImages !== undefined) sm.setBlockImages(patch.blockImages);
+    if (patch.shellPath !== undefined) sm.setShellPath(patch.shellPath || undefined);
+    if (patch.shellCommandPrefix !== undefined) sm.setShellCommandPrefix(patch.shellCommandPrefix || undefined);
+    const config = this.config!;
+    if (patch.constitution) config.update("constitution", patch.constitution);
+    if (patch.context) config.update("context", patch.context);
+    if (patch.review) config.update("review", patch.review);
+    if (patch.escalation) config.update("escalation", patch.escalation);
+    if (patch.sampling) {
+      config.update("sampling", patch.sampling);
+      setSampling(config.get().sampling);
+    }
+    if (patch.toolPolicy) {
+      config.setToolPolicy(patch.toolPolicy.name, patch.toolPolicy.policy);
+      if (patch.toolPolicy.policy !== "deferred") this.onDemand.delete(patch.toolPolicy.name);
+      this.applyToolPolicy();
+      this.emitUsage(onEvent); // tool schemas are part of the context
+    }
+    if (patch.compactAt !== undefined && s.model) {
+      const window = s.model.contextWindow ?? 0;
+      setCompactionOverride(sm, `${s.model.provider}/${s.model.id}`, patch.compactAt > 0 ? window - patch.compactAt : undefined);
+    }
+    await sm.flush();
+    const errors = sm.drainErrors();
+    if (errors.length) throw new Error(`zapis ustawień: ${errors.map((e) => String(e.error ?? e)).join("; ")}`);
+    return this.settings();
+  }
+
+  async compact(onEvent: (e: PiEvent) => void): Promise<void> {
+    const s = this.requireSession();
+    if (this.busy) throw new Error("model pracuje — kompaktowanie po zakończeniu");
+    await s.compact();
+    this.emitUsage(onEvent);
+  }
+
+  get workingDir(): string {
+    return this.cwd;
+  }
+
+  /** Base URL of the active model's provider (llama-server router), if it has one. */
+  get baseUrl(): string | undefined {
+    return (this.session?.model as { baseUrl?: string } | undefined)?.baseUrl;
+  }
+
+  /**
+   * Move the active branch back to before the Nth-from-last user message and
+   * return its text for editing. The abandoned branch stays in the session tree.
+   */
+  async rewind(onEvent: (e: PiEvent) => void, fromEnd: number): Promise<string> {
+    const s = this.requireSession();
+    if (this.busy) throw new Error("model pracuje — zatrzymaj go przed cofaniem");
+    const users = s.sessionManager
+      .getBranch()
+      .filter((e) => e.type === "message" && (e as { message: { role: string } }).message.role === "user");
+    const target = users[users.length - 1 - fromEnd];
+    if (!target) throw new Error("nie znaleziono tej wiadomości w aktywnej gałęzi");
+    const res = await s.navigateTree(target.id, { summarize: false });
+    if (res.cancelled) throw new Error("cofnięcie anulowane");
+    this.emitUsage(onEvent);
+    return res.editorText ?? "";
+  }
+
+  async rename(onEvent: (e: PiEvent) => void, name: string): Promise<void> {
+    this.requireSession().setSessionName(name);
+    await this.emitInit(onEvent);
   }
 
   /** Replace the active session with a persisted one (sidebar "open"). */
   async openSession(onEvent: (e: PiEvent) => void, path: string): Promise<void> {
-    if (!this.services) throw new Error("not initialized — send init first");
+    this.requireServices();
     const sessionManager = SessionManager.open(path);
-    await this.startSession(onEvent, this.initCwd, sessionManager);
+    // Tools must run in the session's own project, not wherever the GUI started.
+    const cwd = sessionManager.getCwd() || this.cwd;
+    await this.startSession(onEvent, cwd, sessionManager);
   }
 
   /** Start a brand-new empty session (UI "Nowa sesja"). */
   async newSession(onEvent: (e: PiEvent) => void, cwd?: string): Promise<void> {
-    if (!this.services) throw new Error("not initialized — send init first");
-    const sessionManager = SessionManager.create(cwd ?? this.initCwd);
-    if (cwd) this.initCwd = cwd;
-    await this.startSession(onEvent, cwd ?? this.initCwd, sessionManager);
+    this.requireServices();
+    const target = cwd ?? this.cwd;
+    await this.startSession(onEvent, target, SessionManager.create(target));
   }
 
   private async startSession(
@@ -118,58 +637,127 @@ export class PiGateway {
     cwd: string,
     sessionManager: SessionManager,
   ): Promise<void> {
-    const model = this.resolveDefaultModel();
+    const services = this.requireServices();
+    const model = this.session?.model ?? this.resolveDefaultModel();
     this.dispose();
+    this.alwaysAllowed.clear(); // "always" is per session
+    this.onDemand.clear();
+    // One loader per session: project context files and extensions are cwd-bound,
+    // and this is where the GUI's own inline extension (permission gate) is attached.
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir: services.agentDir,
+      settingsManager: services.settingsManager,
+      extensionFactories: [{ name: "pi-gui", hidden: true, factory: this.extension }],
+      // GUI-bundled skills (visual design rules etc.), loaded on demand like any pi skill.
+      additionalSkillPaths: [SKILLS_DIR],
+    });
+    await resourceLoader.reload();
     const { session } = await createAgentSession({
       cwd,
       model,
-      modelRuntime: this.services!.modelRuntime,
-      settingsManager: this.services!.settingsManager,
+      modelRuntime: services.modelRuntime,
+      settingsManager: services.settingsManager,
       sessionManager,
+      resourceLoader,
     });
+    this.cwd = cwd;
     this.session = session;
+    this.applyToolPolicy();
     this.subscribe(session, onEvent);
-    this.emitInit(onEvent);
+    await this.emitInit(onEvent);
+    this.emitUsage(onEvent);
   }
 
   private resolveDefaultModel() {
     const settings = this.services!.settingsManager;
     const provider = settings.getDefaultProvider();
     const modelId = settings.getDefaultModel();
-    const model =
-      provider && modelId
-        ? this.services!.modelRuntime.getModel(provider, modelId)
-        : undefined;
+    const model = provider && modelId ? this.services!.modelRuntime.getModel(provider, modelId) : undefined;
     if (!model) {
       throw new Error(`default model not found: ${provider ?? "?"}/${modelId ?? "?"}`);
     }
     return model;
   }
 
-  private emitInit(onEvent: (e: PiEvent) => void): void {
+  private async emitInit(onEvent: (e: PiEvent) => void): Promise<void> {
     onEvent({
       kind: "init_done",
-      cwd: this.initCwd,
+      cwd: this.cwd,
       model: this.session?.model?.id ?? "",
+      provider: this.session?.model?.provider ?? "",
       sessionId: this.session?.sessionId ?? "",
+      sessionPath: this.session?.sessionFile ?? "",
+      sessionName: this.session?.sessionName ?? "",
+      branch: await gitBranch(this.cwd),
+      mode: this.mode,
+      user: userInfo().username,
     });
   }
 
-  async prompt(text: string, behavior?: "steer" | "followUp"): Promise<void> {
+  usage(): Usage | null {
+    const s = this.session;
+    if (!s) return null;
+    const ctx = s.getContextUsage();
+    const stats = s.getSessionStats();
+    const tokens = ctx?.tokens ?? null;
+    return {
+      contextTokens: tokens,
+      contextWindow: ctx?.contextWindow ?? s.model?.contextWindow ?? 0,
+      inputTokens: stats.tokens.input,
+      outputTokens: stats.tokens.output,
+      breakdown: tokens === null ? undefined : this.breakdown(tokens),
+    };
+  }
+
+  /** Same chars/4 heuristic pi uses; tools = the active schemas as sent to the model. */
+  private breakdown(total: number): Usage["breakdown"] {
     const s = this.requireSession();
-    // SDK rejects guessing: while streaming, default to followUp (do not interrupt current run).
-    const effective = behavior ?? (s.state.isStreaming ? "followUp" : undefined);
-    await s.prompt(text, effective ? { streamingBehavior: effective } : undefined);
+    const system = Math.ceil(s.systemPrompt.length / 4);
+    const active = new Set(s.getActiveToolNames());
+    const defs = s
+      .getAllTools()
+      .filter((t) => active.has(t.name))
+      .map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+    const tools = Math.ceil(JSON.stringify(defs).length / 4);
+    return { system, tools, messages: Math.max(0, total - system - tools) };
+  }
+
+  private emitUsage(onEvent: (e: PiEvent) => void): void {
+    const u = this.usage();
+    if (u) onEvent({ kind: "usage", usage: u });
+  }
+
+  async prompt(text: string, images?: Attachment[], behavior?: "steer" | "followUp"): Promise<void> {
+    const s = this.requireSession();
+    const imgs = images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
+    if (this.busy) {
+      // SDK rejects guessing while streaming: default to followUp (don't interrupt).
+      if ((behavior ?? "followUp") === "steer") await s.steer(text, imgs);
+      else await s.followUp(text, imgs);
+      return;
+    }
+    this.running = true;
+    try {
+      await s.prompt(text, imgs?.length ? { images: imgs } : undefined);
+    } finally {
+      this.running = false;
+    }
   }
 
   async abort(): Promise<void> {
-    const s = this.requireSession();
-    if (s.state.isStreaming) await s.abort();
+    // A run parked on an approval prompt can't observe abort — release it first.
+    this.denyAllPending();
+    void this.reviewer?.abort();
+    const s = this.session;
+    if (s && this.busy) await s.abort();
   }
 
   dispose(): void {
+    this.denyAllPending();
     this.session?.dispose();
     this.session = null;
+    this.running = false;
   }
 
   private requireSession(): AgentSession {
@@ -177,8 +765,15 @@ export class PiGateway {
     return this.session;
   }
 
+  private requireServices() {
+    if (!this.services) throw new Error("not initialized — send init first");
+    return this.services;
+  }
+
   private subscribe(session: AgentSession, onEvent: (e: PiEvent) => void): void {
     session.subscribe((event) => {
+      // A disposed session may still flush events; drop them.
+      if (session !== this.session) return;
       switch (event.type) {
         case "message_update": {
           const a = event.assistantMessageEvent;
@@ -202,7 +797,7 @@ export class PiGateway {
             kind: "tool_update",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
-            partialResult: event.partialResult,
+            partial: summarizeToolResult(event.partialResult),
           });
           return;
         case "tool_execution_end":
@@ -210,7 +805,7 @@ export class PiGateway {
             kind: "tool_end",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
-            result: { isError: event.isError, text: summarizeToolResult(event.result) },
+            result: withImages({ isError: event.isError, text: summarizeToolResult(event.result) }, event.result),
           });
           return;
         case "turn_start":
@@ -218,13 +813,26 @@ export class PiGateway {
           return;
         case "turn_end":
           onEvent({ kind: "turn_end" });
+          this.emitUsage(onEvent);
           return;
         case "agent_end":
           onEvent({ kind: "agent_end" });
           return;
-        case "agent_settled":
-          onEvent({ kind: "settled" });
+        case "agent_settled": {
+          this.emitUsage(onEvent);
+          const cp = this.runCheckpoint;
+          this.runCheckpoint = null;
+          // Report restorable file changes before "settled" so the UI attaches them to this turn.
+          const done = cp
+            ? changesSince(this.cwd, cp)
+                .then((files) => {
+                  if (files.length) onEvent({ kind: "checkpoint", checkpoint: cp, files: files.map((f) => f.path) });
+                })
+                .catch(() => undefined)
+            : Promise.resolve();
+          void done.then(() => onEvent({ kind: "settled" }));
           return;
+        }
         case "queue_update":
           onEvent({
             kind: "queue",
@@ -239,6 +847,22 @@ export class PiGateway {
   }
 }
 
+async function gitBranch(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await run("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd, timeout: 2000 });
+    return stdout.trim();
+  } catch {
+    return "";
+  }
+}
+
+function userImages(content: string | { type: string; data?: string; mimeType?: string }[]): Attachment[] {
+  if (typeof content === "string") return [];
+  return content
+    .filter((c) => c.type === "image" && typeof c.data === "string" && typeof c.mimeType === "string")
+    .map((c) => ({ data: c.data!, mimeType: c.mimeType! }));
+}
+
 function userText(content: string | { type: string; text?: string }[]): string {
   if (typeof content === "string") return content;
   return content
@@ -247,12 +871,71 @@ function userText(content: string | { type: string; text?: string }[]): string {
     .join("\n");
 }
 
-function summarizeToolResult(result: unknown, max = 400): string {
+/** Image blocks of a tool result, as the UI shows them. */
+export function toolImages(result: unknown): Attachment[] {
+  const content = (result as { content?: { type: string; data?: string; mimeType?: string }[] } | undefined)?.content;
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((c) => c.type === "image" && typeof c.data === "string" && typeof c.mimeType === "string")
+    .map((c) => ({ data: c.data!, mimeType: c.mimeType! }));
+}
+
+function withImages<T extends object>(summary: T, result: unknown): T & { images?: Attachment[] } {
+  const images = toolImages(result);
+  return images.length ? { ...summary, images } : summary;
+}
+
+export function summarizeToolResult(result: unknown, max = TOOL_TEXT_MAX): string {
   const content = (result as { content?: { type: string; text?: string }[] } | undefined)?.content;
-  if (!Array.isArray(content)) return "";
+  if (!Array.isArray(content)) return typeof result === "string" ? result.slice(0, max) : "";
   const text = content
     .filter((c) => c.type === "text" && typeof c.text === "string")
     .map((c) => c.text)
     .join("\n");
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+  return text.length > max ? `${text.slice(0, max)}\n…` : text;
+}
+
+/** Per-model auto-compaction reserve (compaction.modelOverrides) — same private path as setNested. */
+function setCompactionOverride(sm: SettingsManager, modelKey: string, reserveTokens: number | undefined): void {
+  const internal = sm as unknown as {
+    globalSettings: { compaction?: { modelOverrides?: Record<string, Record<string, unknown>> } };
+    markModified(field: string, nested?: string): void;
+    save(): void;
+  };
+  const compaction = { ...internal.globalSettings.compaction };
+  const overrides = { ...compaction.modelOverrides };
+  if (reserveTokens === undefined) {
+    const { reserveTokens: _drop, ...rest } = overrides[modelKey] ?? {};
+    if (Object.keys(rest).length) overrides[modelKey] = rest;
+    else delete overrides[modelKey];
+  } else {
+    overrides[modelKey] = { ...overrides[modelKey], reserveTokens: Math.max(1000, Math.round(reserveTokens)) };
+  }
+  internal.globalSettings.compaction = { ...compaction, modelOverrides: overrides };
+  internal.markModified("compaction", "modelOverrides");
+  internal.save();
+}
+
+/**
+ * SettingsManager has no public setters for these numbers. Mirror what its own
+ * setters do (write global, mark the nested key, save) — the file stays pi-readable.
+ */
+function setNested(sm: SettingsManager, field: "compaction" | "retry", key: string, value: number): void {
+  const internal = sm as unknown as {
+    globalSettings: Record<string, Record<string, unknown> | undefined>;
+    markModified(field: string, nested?: string): void;
+    save(): void;
+  };
+  internal.globalSettings[field] = { ...internal.globalSettings[field], [key]: value };
+  internal.markModified(field, key);
+  internal.save();
+}
+
+/** "…/pi-lens/dist/index.js" → "pi-lens"; "…/extensions/memory.ts" → "memory". */
+function extensionName(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  const file = parts.pop() ?? path;
+  if (!/^index\.[cm]?[jt]s$/.test(file)) return file.replace(/\.[cm]?[jt]s$/, "");
+  while (parts.length && ["dist", "src", "lib", "build"].includes(parts[parts.length - 1])) parts.pop();
+  return parts.pop() ?? file;
 }

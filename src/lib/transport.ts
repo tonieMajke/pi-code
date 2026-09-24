@@ -15,7 +15,11 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
     case "init":
       return { id, cmd: "init", cwd: cmd.cwd, sessionFile: cmd.sessionFile };
     case "prompt":
-      return { id, cmd: "prompt", text: cmd.text, behavior: cmd.behavior };
+      return { id, cmd: "prompt", text: cmd.text, images: cmd.images, behavior: cmd.behavior };
+    case "mode_set":
+      return { id, cmd: "mode_set", mode: cmd.mode };
+    case "approve":
+      return { id, cmd: "approve", toolCallId: cmd.toolCallId, decision: cmd.decision, reason: cmd.reason };
     case "abort":
       return { id, cmd: "abort" };
     case "status":
@@ -26,8 +30,36 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "session_open", path: cmd.path };
     case "session_new":
       return { id, cmd: "session_new", cwd: cmd.cwd };
+    case "session_rename":
+      return { id, cmd: "session_rename", name: cmd.name };
     case "history":
       return { id, cmd: "history" };
+    case "models_list":
+      return { id, cmd: "models_list" };
+    case "model_set":
+      return { id, cmd: "model_set", provider: cmd.provider, modelId: cmd.modelId };
+    case "rewind":
+      return { id, cmd: "rewind", fromEnd: cmd.fromEnd };
+    case "git_changes":
+      return { id, cmd: "git_changes" };
+    case "git_revert":
+      return { id, cmd: "git_revert", path: cmd.path };
+    case "files_list":
+      return { id, cmd: "files_list" };
+    case "router_status":
+      return { id, cmd: "router_status" };
+    case "notify":
+      return { id, cmd: "notify", title: cmd.title, body: cmd.body };
+    case "settings_get":
+      return { id, cmd: "settings_get" };
+    case "settings_set":
+      return { id, cmd: "settings_set", patch: cmd.patch };
+    case "compact":
+      return { id, cmd: "compact" };
+    case "escalate":
+      return { id, cmd: "escalate", model: cmd.model, reason: cmd.reason };
+    case "checkpoint_restore":
+      return { id, cmd: "checkpoint_restore", checkpoint: cmd.checkpoint };
     case "dispose":
       return { id, cmd: "dispose" };
   }

@@ -1,37 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { ClientCommand, ClientCommandInput, SidecarOut } from "../../shared/protocol";
-
-export interface PiTransport {
-  send(cmd: ClientCommandInput): void;
-  onMessage(cb: (msg: SidecarOut) => void): () => void;
-  onOpen(cb: () => void): () => void;
-  close(): void;
-}
-
-// Explicit per-variant construction (union spread breaks discriminant correlation).
-function withId(cmd: ClientCommandInput, id: number): ClientCommand {
-  switch (cmd.cmd) {
-    case "init":
-      return { id, cmd: "init", cwd: cmd.cwd, sessionFile: cmd.sessionFile };
-    case "prompt":
-      return { id, cmd: "prompt", text: cmd.text, behavior: cmd.behavior };
-    case "abort":
-      return { id, cmd: "abort" };
-    case "status":
-      return { id, cmd: "status" };
-    case "sessions_list":
-      return { id, cmd: "sessions_list", cwd: cmd.cwd };
-    case "session_open":
-      return { id, cmd: "session_open", path: cmd.path };
-    case "session_new":
-      return { id, cmd: "session_new", cwd: cmd.cwd };
-    case "history":
-      return { id, cmd: "history" };
-    case "dispose":
-      return { id, cmd: "dispose" };
-  }
-}
+import type { SidecarOut } from "../../shared/protocol";
+import { withId, type PiTransport } from "./transport";
 
 /**
  * In-app transport: the Rust shell spawns the sidecar directly (stdio),

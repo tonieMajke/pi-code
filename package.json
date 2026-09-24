@@ -9,17 +9,23 @@
     "dev": "concurrently -n bridge,vite -c blue,green \"pnpm dev:bridge\" \"vite\"",
     "desktop": "GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1 sh -c 'cd src-tauri && cargo build && cd .. && ./src-tauri/target/debug/pi-gui'",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "tsx dev/eval/run.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/source-serif-4": "^5.3.0",
     "@tauri-apps/api": "^2.11.1",
     "lucide-react": "^1.47.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "shiki": "^4.4.3"
+    "shiki": "^4.4.3",
+    "typebox": "1.3.27"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.2",

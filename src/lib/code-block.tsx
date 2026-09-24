@@ -1,4 +1,5 @@
 import { useEffect, useState, type ComponentProps } from "react";
+import { Check, Copy } from "lucide-react";
 import type { Highlighter } from "shiki";
 
 const THEME = "github-dark";
@@ -45,7 +46,10 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
 
   return (
     <div className="codeblock">
-      <span className="codeblock-lang">{lang}</span>
+      <div className="codeblock-head">
+        <span className="codeblock-lang">{lang === "text" ? "" : lang}</span>
+        <CopyButton text={code} />
+      </div>
       {html ? (
         <div className="codeblock-code" dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
@@ -54,6 +58,39 @@ export function CodeBlock({ code, lang }: { code: string; lang: string }) {
         </pre>
       )}
     </div>
+  );
+}
+
+export async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // WebKitGTK outside a secure context: fall back to the legacy path.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+}
+
+export function CopyButton({ text, label = "Kopiuj" }: { text: string; label?: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      className="copy-btn"
+      onClick={() => {
+        void copyText(text).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1400);
+        });
+      }}
+      title={label}
+    >
+      {done ? <Check size={13} /> : <Copy size={13} />}
+      <span>{done ? "Skopiowano" : label}</span>
+    </button>
   );
 }
 
@@ -68,5 +105,7 @@ const codeProps = (props: ComponentProps<"code">) => {
 
 const preProps = (props: ComponentProps<"pre">) => <>{props.children}</>;
 
+const linkProps = (props: ComponentProps<"a">) => <a {...props} target="_blank" rel="noreferrer" />;
+
 /** react-markdown components: swap the default <pre> for CodeBlock. */
-export const markdownComponents = { code: codeProps, pre: preProps };
+export const markdownComponents = { code: codeProps, pre: preProps, a: linkProps };
