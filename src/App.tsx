@@ -6,9 +6,12 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { WindowControls } from "./components/WindowControls";
 import { WindowFrame } from "./components/WindowFrame";
 import { Logo } from "./components/Logo";
-import { ArrowDown, FileDiff, ImagePlus, PanelLeftOpen, X } from "lucide-react";
+import { ArrowDown, FileDiff, FolderOpen, ImagePlus, PanelLeftOpen, X } from "lucide-react";
+import { Welcome } from "./components/Welcome";
+import type { OnboardingState } from "../shared/protocol";
 import { initialState, reducer, type InfoLevel, type LivePerf } from "./lib/reducer";
-import { createWsTransport, type PiTransport } from "./lib/transport";
+import { createWsTransport, type PiRequest, type PiTransport } from "./lib/transport";
+import { lang, plural, t } from "../shared/i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { createTauriTransport, inTauri } from "./lib/tauri";
 import { basename, formatDuration, formatTokens, sessionTitle } from "./lib/format";
@@ -43,7 +46,9 @@ import { modeInfo, nextMode } from "./lib/modes";
 import { Sidebar } from "./components/Sidebar";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
-import { SettingsDialog, type AppPrefs } from "./components/Settings";
+import { SettingsDialog, type AppPrefs, type SectionId } from "./components/Settings";
+import { saveLang } from "./lib/lang";
+import type { Lang } from "../shared/i18n";
 
 const SIDEBAR_KEY = "pi-gui.sidebar";
 const PREFS_KEY = "pi-gui.prefs";
@@ -77,6 +82,13 @@ export default function App() {
   const [router, setRouter] = useState<RouterStatus | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SectionId | undefined>(undefined);
+  /** First-run welcome: shown while set. */
+  const [welcome, setWelcome] = useState<OnboardingState | null>(null);
+  const openSettings = useCallback((section?: SectionId) => {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  }, []);
   const [settings, setSettings] = useState<PiSettings | null>(null);
   const [compacting, setCompacting] = useState(false);
   const [prefs, setPrefs] = useState(readPrefs);
@@ -92,8 +104,6 @@ export default function App() {
   const queuedOpenRef = useRef<string | null>(null);
   const openSessionRef = useRef<(path: string) => void>(() => {});
   const newSessionRef = useRef<(cwd: string) => void>(() => {});
-  /** Set when the composer's "Inny folder…" asked: the checked folder starts a session right away. */
-  const startInPickedRef = useRef(false);
   const [switching, setSwitching] = useState(false);
   const [layout, setLayoutState] = useState<SidebarState>({ groups: [], projects: [] });
   const layoutRef = useRef(layout);
@@ -116,12 +126,25 @@ export default function App() {
   const transportRef = useRef<PiTransport | null>(null);
 
   const send = useCallback((cmd: Parameters<PiTransport["send"]>[0]) => transportRef.current?.send(cmd), []);
+  const requestsRef = useRef(new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }[]>());
+  /** Reply as a promise. Replies carry the command name, not the id: same-name requests are answered in order. */
+  const request = useCallback<PiRequest>(
+    <T,>(cmd: Parameters<PiTransport["send"]>[0]) =>
+      new Promise<T>((resolve, reject) => {
+        if (!transportRef.current) return reject(new Error(t("brak połączenia z pi")));
+        const queue = requestsRef.current.get(cmd.cmd) ?? [];
+        queue.push({ resolve: resolve as (v: unknown) => void, reject });
+        requestsRef.current.set(cmd.cmd, queue);
+        transportRef.current.send(cmd);
+      }),
+    [],
+  );
 
   const toast = useCallback((text: string, level: InfoLevel = "info") => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t.slice(-3), { id, text, level }]);
+    setToasts((ts) => [...ts.slice(-3), { id, text, level }]);
     // Errors stay until closed; the rest fades out.
-    if (level !== "error") setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
+    if (level !== "error") setTimeout(() => setToasts((ts) => ts.filter((x) => x.id !== id)), 6000);
   }, []);
 
   // A run may have created/renamed a session — refresh the sidebar after every settled.
@@ -132,10 +155,10 @@ export default function App() {
   useEffect(() => {
     // In the Tauri shell the sidecar is spawned by Rust (stdio); in the
     // browser we go through the local WS dev bridge.
-    const t: PiTransport = inTauri() ? createTauriTransport() : createWsTransport(`ws://127.0.0.1:${import.meta.env.VITE_BRIDGE_PORT ?? 9877}`);
-    transportRef.current = t;
-    imageStore.setFetcher((ref) => t.send({ cmd: "history_image", ref }));
-    const off = t.onMessage((msg) => {
+    const tp: PiTransport = inTauri() ? createTauriTransport() : createWsTransport(`ws://127.0.0.1:${import.meta.env.VITE_BRIDGE_PORT ?? 9877}`);
+    transportRef.current = tp;
+    imageStore.setFetcher((ref) => tp.send({ cmd: "history_image", ref }));
+    const off = tp.onMessage((msg) => {
       if ("event" in msg) {
         const e = msg.event;
         switch (e.kind) {
@@ -143,18 +166,24 @@ export default function App() {
             if (commandOutputRef.current) dispatch({ type: "info", text: e.text, level: e.level });
             else toast(e.text, e.level);
             return;
+          case "memory":
+            if (e.added.length)
+              toast(
+                `${plural(e.added.length, ["Zapamiętano:", "Zapamiętano {n} fakty:", "Zapamiętano {n} faktów:"], ["Remembered:", "Remembered {n} facts:"])} ${e.added.map((x) => x.text).join(" · ")}`,
+              );
+            return;
           case "editor_text":
             setInput(e.text);
             requestAnimationFrame(() => inputRef.current?.focus());
             return;
           case "session_changed":
             dispatch({ type: "clear" });
-            t.send({ cmd: "history" });
-            t.send({ cmd: "sessions_list" });
+            tp.send({ cmd: "history" });
+            tp.send({ cmd: "sessions_list" });
             return;
           case "init_done":
             // Extensions, templates and skills are per project — refresh "/" on every (re)init.
-            t.send({ cmd: "commands_list" });
+            tp.send({ cmd: "commands_list" });
             break;
           case "settled":
             commandOutputRef.current = false;
@@ -166,6 +195,12 @@ export default function App() {
             break;
         }
         dispatch({ type: "event", event: e, at: Date.now() });
+        return;
+      }
+      const pending = msg.cmd ? requestsRef.current.get(msg.cmd)?.shift() : undefined;
+      if (pending) {
+        if (msg.ok) pending.resolve(msg.result);
+        else pending.reject(new Error(msg.error));
         return;
       }
       if (msg.cmd === "session_open") {
@@ -208,22 +243,11 @@ export default function App() {
         case "sidebar_get":
           setLayoutState(msg.result as SidebarState);
           return;
-        case "dir_check": {
-          const { path } = msg.result as { path: string };
-          const next = addProject(layoutRef.current, path);
-          setLayoutState(next);
-          t.send({ cmd: "sidebar_set", state: next });
-          if (startInPickedRef.current) {
-            startInPickedRef.current = false;
-            newSessionRef.current(path);
-          } else toast(`Dodano projekt ${basename(path)} — „+” przy nim zaczyna nową sesję.`);
-          return;
-        }
         case "session_delete": {
           const { path, active } = msg.result as { path: string; active: boolean };
           setLayoutState((l) => moveToGroup(l, path, null));
           if (active) resetViewRef.current();
-          t.send({ cmd: "sessions_list" });
+          tp.send({ cmd: "sessions_list" });
           toast("Czat przeniesiony do kosza systemowego.");
           return;
         }
@@ -245,8 +269,8 @@ export default function App() {
         case "session_fork":
           setInput((msg.result as { text: string }).text);
           afterHistoryRef.current = [{ role: "info", text: "Nowa sesja od wybranej wiadomości — wiadomość czeka w polu do poprawienia.", level: "info" }];
-          t.send({ cmd: "history" });
-          t.send({ cmd: "sessions_list" });
+          tp.send({ cmd: "history" });
+          tp.send({ cmd: "sessions_list" });
           requestAnimationFrame(() => inputRef.current?.focus());
           return;
         case "session_handoff": {
@@ -258,15 +282,15 @@ export default function App() {
           afterHistoryRef.current = [
             { role: "info", text: `Handoff z ${origin}: model napisał prompt dla tej nowej sesji — czeka w polu wiadomości. Popraw go i wyślij Enterem.`, level: "info" },
           ];
-          t.send({ cmd: "history" });
-          t.send({ cmd: "sessions_list" });
+          tp.send({ cmd: "history" });
+          tp.send({ cmd: "sessions_list" });
           requestAnimationFrame(() => inputRef.current?.focus());
           return;
         }
         case "session_clone":
           afterHistoryRef.current = [{ role: "info", text: "To jest kopia sesji — oryginał został bez zmian.", level: "info" }];
-          t.send({ cmd: "history" });
-          t.send({ cmd: "sessions_list" });
+          tp.send({ cmd: "history" });
+          tp.send({ cmd: "sessions_list" });
           return;
         case "session_stats":
           dispatch({ type: "info", text: formatStats(msg.result as SessionStats) });
@@ -278,7 +302,7 @@ export default function App() {
           dispatch({ type: "models", models: msg.result as ModelSummary[] });
           return;
         case "session_rename":
-          t.send({ cmd: "sessions_list" });
+          tp.send({ cmd: "sessions_list" });
           return;
         case "git_changes":
         case "git_revert":
@@ -307,35 +331,35 @@ export default function App() {
         case "checkpoint_restore":
           if (restoringRef.current) dispatch({ type: "restored", checkpoint: restoringRef.current });
           restoringRef.current = null;
-          t.send({ cmd: "git_changes" });
+          tp.send({ cmd: "git_changes" });
           return;
         case "compact":
           setSettings(msg.result as PiSettings);
           setCompacting(false);
           if (afterHistoryRef.current.length) afterHistoryRef.current.push({ role: "info", text: "Kontekst skompaktowany.", level: "info" });
-          t.send({ cmd: "history" });
+          tp.send({ cmd: "history" });
           return;
         case "rewind":
           setInput((msg.result as { text: string }).text);
-          t.send({ cmd: "history" });
+          tp.send({ cmd: "history" });
           requestAnimationFrame(() => inputRef.current?.focus());
           return;
       }
     });
-    const offOpen = t.onOpen(() => {
+    const offOpen = tp.onOpen(() => {
       // Boot (or re-boot after bridge restart): init is idempotent in the sidecar.
-      t.send({ cmd: "appearance_get" });
-      t.send({ cmd: "init" });
-      t.send({ cmd: "commands_list" });
-      t.send({ cmd: "history" });
-      t.send({ cmd: "sessions_list" });
-      t.send({ cmd: "models_list" });
-      t.send({ cmd: "sidebar_get" });
+      tp.send({ cmd: "appearance_get" });
+      tp.send({ cmd: "init", lang: lang() });
+      tp.send({ cmd: "commands_list" });
+      tp.send({ cmd: "history" });
+      tp.send({ cmd: "sessions_list" });
+      tp.send({ cmd: "models_list" });
+      tp.send({ cmd: "sidebar_get" });
     });
     return () => {
       off();
       offOpen();
-      t.close();
+      tp.close();
       transportRef.current = null;
       imageStore.setFetcher(null);
     };
@@ -544,18 +568,38 @@ export default function App() {
     send({ cmd: "sidebar_set", state: next });
   };
 
-  /** Native folder picker in the app; a typed path in the browser build. Both are checked by the sidecar. */
-  const addProjectFolder = async (start = false) => {
+  /**
+   * Native folder picker in the app, a typed path in the browser build — or when the
+   * native dialog fails (it used to fail silently). The sidecar checks the path.
+   */
+  const pickFolder = async (): Promise<string | null> => {
     let dir: string | null = null;
     if (inTauri()) {
-      const picked = await openDialog({ directory: true, multiple: false, title: "Wybierz folder projektu" }).catch(() => null);
-      dir = typeof picked === "string" ? picked : null;
+      try {
+        const picked = await openDialog({ directory: true, multiple: false, title: t("Wybierz folder projektu"), defaultPath: state.cwd || undefined });
+        dir = typeof picked === "string" ? picked : null;
+      } catch (e) {
+        toast(t("Okno wyboru folderu nie zadziałało ({err}) — wpisz ścieżkę.", { err: e instanceof Error ? e.message : String(e) }), "warning");
+        dir = window.prompt(t("Ścieżka folderu projektu"), state.cwd);
+      }
     } else {
-      dir = window.prompt("Ścieżka folderu projektu", state.cwd);
+      dir = window.prompt(t("Ścieżka folderu projektu"), state.cwd);
     }
-    if (!dir?.trim()) return;
-    startInPickedRef.current = start;
-    send({ cmd: "dir_check", path: dir.trim() });
+    if (!dir?.trim()) return null;
+    return (await request<{ path: string }>({ cmd: "dir_check", path: dir.trim() })).path;
+  };
+
+  /** Sidebar "+" (just add) and the composer's "Inny folder…" (add and start a session there). */
+  const addProjectFolder = async (start = false) => {
+    try {
+      const path = await pickFolder();
+      if (!path) return;
+      setLayout(addProject(layoutRef.current, path));
+      if (start) newSessionRef.current(path);
+      else toast(t("Dodano projekt {name} — „+” przy nim zaczyna nową sesję.", { name: basename(path) }));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "error");
+    }
   };
 
   const openSession = (path: string) => {
@@ -575,10 +619,43 @@ export default function App() {
     if (state.connected) send({ cmd: "settings_get" });
   }, [settingsOpen, state.connected, state.sessionPath, state.model, send]);
 
+  // First run: the sidecar remembers whether the welcome was done (pi-gui.json), so it
+  // shows once per machine, not per browser profile.
+  useEffect(() => {
+    if (!state.connected) return;
+    request<OnboardingState>({ cmd: "onboarding_get" }).then(
+      (o) => !o.done && setWelcome(o),
+      () => undefined,
+    );
+  }, [state.connected, request]);
+
+  const showWelcome = () => request<OnboardingState>({ cmd: "onboarding_get" }).then(setWelcome, () => undefined);
+  const finishWelcome = () => {
+    setWelcome(null);
+    send({ cmd: "onboarding_done" });
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
   // Rust owns the close button's behaviour; tell it the user's choice (and on every start).
   useEffect(() => {
     if (inTauri()) void invoke("set_close_to_tray", { enabled: prefs.closeToTray }).catch(() => undefined);
   }, [prefs.closeToTray]);
+
+  /** Credentials or models.json changed: pi reloaded its model list, the composer follows. */
+  const refreshModels = useCallback(() => {
+    send({ cmd: "models_list" });
+    send({ cmd: "settings_get" });
+  }, [send]);
+
+  /** Module-level labels are built once at load, so a language switch reloads the window. */
+  const changeLang = useCallback(
+    (l: Lang) => {
+      saveLang(l);
+      send({ cmd: "lang_set", lang: l });
+      setTimeout(() => window.location.reload(), 50);
+    },
+    [send],
+  );
 
   const savePrefs = (p: AppPrefs) => {
     setPrefs(p);
@@ -820,6 +897,9 @@ export default function App() {
     { id: "changes", group: "Akcje", label: changesOpen ? "Ukryj panel zmian" : "Pokaż panel zmian", hint: <kbd>Ctrl Shift D</kbd>, run: () => setChangesOpen((o) => !o) },
     { id: "sidebar", group: "Akcje", label: sidebarOpen ? "Zwiń panel sesji" : "Pokaż panel sesji", hint: <kbd>Ctrl B</kbd>, run: toggleSidebar },
     { id: "settings", group: "Akcje", label: "Ustawienia", hint: <kbd>Ctrl ,</kbd>, keywords: "settings konfiguracja", run: () => setSettingsOpen(true) },
+    { id: "providers", group: "Akcje", label: t("Dostawcy modeli"), keywords: "providers api key openrouter vllm ollama klucz", run: () => openSettings("providers") },
+    { id: "memory", group: "Akcje", label: t("Pamięć"), keywords: "memory pamięć zapamiętane agents.md", run: () => openSettings("memory") },
+    { id: "welcome", group: "Akcje", label: t("Ekran powitalny"), keywords: "welcome onboarding powitanie start", run: () => void showWelcome() },
     { id: "compact", group: "Akcje", label: "Kompaktuj kontekst", keywords: "compact", run: () => { setCompacting(true); send({ cmd: "compact" }); } },
     { id: "handoff", group: "Akcje", label: "Handoff → nowa sesja", keywords: "handoff podsumowanie przekazanie", run: () => runSlash("handoff", "") },
     ...(state.busy ? [{ id: "stop", group: "Akcje", label: "Przerwij model", hint: <kbd>Esc</kbd>, run: stop }] : []),
@@ -878,6 +958,7 @@ export default function App() {
       provider={state.provider}
       models={state.models}
       onModel={(m) => send({ cmd: "model_set", provider: m.provider, modelId: m.id })}
+      onProviders={() => openSettings("providers")}
       thinking={settings?.thinking ?? null}
       onThinking={onThinking}
       cwd={state.cwd}
@@ -995,6 +1076,13 @@ export default function App() {
             <h1>Co dalej, Majku?</h1>
             {dialog && <ExtensionDialog key={dialog.id} request={dialog} queued={state.dialogs.length - 1} onAnswer={answerDialog} />}
             {composer}
+            {state.cwd && (
+              <button className="hero-folder" onClick={() => void addProjectFolder(true)} title={t("Model pracuje na plikach w tym folderze")}>
+                <FolderOpen size={13} />
+                <span className="hf-path">{state.cwd.replace(/^\/home\/[^/]+/, "~")}</span>
+                <span className="hf-change">{t("zmień folder")}</span>
+              </button>
+            )}
             <div className="hero-hints">
               <kbd>/</kbd> komendy · <kbd>Ctrl N</kbd> nowa sesja · <kbd>Ctrl K</kbd> szukaj · <kbd>Ctrl B</kbd> panel
             </div>
@@ -1102,9 +1190,34 @@ export default function App() {
           onImage={setBackgroundImage}
           imageBusy={imageBusy}
           onClose={() => setSettingsOpen(false)}
+          request={request}
+          initialSection={settingsSection}
+          onProvidersChanged={refreshModels}
+          onLang={changeLang}
         />
       )}
-      <Toasts toasts={toasts} onClose={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
+      {welcome && (
+        <Welcome
+          info={welcome}
+          request={request}
+          models={state.models}
+          model={state.model}
+          provider={state.provider}
+          cwd={state.cwd}
+          projects={[...new Set(state.sessions.map((x) => x.cwd).filter(Boolean))]}
+          onModel={(m) => send({ cmd: "model_set", provider: m.provider, modelId: m.id })}
+          onDefaultModel={(key) => send({ cmd: "settings_set", patch: { defaultModel: key } })}
+          onProvidersChanged={refreshModels}
+          onPickFolder={pickFolder}
+          onFolder={(dir) => {
+            setLayout(addProject(layoutRef.current, dir));
+            newSessionRef.current(dir);
+          }}
+          onLang={changeLang}
+          onDone={finishWelcome}
+        />
+      )}
+      <Toasts toasts={toasts} onClose={(id) => setToasts((ts) => ts.filter((x) => x.id !== id))} />
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
     </div>
   );
@@ -1146,11 +1259,11 @@ function StuckCard({
 }
 
 function formatStats(st: SessionStats): string {
-  const t = st.tokens;
+  const tok = st.tokens;
   const lines = [
     "**Sesja**",
     `- wiadomości: ${st.userMessages} Twoich, ${st.assistantMessages} modelu, ${st.toolCalls} wywołań narzędzi`,
-    `- tokeny: ${formatTokens(t.input)} wejście${t.cacheRead ? ` (z cache ${formatTokens(t.cacheRead)})` : ""}, ${formatTokens(t.output)} wyjście, razem ${formatTokens(t.total)}`,
+    `- tokeny: ${formatTokens(tok.input)} wejście${tok.cacheRead ? ` (z cache ${formatTokens(tok.cacheRead)})` : ""}, ${formatTokens(tok.output)} wyjście, razem ${formatTokens(tok.total)}`,
   ];
   if (st.cost > 0) lines.push(`- koszt: $${st.cost.toFixed(4)}`);
   if (st.sessionFile) lines.push(`- plik: \`${st.sessionFile.replace(/^\/home\/[^/]+/, "~")}\``);

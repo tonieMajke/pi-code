@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Sparkles, Terminal, Trash2, Wrench, X } from "lucide-react";
+import { BookMarked, Plug, Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Sparkles, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Appearance, AppearancePatch, ModelSummary, PiSettings, QueueMode, SamplingConfig, SettingsPatch, ToolPolicy } from "../../shared/protocol";
 import { formatTokens } from "../lib/format";
+import { NumberField, Row, Segmented, TextField, Toggle } from "./settings-ui";
+import { MemorySection } from "./MemorySection";
+import { ProvidersPanel } from "./Providers";
+import type { PiRequest } from "../lib/transport";
+import { lang, LANGS, t, type Lang } from "../../shared/i18n";
 import { ACCENTS, BACKGROUNDS } from "../lib/appearance";
 
 const SECTIONS = [
   { id: "model", label: "Model i myślenie", icon: Brain },
+  { id: "providers", label: "Dostawcy modeli", icon: Plug },
+  { id: "memory", label: "Pamięć", icon: BookMarked },
   { id: "constitution", label: "Konstytucja", icon: Scale },
   { id: "quality", label: "Recenzja i eskalacja", icon: ShieldCheck },
   { id: "taste", label: "Gust", icon: Sparkles },
@@ -17,7 +24,7 @@ const SECTIONS = [
   { id: "look", label: "Wygląd", icon: Palette },
   { id: "app", label: "Aplikacja", icon: Bell },
 ] as const;
-type SectionId = (typeof SECTIONS)[number]["id"];
+export type SectionId = (typeof SECTIONS)[number]["id"];
 
 const THINKING_LABELS: Record<string, string> = {
   off: "wył.",
@@ -46,7 +53,15 @@ export function SettingsDialog({
   onImage,
   imageBusy,
   onClose,
+  request,
+  onProvidersChanged,
+  onLang,
+  initialSection,
 }: {
+  request: PiRequest;
+  onProvidersChanged: () => void;
+  onLang: (l: Lang) => void;
+  initialSection?: SectionId;
   settings: PiSettings | null;
   models: ModelSummary[];
   model: string;
@@ -64,7 +79,7 @@ export function SettingsDialog({
   imageBusy: boolean;
   onClose: () => void;
 }) {
-  const [section, setSection] = useState<SectionId>("model");
+  const [section, setSection] = useState<SectionId>(initialSection ?? "model");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -103,6 +118,14 @@ export function SettingsDialog({
           </button>
           {section === "look" ? (
             <AppearanceSection a={appearance} onPatch={onAppearance} onImage={onImage} busy={imageBusy} />
+          ) : section === "providers" ? (
+            <>
+              <h2>{t("Dostawcy modeli")}</h2>
+              <p className="settings-note">
+                {t("Pi Code działa z każdym dostawcą, którego obsługuje pi: lokalny llama.cpp, vLLM, LM Studio, Ollama, OpenRouter, Anthropic, OpenAI i inne. Statystyki prędkości na żywo, status GPU i limit myślenia działają tylko z llama.cpp.")}
+              </p>
+              <ProvidersPanel request={request} onChanged={onProvidersChanged} />
+            </>
           ) : !s ? (
             <div className="s-empty">wczytywanie ustawień pi…</div>
           ) : (
@@ -145,6 +168,8 @@ export function SettingsDialog({
                   <SamplingRows cfg={s.gui.sampling} onPatch={onPatch} />
                 </>
               )}
+
+              {section === "memory" && <MemorySection s={s} request={request} onPatch={onPatch} busy={busy} />}
 
               {section === "constitution" && <ConstitutionSection c={s.constitution} onPatch={onPatch} />}
 
@@ -283,6 +308,9 @@ export function SettingsDialog({
               {section === "app" && (
                 <>
                   <h2>Aplikacja</h2>
+                  <Row label={t("Język")} desc={t("Język interfejsu. Po zmianie okno przeładuje się.")}>
+                    <Segmented value={lang()} options={LANGS.map((l) => ({ value: l.id, label: l.label }))} onChange={(v) => onLang(v as Lang)} />
+                  </Row>
                   <Row label="Powiadomienia" desc="Systemowe powiadomienie, gdy pi skończy albo czeka na zgodę, a okno jest w tle.">
                     <Toggle value={prefs.notifications} onChange={(v) => onPrefs({ ...prefs, notifications: v })} />
                   </Row>
@@ -299,46 +327,6 @@ export function SettingsDialog({
   );
 }
 
-function Row({ label, desc, children }: { label: ReactNode; desc?: ReactNode; children: ReactNode }) {
-  return (
-    <div className="s-row">
-      <div className="s-row-text">
-        <div className="s-row-label">{label}</div>
-        {desc && <div className="s-row-desc">{desc}</div>}
-      </div>
-      <div className="s-row-ctl">{children}</div>
-    </div>
-  );
-}
-
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button role="switch" aria-checked={value} className={`toggle ${value ? "on" : ""}`} onClick={() => onChange(!value)}>
-      <span />
-    </button>
-  );
-}
-
-function Segmented({
-  value,
-  options,
-  onChange,
-}: {
-  value: string;
-  options: { value: string; label: string }[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="segmented">
-      {options.map((o) => (
-        <button key={o.value} className={o.value === value ? "on" : ""} onClick={() => o.value !== value && onChange(o.value)}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function QueueSelect({ value, onChange }: { value: QueueMode; onChange: (v: QueueMode) => void }) {
   return (
     <Segmented
@@ -348,61 +336,6 @@ function QueueSelect({ value, onChange }: { value: QueueMode; onChange: (v: Queu
         { value: "all", label: "wszystkie" },
       ]}
       onChange={(v) => onChange(v as QueueMode)}
-    />
-  );
-}
-
-/** Commits on blur / Enter so every keystroke doesn't rewrite settings.json. */
-function NumberField({
-  value,
-  min,
-  max,
-  step = 1,
-  onCommit,
-}: {
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  onCommit: (v: number) => void;
-}) {
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => setDraft(String(value)), [value]);
-  const commit = () => {
-    const n = Math.round(Number(draft));
-    if (!Number.isFinite(n) || (min !== undefined && n < min) || (max !== undefined && n > max)) {
-      setDraft(String(value));
-      return;
-    }
-    if (n !== value) onCommit(n);
-  };
-  return (
-    <input
-      className="s-input num"
-      type="number"
-      value={draft}
-      min={min}
-      max={max}
-      step={step}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === "Enter" && commit()}
-    />
-  );
-}
-
-function TextField({ value, placeholder, onCommit }: { value: string; placeholder?: string; onCommit: (v: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
-  const commit = () => draft.trim() !== value && onCommit(draft.trim());
-  return (
-    <input
-      className="s-input"
-      value={draft}
-      placeholder={placeholder}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === "Enter" && commit()}
     />
   );
 }

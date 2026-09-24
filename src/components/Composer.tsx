@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ArrowUp, Brain, Check, ChevronDown, Clock, Cpu, Folder, FolderPlus, GitBranch, Paperclip, Square, X } from "lucide-react";
+import { Plug, ArrowUp, Brain, Check, ChevronDown, Clock, Cpu, Folder, FolderPlus, GitBranch, Paperclip, Square, X } from "lucide-react";
 import type { Attachment, ModelSummary, PermissionMode, PiSettings, SessionSummary, Usage } from "../../shared/protocol";
 import { Menu, type MenuItem } from "./Menu";
+import { t } from "../../shared/i18n";
 import { basename, formatTokens } from "../lib/format";
 import type { Outgoing } from "../lib/reducer";
 import { MODES, modeInfo } from "../lib/modes";
@@ -35,6 +36,7 @@ export function Composer({
   provider,
   models,
   onModel,
+  onProviders,
   thinking,
   onThinking,
   cwd,
@@ -69,6 +71,8 @@ export function Composer({
   provider: string;
   models: ModelSummary[];
   onModel: (m: ModelSummary) => void;
+  /** Settings → model providers (add an API key or a server). */
+  onProviders: () => void;
   /** null while settings haven't loaded yet, or the current model doesn't report thinking support. */
   thinking: PiSettings["thinking"] | null;
   onThinking: (level: string) => void;
@@ -241,6 +245,12 @@ export function Composer({
     active: m.id === model && m.provider === provider,
     onSelect: () => onModel(m),
   }));
+  modelItems.push({
+    key: "__providers",
+    label: <span className="proj-item"><span className="proj-name">{t("Dostawcy modeli…")}</span></span>,
+    hint: <Plug size={14} />,
+    onSelect: onProviders,
+  });
 
   const thinkingItems: MenuItem[] = (thinking?.available ?? []).map((l) => ({
     key: l,
@@ -519,7 +529,7 @@ export function Composer({
             trigger={
               <span className="chip model-chip" title={`${provider}/${model}`}>
                 <Cpu size={13} />
-                <span>{model || "model"}</span>
+                <span>{model || t("wybierz model")}</span>
                 <ChevronDown size={12} className="chev" />
               </span>
             }

@@ -1,5 +1,8 @@
 import type { ClientCommand, ClientCommandInput, SidecarOut } from "../../shared/protocol";
 
+/** One command, its reply as a promise (App keeps one pending request per command name). */
+export type PiRequest = <T = unknown>(cmd: ClientCommandInput) => Promise<T>;
+
 export interface PiTransport {
   send(cmd: ClientCommandInput): void;
   onMessage(cb: (msg: SidecarOut) => void): () => void;

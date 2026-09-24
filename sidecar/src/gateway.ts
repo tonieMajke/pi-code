@@ -73,7 +73,7 @@ import {
   MIN_USER_MESSAGES,
   parseFacts,
 } from "./memory.js";
-import { addEndpoint, listProviders, logoutProvider, probeEndpoint, removeEndpoint, setProviderKey } from "./providers.js";
+import { addEndpoint, endpointId, listProviders, logoutProvider, probeEndpoint, removeEndpoint, setProviderKey } from "./providers.js";
 import { setLang, t, type Lang } from "../../shared/i18n.js";
 
 const run = promisify(execFile);
@@ -1009,10 +1009,17 @@ export class PiGateway {
     const rt = this.requireServices().modelRuntime;
     await rt.refresh({ allowNetwork: false }).catch(() => undefined);
     const s = this.session;
-    if (s && !s.model) {
-      const model = this.resolveDefaultModel();
+    if (s && !this.realModel()) {
+      // The snapshot fills asynchronously after refresh — ask for the list itself.
+      const model = this.resolveDefaultModel() ?? (await rt.getAvailable().catch(() => []))[0];
       if (model) {
         await s.setModel(model);
+        // First provider on a fresh install: it becomes the default for new sessions too.
+        const sm = this.requireServices().settingsManager;
+        if (!sm.getDefaultModel()) {
+          sm.setDefaultModelAndProvider(model.provider, model.id);
+          await sm.flush();
+        }
         await this.emitInit(onEvent);
       }
     }
@@ -1035,6 +1042,10 @@ export class PiGateway {
   }
 
   async addEndpoint(onEvent: (e: PiEvent) => void, ep: CustomEndpoint): Promise<ProviderInfo[]> {
+    // Same id as a built-in or extension provider would silently replace its models.
+    const id = endpointId(ep.name);
+    const taken = (await this.providers()).find((p) => p.id === id && !p.custom);
+    if (taken) throw new Error(t("nazwa „{name}” należy już do dostawcy {provider} — wybierz inną", { name: ep.name, provider: taken.name }));
     addEndpoint(this.modelsFile, ep);
     return this.providersChanged(onEvent);
   }
@@ -1048,7 +1059,7 @@ export class PiGateway {
     const localLlama = await fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(1500) })
       .then((r) => (r.headers.get("server") ?? "").toLowerCase().includes("llama.cpp"))
       .catch(() => false);
-    return { done: this.config!.get().onboarded, localLlama, hasModel: Boolean(this.session?.model), home: homedir() };
+    return { done: this.config!.get().onboarded, localLlama, hasModel: Boolean(this.realModel()), home: homedir() };
   }
 
   finishOnboarding(): void {
@@ -1378,7 +1389,7 @@ export class PiGateway {
     sessionManager: SessionManager,
   ): Promise<void> {
     const services = this.requireServices();
-    const model = this.session?.model ?? this.resolveDefaultModel();
+    const model = this.realModel() ?? this.resolveDefaultModel();
     await this.extensionsReady; // never dispose a session its extensions are still starting on
     const left = this.session;
     const leftSnapshot = left ? { id: left.sessionId, messages: [...left.state.messages], model: left.model } : null;
@@ -1484,12 +1495,22 @@ export class PiGateway {
     return model ?? runtime.getAvailableSnapshot()[0];
   }
 
+  /**
+   * The session's model when it is a real one. Without any provider the SDK fills in a
+   * placeholder ("unknown"/"unknown") that no registry knows.
+   */
+  private realModel() {
+    const m = this.session?.model;
+    return m && this.services?.modelRuntime.getModel(m.provider, m.id) ? m : undefined;
+  }
+
   private async emitInit(onEvent: (e: PiEvent) => void): Promise<void> {
+    const model = this.realModel();
     onEvent({
       kind: "init_done",
       cwd: this.cwd,
-      model: this.session?.model?.id ?? "",
-      provider: this.session?.model?.provider ?? "",
+      model: model?.id ?? "",
+      provider: model?.provider ?? "",
       sessionId: this.session?.sessionId ?? "",
       sessionPath: this.session?.sessionFile ?? "",
       sessionName: this.session?.sessionName ?? "",
