@@ -38,7 +38,30 @@ export type ClientCommand =
   /** Hand the current task to a stronger model ("provider/id"). */
   | { id: number; cmd: "escalate"; model: string; reason: string }
   | { id: number; cmd: "checkpoint_restore"; checkpoint: string }
+  | { id: number; cmd: "appearance_get" }
+  | { id: number; cmd: "appearance_set"; patch: AppearancePatch }
+  /** data: URL of an already downscaled image, or null to remove it. */
+  | { id: number; cmd: "appearance_image"; dataUrl: string | null }
   | { id: number; cmd: "dispose" };
+
+export type ThemeChoice = "system" | "dark" | "light";
+
+/** Look of the app, stored by the sidecar in ~/.pi/agent/pi-gui-appearance.json. */
+export type Appearance = {
+  theme: ThemeChoice;
+  /** "#rrggbb" or null = theme default. */
+  accent: string | null;
+  /** "#rrggbb" or null = theme default; a custom background also decides light/dark. */
+  background: string | null;
+  /** Background picture: dim = 0..0.95 tint of the background colour over it, blur in px. */
+  image: { dim: number; blur: number };
+  /** data: URL of the stored picture (replies only). */
+  imageUrl: string | null;
+};
+
+export type AppearancePatch = Partial<Pick<Appearance, "theme" | "accent" | "background">> & {
+  image?: Partial<Appearance["image"]>;
+};
 
 export type QueueMode = "all" | "one-at-a-time";
 

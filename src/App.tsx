@@ -7,7 +7,10 @@ import { initialState, reducer, type LivePerf } from "./lib/reducer";
 import { createWsTransport, type PiTransport } from "./lib/transport";
 import { createTauriTransport, inTauri } from "./lib/tauri";
 import { formatDuration, formatTokens, sessionTitle } from "./lib/format";
+import { applyAppearance, cachedAppearance, downscaleImage } from "./lib/appearance";
 import type {
+  Appearance,
+  AppearancePatch,
   Attachment,
   GitChanges,
   HistoryItem,
@@ -62,6 +65,10 @@ export default function App() {
   const [settings, setSettings] = useState<PiSettings | null>(null);
   const [compacting, setCompacting] = useState(false);
   const [prefs, setPrefs] = useState(readPrefs);
+  const [appearance, setAppearance] = useState<Appearance>(cachedAppearance);
+  const [imageBusy, setImageBusy] = useState(false);
+  const appearancePatchRef = useRef<AppearancePatch>({});
+  const appearanceTimerRef = useRef<number | undefined>(undefined);
   const restoringRef = useRef<string | null>(null);
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
@@ -94,6 +101,7 @@ export default function App() {
       }
       if (!msg.ok) {
         if (msg.cmd === "compact") setCompacting(false);
+        if (msg.cmd === "appearance_image") setImageBusy(false);
         dispatch({ type: "error", error: `${msg.cmd ?? "pi"}: ${msg.error}` });
         return;
       }
@@ -125,6 +133,15 @@ export default function App() {
         case "settings_set":
           setSettings(msg.result as PiSettings);
           return;
+        // appearance_set replies are ignored: the UI state is applied optimistically
+        // and an older reply must not snap a slider back while it is being dragged.
+        case "appearance_get":
+          setAppearance(msg.result as Appearance);
+          return;
+        case "appearance_image":
+          setAppearance((a) => ({ ...a, imageUrl: (msg.result as Appearance).imageUrl }));
+          setImageBusy(false);
+          return;
         case "checkpoint_restore":
           if (restoringRef.current) dispatch({ type: "restored", checkpoint: restoringRef.current });
           restoringRef.current = null;
@@ -144,6 +161,7 @@ export default function App() {
     });
     const offOpen = t.onOpen(() => {
       // Boot (or re-boot after bridge restart): init is idempotent in the sidecar.
+      t.send({ cmd: "appearance_get" });
       t.send({ cmd: "init" });
       t.send({ cmd: "history" });
       t.send({ cmd: "sessions_list" });
@@ -156,6 +174,40 @@ export default function App() {
       transportRef.current = null;
     };
   }, []);
+
+  useEffect(() => applyAppearance(appearance), [appearance]);
+
+  const patchAppearance = useCallback(
+    (patch: AppearancePatch) => {
+      setAppearance((a) => ({ ...a, ...patch, image: { ...a.image, ...patch.image } }));
+      // Sliders fire per pixel: batch the patches and save once they settle.
+      const pending = appearancePatchRef.current;
+      appearancePatchRef.current = { ...pending, ...patch, image: { ...pending.image, ...patch.image } };
+      window.clearTimeout(appearanceTimerRef.current);
+      appearanceTimerRef.current = window.setTimeout(() => {
+        send({ cmd: "appearance_set", patch: appearancePatchRef.current });
+        appearancePatchRef.current = {};
+      }, 250);
+    },
+    [send],
+  );
+
+  const setBackgroundImage = useCallback(
+    (file: File | null) => {
+      if (!file) {
+        send({ cmd: "appearance_image", dataUrl: null });
+        return;
+      }
+      setImageBusy(true);
+      downscaleImage(file)
+        .then((dataUrl) => send({ cmd: "appearance_image", dataUrl }))
+        .catch((err) => {
+          setImageBusy(false);
+          dispatch({ type: "error", error: `obraz tła: ${err instanceof Error ? err.message : String(err)}` });
+        });
+    },
+    [send],
+  );
 
   // Changes panel: refresh when opened, after every run, and when a mutating tool finishes.
   const toolEnds = state.messages.reduce(
@@ -461,6 +513,11 @@ export default function App() {
       }}
     >
       {inTauri() && <WindowFrame />}
+      {appearance.imageUrl && (
+        <div className="app-bg" aria-hidden>
+          <div className="app-bg-img" style={{ backgroundImage: `url("${appearance.imageUrl}")` }} />
+        </div>
+      )}
       {dragging && (
         <div className="drop-overlay">
           <ImagePlus size={28} />
@@ -618,6 +675,10 @@ export default function App() {
             send({ cmd: "compact" });
           }}
           compacting={compacting}
+          appearance={appearance}
+          onAppearance={patchAppearance}
+          onImage={setBackgroundImage}
+          imageBusy={imageBusy}
           onClose={() => setSettingsOpen(false)}
         />
       )}

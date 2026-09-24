@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Brain, Bell, Box, FileText, Layers, RotateCw, Scale, ShieldCheck, Terminal, Wrench, X } from "lucide-react";
-import type { ModelSummary, PiSettings, QueueMode, SamplingConfig, SettingsPatch, ToolPolicy } from "../../shared/protocol";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Terminal, Trash2, Wrench, X } from "lucide-react";
+import type { Appearance, AppearancePatch, ModelSummary, PiSettings, QueueMode, SamplingConfig, SettingsPatch, ToolPolicy } from "../../shared/protocol";
 import { formatTokens } from "../lib/format";
+import { ACCENTS, BACKGROUNDS } from "../lib/appearance";
 
 const SECTIONS = [
   { id: "model", label: "Model i myślenie", icon: Brain },
@@ -12,6 +13,7 @@ const SECTIONS = [
   { id: "behavior", label: "Zachowanie", icon: RotateCw },
   { id: "shell", label: "Powłoka", icon: Terminal },
   { id: "resources", label: "Rozszerzenia i skille", icon: Box },
+  { id: "look", label: "Wygląd", icon: Palette },
   { id: "app", label: "Aplikacja", icon: Bell },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -38,6 +40,10 @@ export function SettingsDialog({
   onPatch,
   onCompact,
   compacting,
+  appearance,
+  onAppearance,
+  onImage,
+  imageBusy,
   onClose,
 }: {
   settings: PiSettings | null;
@@ -50,6 +56,11 @@ export function SettingsDialog({
   onPatch: (p: SettingsPatch) => void;
   onCompact: () => void;
   compacting: boolean;
+  appearance: Appearance;
+  onAppearance: (p: AppearancePatch) => void;
+  /** File to import as the background picture, or null to remove it. */
+  onImage: (file: File | null) => void;
+  imageBusy: boolean;
   onClose: () => void;
 }) {
   const [section, setSection] = useState<SectionId>("model");
@@ -89,7 +100,9 @@ export function SettingsDialog({
           <button className="icon-btn settings-close" onClick={onClose} title="Zamknij (Esc)">
             <X size={16} />
           </button>
-          {!s ? (
+          {section === "look" ? (
+            <AppearanceSection a={appearance} onPatch={onAppearance} onImage={onImage} busy={imageBusy} />
+          ) : !s ? (
             <div className="s-empty">wczytywanie ustawień pi…</div>
           ) : (
             <>
@@ -646,5 +659,132 @@ function OptionalNumber({
       onBlur={commit}
       onKeyDown={(e) => e.key === "Enter" && commit()}
     />
+  );
+}
+
+export function AppearanceSection({
+  a,
+  onPatch,
+  onImage,
+  busy,
+}: {
+  a: Appearance;
+  onPatch: (p: AppearancePatch) => void;
+  onImage: (file: File | null) => void;
+  busy: boolean;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const custom = a.accent !== null || a.background !== null || a.imageUrl !== null || a.theme !== "system";
+  return (
+    <>
+      <h2>Wygląd</h2>
+      <Row
+        label="Motyw"
+        desc={a.background ? "Ustala go teraz kolor tła (jasne tło → jasny motyw), żeby tekst był czytelny." : undefined}
+      >
+        <Segmented
+          value={a.theme}
+          options={[
+            { value: "system", label: "systemowy" },
+            { value: "dark", label: "ciemny" },
+            { value: "light", label: "jasny" },
+          ]}
+          onChange={(v) => onPatch({ theme: v as Appearance["theme"] })}
+        />
+      </Row>
+      <Row label="Kolor akcentu" desc="Przyciski, zaznaczenia, ikony. Logo zostaje w kolorze marki.">
+        <Swatches colors={ACCENTS} value={a.accent} onChange={(accent) => onPatch({ accent })} />
+      </Row>
+      <Row label="Kolor tła" desc="Z niego liczone są panele, dymki i bloki kodu.">
+        <Swatches colors={BACKGROUNDS} value={a.background} onChange={(background) => onPatch({ background })} />
+      </Row>
+      <Row label="Obraz tła" desc="Zdjęcie pod całym oknem. Zapisywane zmniejszone (maks. 2560 px) obok ustawień pi.">
+        <div className="bg-pick">
+          {a.imageUrl && <img className="bg-thumb" src={a.imageUrl} alt="" />}
+          <button className="btn" disabled={busy} onClick={() => fileRef.current?.click()}>
+            <ImagePlus size={14} />
+            {busy ? "wczytywanie…" : a.imageUrl ? "Zmień…" : "Wybierz obraz…"}
+          </button>
+          {a.imageUrl && (
+            <button className="icon-btn" title="Usuń obraz" onClick={() => onImage(null)}>
+              <Trash2 size={15} />
+            </button>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) onImage(f);
+            }}
+          />
+        </div>
+      </Row>
+      {a.imageUrl && (
+        <>
+          <Row label="Przyciemnienie obrazu" desc="Ile koloru tła kłaść na zdjęcie — wyżej = czytelniejszy tekst.">
+            <Slider value={a.image.dim} min={0} max={0.95} step={0.01} format={(v) => `${Math.round(v * 100)}%`} onChange={(dim) => onPatch({ image: { dim } })} />
+          </Row>
+          <Row label="Rozmycie obrazu">
+            <Slider value={a.image.blur} min={0} max={40} step={1} format={(v) => `${v} px`} onChange={(blur) => onPatch({ image: { blur } })} />
+          </Row>
+        </>
+      )}
+      <Row label="Przywróć domyślny wygląd">
+        <button
+          className="btn"
+          disabled={!custom}
+          onClick={() => {
+            onPatch({ theme: "system", accent: null, background: null, image: { dim: 0.55, blur: 0 } });
+            if (a.imageUrl) onImage(null);
+          }}
+        >
+          <RotateCcw size={14} />
+          Resetuj
+        </button>
+      </Row>
+    </>
+  );
+}
+
+/** Preset colours + a custom picker; the first "auto" dot = theme default (null). */
+function Swatches({ colors, value, onChange }: { colors: string[]; value: string | null; onChange: (v: string | null) => void }) {
+  const isCustom = value !== null && !colors.includes(value);
+  return (
+    <div className="swatches">
+      <button className={`swatch auto ${value === null ? "on" : ""}`} title="Domyślny motywu" onClick={() => onChange(null)} />
+      {colors.map((c) => (
+        <button key={c} className={`swatch ${value === c ? "on" : ""}`} style={{ background: c }} title={c} onClick={() => onChange(c)} />
+      ))}
+      <label className={`swatch custom ${isCustom ? "on" : ""}`} title="Własny kolor" style={isCustom ? { background: value } : undefined}>
+        <input type="color" value={value ?? "#808080"} onChange={(e) => onChange(e.target.value)} />
+      </label>
+    </div>
+  );
+}
+
+function Slider({
+  value,
+  min,
+  max,
+  step,
+  format,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (v: number) => string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="slider">
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <span className="slider-val">{format(value)}</span>
+    </div>
   );
 }

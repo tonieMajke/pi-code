@@ -1,4 +1,6 @@
 import readline from "node:readline";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { AppearanceStore } from "./appearance.js";
 import { PiGateway } from "./gateway.js";
 import { gitChanges, gitRevert, listFiles, notify, routerStatus } from "./workspace.js";
 import type { ClientCommand, CommandName, PiEvent, SidecarOut } from "../../shared/protocol.js";
@@ -7,6 +9,7 @@ import type { ClientCommand, CommandName, PiEvent, SidecarOut } from "../../shar
 console.log = console.info = console.debug = (...args: unknown[]) => console.error(...args);
 
 const gateway = new PiGateway();
+const appearance = new AppearanceStore(process.env.PI_GUI_APPEARANCE_DIR ?? getAgentDir());
 
 function out(msg: SidecarOut): void {
   process.stdout.write(`${JSON.stringify(msg)}\n`);
@@ -43,6 +46,9 @@ const KNOWN = new Set<CommandName>([
   "compact",
   "escalate",
   "checkpoint_restore",
+  "appearance_get",
+  "appearance_set",
+  "appearance_image",
   "dispose",
 ]);
 
@@ -134,6 +140,16 @@ async function handle(cmd: ClientCommand): Promise<void> {
       case "notify":
         await notify(cmd.title, cmd.body);
         reply(cmd.id, cmd.cmd, true, { done: true });
+        return;
+      // Appearance does not need a session: the UI applies it before init finishes.
+      case "appearance_get":
+        reply(cmd.id, cmd.cmd, true, appearance.get());
+        return;
+      case "appearance_set":
+        reply(cmd.id, cmd.cmd, true, appearance.update(cmd.patch));
+        return;
+      case "appearance_image":
+        reply(cmd.id, cmd.cmd, true, appearance.setImage(cmd.dataUrl));
         return;
       case "settings_get":
         requireReady();

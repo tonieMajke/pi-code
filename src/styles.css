@@ -35,8 +35,37 @@
   --radius: 12px;
 }
 
+/* Light theme: explicit (data-theme, set from Settings → Wygląd) or following the system. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #faf9f5;
+  --bg-side: #f0eee6;
+  --surface: #ffffff;
+  --surface-2: #f3f1ea;
+  --hover: rgba(31, 30, 29, 0.05);
+  --active: rgba(31, 30, 29, 0.08);
+  --bubble: #f0eee6;
+  --code-bg: #f3f1ea;
+  --text: #1f1e1d;
+  --text-2: #3d3c38;
+  --muted: #6f6d66;
+  --faint: #9b998f;
+  --border: rgba(31, 30, 29, 0.1);
+  --border-strong: rgba(31, 30, 29, 0.2);
+  --accent: #c96442;
+  --accent-hover: #b5573a;
+  --accent-soft: rgba(201, 100, 66, 0.12);
+  --ok: #3f8f3a;
+  --err: #c2412f;
+  --add-bg: rgba(63, 143, 58, 0.1);
+  --add-fg: #2d6a2a;
+  --del-bg: rgba(194, 65, 47, 0.1);
+  --del-fg: #9c2f20;
+  --shadow: 0 8px 28px rgba(31, 30, 29, 0.14);
+}
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     color-scheme: light;
     --bg: #faf9f5;
     --bg-side: #f0eee6;
@@ -98,7 +127,19 @@ kbd {
 ::-webkit-scrollbar-thumb:hover { background-color: var(--faint); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-.app { display: flex; height: 100%; }
+.app { display: flex; height: 100%; isolation: isolate; }
+
+/* Background picture (Settings → Wygląd): under everything, tinted with --bg by --bg-dim. */
+.app-bg { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.app-bg-img {
+  position: absolute; inset: 0;
+  background-size: cover; background-position: center;
+  filter: blur(var(--bg-blur, 0px));
+  transform: scale(1.04); /* blurred edges would fade to transparent */
+}
+.app-bg::after { content: ""; position: absolute; inset: 0; background: var(--bg); opacity: var(--bg-dim, 0.55); }
+html.has-bg-image .sidebar,
+html.has-bg-image .changes { background: color-mix(in srgb, var(--bg-side) 78%, transparent); }
 
 /* Undecorated Tauri window: rounded corners on a transparent window + resize grips.
    clip-path (not overflow) so fixed overlays and modal backdrops get clipped too. */
@@ -925,3 +966,22 @@ select.s-input { width: 260px; }
   display: flex; align-items: center; justify-content: center; padding: 32px; cursor: zoom-out;
 }
 .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; box-shadow: var(--shadow); }
+
+/* ── Settings → Wygląd ──────────────────── */
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 300px; }
+.swatch {
+  width: 22px; height: 22px; border-radius: 50%; padding: 0; flex: none;
+  border: 1px solid var(--border-strong); position: relative; cursor: pointer;
+}
+.swatch.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-2); }
+.swatch.auto { background: linear-gradient(135deg, var(--surface-2) 50%, var(--accent) 50%); }
+.swatch.custom {
+  background: conic-gradient(#e5695b, #e0a340, #7fb069, #4fa3a5, #5b8def, #9b7be0, #d4679a, #e5695b);
+  overflow: hidden;
+}
+.swatch.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; border: 0; padding: 0; }
+.bg-pick { display: flex; align-items: center; gap: 8px; }
+.bg-thumb { width: 64px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-strong); }
+.slider { display: flex; align-items: center; gap: 10px; }
+.slider input[type="range"] { width: 160px; accent-color: var(--accent); }
+.slider-val { width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }

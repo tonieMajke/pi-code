@@ -60,6 +60,12 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "escalate", model: cmd.model, reason: cmd.reason };
     case "checkpoint_restore":
       return { id, cmd: "checkpoint_restore", checkpoint: cmd.checkpoint };
+    case "appearance_get":
+      return { id, cmd: "appearance_get" };
+    case "appearance_set":
+      return { id, cmd: "appearance_set", patch: cmd.patch };
+    case "appearance_image":
+      return { id, cmd: "appearance_image", dataUrl: cmd.dataUrl };
     case "dispose":
       return { id, cmd: "dispose" };
   }
