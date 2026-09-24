@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { WindowControls } from "./components/WindowControls";
+import { WindowFrame } from "./components/WindowFrame";
 import { Logo } from "./components/Logo";
 import { ArrowDown, FileDiff, ImagePlus, PanelLeftOpen, X } from "lucide-react";
 import { initialState, reducer, type LivePerf } from "./lib/reducer";
@@ -459,6 +460,7 @@ export default function App() {
         void addFiles(imageFiles(e.dataTransfer.files));
       }}
     >
+      {inTauri() && <WindowFrame />}
       {dragging && (
         <div className="drop-overlay">
           <ImagePlus size={28} />

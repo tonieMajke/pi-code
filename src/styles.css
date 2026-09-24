@@ -100,6 +100,35 @@ kbd {
 
 .app { display: flex; height: 100%; }
 
+/* Undecorated Tauri window: rounded corners on a transparent window + resize grips.
+   clip-path (not overflow) so fixed overlays and modal backdrops get clipped too. */
+:root { --win-radius: 10px; }
+html.win-frameless, html.win-frameless body { background: transparent; }
+html.win-frameless #root {
+  background: var(--bg);
+  border-radius: var(--win-radius);
+  clip-path: inset(0 round var(--win-radius));
+}
+html.win-frameless #root::after {
+  content: ""; position: fixed; inset: 0; z-index: 200; pointer-events: none;
+  border: 1px solid var(--border-strong); border-radius: var(--win-radius);
+}
+html.win-max #root { border-radius: 0; clip-path: none; }
+html.win-max #root::after, html.win-max .win-grips { display: none; }
+
+.win-grip { position: fixed; z-index: 210; }
+.win-grip.n, .win-grip.s { left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
+.win-grip.e, .win-grip.w { top: 14px; bottom: 14px; width: 6px; cursor: ew-resize; }
+.win-grip.n { top: 0; }
+.win-grip.s { bottom: 0; }
+.win-grip.e { right: 0; }
+.win-grip.w { left: 0; }
+.win-grip.ne, .win-grip.nw, .win-grip.se, .win-grip.sw { width: 14px; height: 14px; }
+.win-grip.nw { top: 0; left: 0; cursor: nwse-resize; }
+.win-grip.se { bottom: 0; right: 0; cursor: nwse-resize; }
+.win-grip.ne { top: 0; right: 0; cursor: nesw-resize; }
+.win-grip.sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border-radius: 8px;
