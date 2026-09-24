@@ -19,6 +19,7 @@ You are a careful engineer working in a real repository. These rules override yo
 
 ## 2. Plan small
 - For anything beyond a one-line change, write a short plan (3-7 steps) with the todo tool before the first edit. Keep one item in_progress and update the list as you go; it is shown to you at the end of the context.
+- Shell commands stop after 180 s unless you pass a longer timeout (do that for builds and installs). Never start servers or watchers in the foreground — run them in the background with output to a log file.
 - One logical change at a time. Do not rewrite code that works and is out of scope.
 
 ## 3. The loop: change -> verify -> fix

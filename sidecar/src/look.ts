@@ -60,22 +60,41 @@ async function firefoxShot(url: string, out: string, width: number, height: numb
 }
 
 /** Page screenshot through the shared browser; the one-shot Firefox CLI is the fallback. */
-export async function pageShot(url: string, out: string, width: number, height: number, fullPage = false): Promise<void> {
+/**
+ * Screenshot a page. Returns what the page itself complained about (JS errors, console
+ * errors, WebGL/shader messages) — a pretty screenshot of a page that threw is a lie.
+ */
+export async function pageShot(url: string, out: string, width: number, height: number, fullPage = false): Promise<string[]> {
+  const problems: string[] = [];
   try {
     await withPage({ width, height }, async (page) => {
-      await open(page, url);
+      const onError = (err: unknown) => problems.push(`JS error: ${err instanceof Error ? err.message : String(err)}`);
+      const onConsole = (msg: { type(): string; text(): string }) => {
+        const text = msg.text();
+        if (msg.type() === "error" || /webgl|shader|glsl/i.test(text)) problems.push(`console ${msg.type()}: ${text}`);
+      };
+      page.on("pageerror", onError);
+      page.on("console", onConsole);
+      try {
+        await open(page, url);
       if (fullPage) {
         const h = await page.evaluate(() => document.scrollingElement?.scrollHeight ?? 0);
         await page.screenshot({ path: out as `${string}.png`, clip: { x: 0, y: 0, width, height: Math.min(Math.max(h, height), MAX_PAGE_HEIGHT) }, captureBeyondViewport: true });
       } else {
         await page.screenshot({ path: out as `${string}.png` });
       }
+      } finally {
+        page.off("pageerror", onError);
+        page.off("console", onConsole);
+      }
     });
   } catch (err) {
     if (fullPage) throw err;
     await firefoxShot(url, out, width, height);
   }
+  return [...new Set(problems.map((p) => p.slice(0, 300)))].slice(0, 8);
 }
+
 
 function mermaidPage(source: string): string {
   const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -95,13 +114,13 @@ async function render(input: LookInput, cwd: string, dir: string, out: string): 
   const t = resolveTarget(input.target, cwd);
   const size = `${width}x${height}${input.fullPage ? " full page" : ""}`;
   if (t.kind === "url") {
-    await pageShot(t.url, out, width, height, input.fullPage);
-    return `screenshot of ${t.url} at ${size}`;
+    const problems = await pageShot(t.url, out, width, height, input.fullPage);
+    return `screenshot of ${t.url} at ${size}${problemNote(problems)}`;
   }
   const ext = extname(t.path).toLowerCase();
   if (PAGE.has(ext)) {
-    await pageShot(pathToFileURL(t.path).href, out, width, height, input.fullPage);
-    return `screenshot of ${input.target} at ${size}`;
+    const problems = await pageShot(pathToFileURL(t.path).href, out, width, height, input.fullPage);
+    return `screenshot of ${input.target} at ${size}${problemNote(problems)}`;
   }
   if (ext === ".svg") {
     await run("rsvg-convert", ["--width", String(Math.min(width, 1600)), "--keep-aspect-ratio", "--background-color", "white", "-o", out, t.path], { timeout: 30000 });
@@ -122,6 +141,26 @@ async function render(input: LookInput, cwd: string, dir: string, out: string): 
     return `image ${input.target}`;
   }
   throw new Error(`don't know how to render ${ext || "this file"} — supported: URL, .html, .svg, .dot/.gv, .mmd, images`);
+}
+
+function problemNote(problems: string[]): string {
+  if (!problems.length) return "";
+  return `\n⚠ The page reported problems while loading — fix these before judging the picture:\n${problems.map((p) => `- ${p}`).join("\n")}`;
+}
+
+/**
+ * A render that is (almost) one flat colour: an empty page, a black canvas, a scene that
+ * did not draw. Returns a warning, or "".
+ */
+export async function blankWarning(file: string): Promise<string> {
+  try {
+    const { stdout } = await run("magick", [file, "-colorspace", "sRGB", "-format", "%[fx:standard_deviation] %[hex:u.p{0,0}]", "info:"], { timeout: 30000 });
+    const [sd, hex] = stdout.trim().split(" ");
+    if (Number(sd) >= 0.015) return "";
+    return `\n⚠ The picture is almost a single flat colour (#${hex.slice(0, 6)}): the page is empty, black or did not draw. Do not call this done — find out why (console errors, a canvas that never renders, content hidden or off-screen).`;
+  } catch {
+    return "";
+  }
 }
 
 let labelFont: Promise<string[]> | null = null;
@@ -151,10 +190,14 @@ export async function look(input: LookInput, cwd: string): Promise<LookResult> {
       await run("magick", [out, "-crop", `${cw}x${ch}+${Math.max(0, Math.round(x))}+${Math.max(0, Math.round(y))}`, "+repage", "-filter", "point", "-resize", "200%", out], { timeout: 30000 });
       note += `, crop ${cw}x${ch} at ${Math.round(x)},${Math.round(y)} zoomed 2x`;
     }
+    const blank = input.crop ? "" : await blankWarning(out);
     // Keep the model's image budget sane.
     await run("magick", [out, "-resize", `${MAX_SIDE}x${MAX_SIDE}>`, out], { timeout: 30000 });
     const d = await dims(out);
-    return { data: readFileSync(out).toString("base64"), mimeType: "image/png", note: `${note} → ${d.w}x${d.h} px` };
+    // Warnings (page errors, flat picture) go last, after the size, where they are read.
+    const [head, ...warn] = note.split("\n⚠");
+    const tail = [...warn.map((w) => `\n⚠${w}`), blank].join("");
+    return { data: readFileSync(out).toString("base64"), mimeType: "image/png", note: `${head} → ${d.w}x${d.h} px${tail}` };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

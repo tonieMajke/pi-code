@@ -34,6 +34,10 @@ import type {
   SlashCommandInfo,
   Usage,
 } from "../../shared/protocol.js";
+import { withMidrunNote } from "../../shared/midrun.js";
+
+/** bash calls without their own timeout get this one; builds that need longer must say so. */
+const DEFAULT_BASH_TIMEOUT_S = 180;
 import { ExtensionDialogs } from "./extension-ui.js";
 import { SidebarStore } from "./sidebar-store.js";
 import { decide, PLAN_PROMPT } from "./permissions.js";
@@ -240,6 +244,8 @@ export class PiGateway {
         }
       }
       progress.beforeTool(event.toolName, input);
+      // A command without a time limit can hang the whole turn for minutes (watchers, prompts, servers).
+      if (event.toolName === "bash" && input.timeout === undefined) input.timeout = DEFAULT_BASH_TIMEOUT_S;
       if (event.toolName === "edit" && !process.env.PI_GUI_NO_EDITFIX) {
         // Small models get the code right and the whitespace wrong, or edit from memory.
         const fix = repairEdit(input, this.cwd);
@@ -1317,8 +1323,8 @@ export class PiGateway {
       this.taste?.userSpoke();
       if (finishIntent(text)) this.guard?.userFinish();
       // SDK rejects guessing while streaming: default to followUp (don't interrupt).
-      if ((behavior ?? "followUp") === "steer") await s.steer(text, imgs);
-      else await s.followUp(text, imgs);
+      if ((behavior ?? "followUp") === "steer") await s.steer(withMidrunNote(text), imgs);
+      else await s.followUp(withMidrunNote(text), imgs);
       return;
     }
     this.running = true;

@@ -52,3 +52,20 @@ describe("look extras", () => {
 
   afterAll(() => closeBrowser());
 });
+
+describe("look warnings", () => {
+  afterAll(() => closeBrowser());
+
+  it("says so when the page threw or rendered nothing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-gui-look-warn-"));
+    writeFileSync(join(dir, "black.html"), `<body style="margin:0;background:#000"><canvas id=c width=800 height=600></canvas><script>undefinedThing.draw()</script></body>`);
+    const r = await look({ target: "black.html" }, dir);
+    expect(r.note).toMatch(/→ \d+x\d+ px/);
+    expect(r.note).toMatch(/JS error: .*undefinedThing/);
+    expect(r.note).toMatch(/almost a single flat colour \(#000000\)/);
+
+    writeFileSync(join(dir, "ok.html"), `<body style="font:24px sans-serif"><h1>Hello</h1><p>Some text on a page that works.</p></body>`);
+    const ok = await look({ target: "ok.html" }, dir);
+    expect(ok.note).not.toMatch(/⚠/);
+  }, 60000);
+});

@@ -10,6 +10,7 @@ import type {
   UiRequest,
   Usage,
 } from "../../shared/protocol";
+import { stripMidrunNote } from "../../shared/midrun";
 
 export type RequestStats = Extract<Perf, { phase: "done" }>;
 export type LivePerf = Exclude<Perf, { phase: "done" }>;
@@ -207,7 +208,8 @@ function historyMessages(items: HistoryItem[]): Msg[] {
   );
 }
 
-function userMsg(text: string, images?: Attachment[]): Msg {
+function userMsg(raw: string, images?: Attachment[]): Msg {
+  const text = stripMidrunNote(raw);
   return images?.length ? { role: "user", text, images } : { role: "user", text };
 }
 
