@@ -10,7 +10,7 @@ export interface PiTransport {
 
 // Explicit per-variant construction: spreading a union does not preserve
 // discriminant correlation, so TS rejects `{ ...cmd, id }` as ClientCommand.
-function withId(cmd: ClientCommandInput, id: number): ClientCommand {
+export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
   switch (cmd.cmd) {
     case "init":
       return { id, cmd: "init", cwd: cmd.cwd, sessionFile: cmd.sessionFile };

@@ -1,0 +1,107 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ClientCommand } from "../../shared/protocol";
+import { createWsTransport, withId } from "./transport";
+
+describe("withId", () => {
+  it("builds a valid command for every variant", () => {
+    const cases: [ReturnType<typeof withId>, string][] = [
+      [withId({ cmd: "init", cwd: "/w" }, 1), "init"],
+      [withId({ cmd: "prompt", text: "x" }, 2), "prompt"],
+      [withId({ cmd: "abort" }, 3), "abort"],
+      [withId({ cmd: "status" }, 4), "status"],
+      [withId({ cmd: "sessions_list" }, 5), "sessions_list"],
+      [withId({ cmd: "session_open", path: "/s" }, 6), "session_open"],
+      [withId({ cmd: "session_new" }, 7), "session_new"],
+      [withId({ cmd: "history" }, 8), "history"],
+      [withId({ cmd: "dispose" }, 9), "dispose"],
+    ];
+    for (const [cmd, name] of cases) {
+      expect(cmd.cmd).toBe(name);
+      expect(cmd.id).toBeGreaterThan(0);
+    }
+    // round-trip: everything serializes back to the same discriminant
+    for (const [cmd] of cases) {
+      expect(JSON.parse(JSON.stringify(cmd)).cmd).toBe(cmd.cmd);
+    }
+  });
+});
+
+/** Minimal in-memory WebSocket stand-in driving the real reconnect logic. */
+class FakeWebSocket {
+  static instances: FakeWebSocket[] = [];
+  static OPEN = 1;
+  static CLOSED = 3;
+  readyState = FakeWebSocket.OPEN;
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  sent: string[] = [];
+
+  constructor(url: string) {
+    this.url = url;
+    FakeWebSocket.instances.push(this);
+  }
+  url: string;
+  send(data: string) {
+    this.sent.push(data);
+  }
+  close() {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.onclose?.();
+  }
+  /** Simulate the server dropping the connection. */
+  drop() {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.onclose?.();
+  }
+  /** Simulate the socket finishing its handshake. */
+  fireOpen() {
+    this.onopen?.();
+  }
+}
+
+afterEach(() => {
+  FakeWebSocket.instances = [];
+  vi.restoreAllMocks();
+});
+
+describe("createWsTransport", () => {
+  it("fires onOpen after connect and sends commands as JSON lines", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const t = createWsTransport("ws://127.0.0.1:9876");
+    const opened: number[] = [];
+    const t2 = vi.fn();
+    t.onOpen(() => opened.push(1));
+    t.onMessage(t2);
+    FakeWebSocket.instances[0].fireOpen();
+    expect(opened).toEqual([1]);
+
+    t.send({ cmd: "status" });
+    const sent = JSON.parse(FakeWebSocket.instances[0].sent[0]) as ClientCommand;
+    expect(sent).toMatchObject({ cmd: "status" });
+    expect(typeof sent.id).toBe("number");
+
+    // inbound message reaches onMessage
+    FakeWebSocket.instances[0].onmessage?.({ data: JSON.stringify({ id: 1, ok: true }) });
+    expect(t2).toHaveBeenCalledWith({ id: 1, ok: true });
+    t.close();
+  });
+
+  it("reconnects after a dropped connection and fires onOpen again", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.useFakeTimers();
+    const t = createWsTransport("ws://127.0.0.1:9876");
+    let opens = 0;
+    t.onOpen(() => opens++);
+    FakeWebSocket.instances[0].fireOpen();
+    expect(opens).toBe(1);
+
+    FakeWebSocket.instances[0].drop();
+    expect(FakeWebSocket.instances).toHaveLength(1); // not yet — backoff timer pending
+    await vi.advanceTimersByTimeAsync(500);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    FakeWebSocket.instances[1].fireOpen();
+    expect(opens).toBe(2);
+    t.close();
+  });
+});
