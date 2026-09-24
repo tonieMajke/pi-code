@@ -124,4 +124,9 @@ export const EN: Record<string, string> = {
   "Plan": "Plan",
   "Tylko odczyt i analiza — model przygotowuje plan, nic nie zmienia": "Read and analyse only — the model prepares a plan and changes nothing",
   "Wszystko bez pytania. Model ma wolną rękę": "Nothing asks. The model has a free hand",
+  "Szukaj w rozmowie": "Find in chat",
+  "brak": "none",
+  "Poprzednie (Shift+Enter)": "Previous (Shift+Enter)",
+  "Następne (Enter)": "Next (Enter)",
+  "Zamknij (Esc)": "Close (Esc)",
 };

@@ -155,14 +155,21 @@ export function ToolCard({
   cwd = "",
   now,
   awaiting = false,
+  forceOpen = false,
+  part,
 }: {
   tool: ToolItem;
   cwd?: string;
   now?: number;
   /** Parked on the permission gate. */
   awaiting?: boolean;
+  /** Find in transcript hit inside: shown expanded whatever the user toggled. */
+  forceOpen?: boolean;
+  /** Index in the turn's parts (data-part, for find). */
+  part?: number;
 }) {
-  const [open, setOpen] = useState(false);
+  const [userOpen, setOpen] = useState(false);
+  const open = userOpen || forceOpen;
   const Icon = toolIcon(tool.name);
   const target = summarizeArgs(tool.args, cwd);
   const stats = changeStats(tool);
@@ -172,7 +179,7 @@ export function ToolCard({
   const duration = elapsed >= 100 ? formatDuration(elapsed) : "";
 
   return (
-    <div className={`tool ${awaiting ? "awaiting" : tool.status} ${open ? "open" : ""}`}>
+    <div className={`tool ${awaiting ? "awaiting" : tool.status} ${open ? "open" : ""}`} data-part={part}>
       <button className="tool-row" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span className="tool-glyph">
           {awaiting ? (

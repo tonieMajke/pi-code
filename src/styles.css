@@ -1257,3 +1257,21 @@ button.welcome-folder:hover { background: var(--hover); border-color: var(--bord
 .hero-folder .hf-path { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .hero-folder .hf-change { color: var(--accent); flex: none; }
 @media (max-width: 560px) { .welcome { padding: 14px 16px 16px; } .welcome-step h1 { font-size: 24px; } }
+
+/* Find in transcript (Ctrl+F) */
+.find-bar {
+  position: absolute; top: 52px; right: 20px; z-index: 30;
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 4px 4px 10px; border: 1px solid var(--border-strong); border-radius: 10px;
+  background: var(--surface); box-shadow: var(--shadow);
+}
+.find-bar input {
+  width: 220px; border: none; outline: none; background: transparent;
+  color: var(--text); font: inherit; font-size: 13.5px; padding: 4px 2px;
+}
+.find-icon { color: var(--muted); flex: none; }
+.find-count { min-width: 44px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.find-count.none { color: var(--err); }
+::highlight(find) { background-color: rgba(217, 119, 87, 0.28); }
+::highlight(find-current) { background-color: var(--accent); color: #fff; }
+.find-block { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }

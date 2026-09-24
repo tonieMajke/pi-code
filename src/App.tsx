@@ -2,7 +2,9 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { addProject, moveToGroup } from "./lib/sidebar";
 import { imageStore } from "./lib/image-store";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { FindBar } from "./components/FindBar";
+import { clearFind, findMatches, hitsOf, paintFind } from "./lib/find";
 import { WindowControls } from "./components/WindowControls";
 import { WindowFrame } from "./components/WindowFrame";
 import { Logo } from "./components/Logo";
@@ -124,6 +126,8 @@ export default function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const transportRef = useRef<PiTransport | null>(null);
+  /** Find in transcript (Ctrl+F): null = closed; focus bumps on every Ctrl+F. */
+  const [find, setFind] = useState<{ query: string; cur: number; focus: number } | null>(null);
 
   const send = useCallback((cmd: Parameters<PiTransport["send"]>[0]) => transportRef.current?.send(cmd), []);
   const requestsRef = useRef(new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }[]>());
@@ -475,6 +479,40 @@ export default function App() {
     return () => ro.disconnect();
   }, [empty]);
 
+  const findHits = useMemo(() => (find ? hitsOf(findMatches(state.messages, find.query)) : []), [find?.query, state.messages]);
+  const findHit = find && findHits.length ? findHits[Math.min(find.cur, findHits.length - 1)] : null;
+  const findTarget = findHit ? { msg: findHit.msgIndex, part: findHit.partIndex } : null;
+  const findScrolled = useRef("");
+  // After the transcript rendered the hit's block expanded: highlight and scroll to it (once per hit).
+  useLayoutEffect(() => {
+    const col = columnRef.current;
+    if (!find) {
+      clearFind();
+      findScrolled.current = "";
+      return;
+    }
+    if (!col) return;
+    const paint = () => {
+      const { block, current } = paintFind(col, find.query, findHit);
+      const key = findHit ? `${find.query}|${findHit.msgIndex}|${findHit.partIndex}|${findHit.field}|${findHit.occ}` : "";
+      const el = scrollRef.current;
+      if (!key || key === findScrolled.current || !el || !block) return;
+      findScrolled.current = key;
+      atBottomRef.current = false;
+      setAtBottom(false);
+      const box = (current ?? block).getBoundingClientRect();
+      const view = el.getBoundingClientRect();
+      if (box.top < view.top + 40 || box.bottom > view.bottom - 40) el.scrollTop += box.top - view.top - el.clientHeight / 3;
+    };
+    paint();
+    // Code blocks are highlighted by shiki asynchronously — their text nodes get replaced.
+    const id = window.setTimeout(paint, 200);
+    return () => window.clearTimeout(id);
+  });
+  const stepFind = (dir: 1 | -1) =>
+    setFind((f) => (f && findHits.length ? { ...f, cur: (Math.min(f.cur, findHits.length - 1) + dir + findHits.length) % findHits.length } : f));
+  const openFind = useCallback(() => setFind((f) => ({ query: f?.query ?? "", cur: f?.cur ?? 0, focus: (f?.focus ?? 0) + 1 })), []);
+
   const scrollToBottom = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -691,6 +729,9 @@ export default function App() {
         e.preventDefault();
         if (!sidebarOpen) toggleSidebar();
         requestAnimationFrame(() => searchRef.current?.focus());
+      } else if (mod && !e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        openFind();
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         setPaletteOpen((o) => !o);
@@ -709,7 +750,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newSession, toggleSidebar, stop, setMode, state.busy, state.mode, sidebarOpen]);
+  }, [newSession, toggleSidebar, stop, setMode, openFind, state.busy, state.mode, sidebarOpen]);
 
   const approval = state.approvals[0];
   const awaiting = new Set(state.approvals.map((a) => a.toolCallId));
@@ -901,6 +942,7 @@ export default function App() {
     { id: "memory", group: "Akcje", label: t("Pamięć"), keywords: "memory pamięć zapamiętane agents.md", run: () => openSettings("memory") },
     { id: "welcome", group: "Akcje", label: t("Ekran powitalny"), keywords: "welcome onboarding powitanie start", run: () => void showWelcome() },
     { id: "compact", group: "Akcje", label: "Kompaktuj kontekst", keywords: "compact", run: () => { setCompacting(true); send({ cmd: "compact" }); } },
+    { id: "find", group: "Akcje", label: t("Szukaj w rozmowie"), hint: <kbd>Ctrl F</kbd>, keywords: "find search znajdź", run: openFind },
     { id: "handoff", group: "Akcje", label: "Handoff → nowa sesja", keywords: "handoff podsumowanie przekazanie", run: () => runSlash("handoff", "") },
     ...(state.busy ? [{ id: "stop", group: "Akcje", label: "Przerwij model", hint: <kbd>Esc</kbd>, run: stop }] : []),
     ...MODES.map((m) => ({
@@ -1070,6 +1112,18 @@ export default function App() {
           </div>
         )}
 
+        {find && !empty && (
+          <FindBar
+            query={find.query}
+            onQuery={(query) => setFind((f) => (f ? { ...f, query, cur: 0 } : f))}
+            current={findHit ? Math.min(find.cur, findHits.length - 1) : 0}
+            total={findHits.length}
+            onStep={stepFind}
+            onClose={() => setFind(null)}
+            focusKey={find.focus}
+          />
+        )}
+
         {empty ? (
           <div className="hero">
             <Logo size={60} className="hero-mark" />
@@ -1106,6 +1160,7 @@ export default function App() {
                         }
                   }
                   onExecutePlan={planDone ? executePlan : undefined}
+                  findTarget={findTarget}
                 />
                 {state.busy && !approval && <Working since={state.busySince} now={now} perf={state.perf} />}
               </div>

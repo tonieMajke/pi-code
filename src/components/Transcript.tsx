@@ -20,6 +20,7 @@ export function Transcript({
   onExecutePlan,
   onEdit,
   onRestore,
+  findTarget,
 }: {
   messages: Msg[];
   cwd: string;
@@ -32,6 +33,8 @@ export function Transcript({
   onEdit?: (fromEnd: number) => void;
   /** Undo a run's file changes (undefined while the model works). */
   onRestore?: (checkpoint: string) => void;
+  /** Block holding the current find hit — collapsed tools/thinking open for it. */
+  findTarget?: { msg: number; part: number } | null;
 }) {
   const last = messages.length - 1;
   // Position of each user message counted from the end — how the sidecar finds it on the branch.
@@ -43,20 +46,23 @@ export function Transcript({
         m.role === "user" ? (
           <UserMessage
             key={i}
+            index={i}
             text={m.text}
             images={m.images}
             onEdit={onEdit && (() => onEdit(fromEnd.get(i)!))}
           />
         ) : m.role === "command" ? (
-          <div className="cmd-line" key={i}>
+          <div className="cmd-line" key={i} data-msg={i} data-part={0}>
             <span className="cmd-prompt">›</span>
             <code>{m.text}</code>
           </div>
         ) : m.role === "info" ? (
-          <InfoBlock key={i} text={m.text} level={m.level} />
+          <InfoBlock key={i} index={i} text={m.text} level={m.level} />
         ) : (
           <AssistantTurn
             key={i}
+            index={i}
+            openPart={findTarget?.msg === i ? findTarget.part : -1}
             parts={m.parts}
             open={m.open}
             stats={m.stats}
@@ -74,9 +80,9 @@ export function Transcript({
 }
 
 /** Command output / extension message: markdown, quieter than an answer. */
-const InfoBlock = memo(function InfoBlock({ text, level }: { text: string; level: "info" | "warning" | "error" }) {
+const InfoBlock = memo(function InfoBlock({ index, text, level }: { index: number; text: string; level: "info" | "warning" | "error" }) {
   return (
-    <div className={`info-block info-${level}`}>
+    <div className={`info-block info-${level}`} data-msg={index} data-part={0}>
       <ReactMarkdown remarkPlugins={REMARK} components={markdownComponents}>
         {text}
       </ReactMarkdown>
@@ -85,16 +91,18 @@ const InfoBlock = memo(function InfoBlock({ text, level }: { text: string; level
 });
 
 const UserMessage = memo(function UserMessage({
+  index,
   text,
   images,
   onEdit,
 }: {
+  index: number;
   text: string;
   images?: Attachment[];
   onEdit?: () => void;
 }) {
   return (
-    <div className="msg user">
+    <div className="msg user" data-msg={index} data-part={0}>
       {onEdit && (
         <button className="edit-btn" onClick={onEdit} title="Edytuj i wyślij ponownie (stara gałąź zostaje w historii sesji)">
           <Pencil size={13} />
@@ -116,24 +124,28 @@ const UserMessage = memo(function UserMessage({
   );
 });
 
-type Block = { kind: "part"; part: Exclude<Part, { type: "tool" }> } | { kind: "tools"; tools: ToolItem[] };
+type Block =
+  | { kind: "part"; part: Exclude<Part, { type: "tool" }>; index: number }
+  | { kind: "tools"; tools: { tool: ToolItem; index: number }[] };
 
 /** Consecutive tool calls render as one compact group (Claude Code style). */
 function toBlocks(parts: Part[]): Block[] {
   const blocks: Block[] = [];
-  for (const p of parts) {
+  parts.forEach((p, index) => {
     if (p.type === "tool") {
       const last = blocks[blocks.length - 1];
-      if (last?.kind === "tools") last.tools.push(p.tool);
-      else blocks.push({ kind: "tools", tools: [p.tool] });
+      if (last?.kind === "tools") last.tools.push({ tool: p.tool, index });
+      else blocks.push({ kind: "tools", tools: [{ tool: p.tool, index }] });
     } else {
-      blocks.push({ kind: "part", part: p });
+      blocks.push({ kind: "part", part: p, index });
     }
-  }
+  });
   return blocks;
 }
 
 function AssistantTurn({
+  index,
+  openPart,
   parts,
   open,
   stats,
@@ -144,6 +156,9 @@ function AssistantTurn({
   awaiting,
   onExecutePlan,
 }: {
+  index: number;
+  /** Part to show expanded (find hit), -1 = none. */
+  openPart: number;
   parts: Part[];
   open: boolean;
   stats?: RequestStats[];
@@ -160,29 +175,29 @@ function AssistantTurn({
     .map((p) => p.text)
     .join("\n\n");
   return (
-    <div className="msg assistant">
+    <div className="msg assistant" data-msg={index}>
       {blocks.map((b, i) => {
         if (b.kind === "tools") {
           return (
             <div className="tool-group" key={i}>
-              {b.tools.map((t) => (
-                <ToolCard key={t.id} tool={t} cwd={cwd} now={now} awaiting={awaiting.has(t.id)} />
+              {b.tools.map(({ tool, index: p }) => (
+                <ToolCard key={tool.id} tool={tool} cwd={cwd} now={now} awaiting={awaiting.has(tool.id)} part={p} forceOpen={openPart === p} />
               ))}
             </div>
           );
         }
         if (b.part.type === "notice") {
           return (
-            <div className="guard-notice" key={i} title="Konstytucja odesłała model do pracy (Ustawienia → Konstytucja)">
+            <div className="guard-notice" key={i} data-part={b.index} title="Konstytucja odesłała model do pracy (Ustawienia → Konstytucja)">
               <Scale size={13} />
               <span>{b.part.text}</span>
             </div>
           );
         }
         if (b.part.type === "thinking") {
-          return <Thinking key={i} part={b.part} now={now} />;
+          return <Thinking key={i} part={b.part} now={now} index={b.index} forceOpen={openPart === b.index} />;
         }
-        return <Markdown key={i} text={b.part.text} />;
+        return <Markdown key={i} text={b.part.text} index={b.index} />;
       })}
       {!open && onExecutePlan && (
         <div className="plan-cta">
@@ -241,9 +256,9 @@ function RestoreButton({
   );
 }
 
-const Markdown = memo(function Markdown({ text }: { text: string }) {
+const Markdown = memo(function Markdown({ text, index }: { text: string; index: number }) {
   return (
-    <div className="md">
+    <div className="md" data-part={index}>
       <ReactMarkdown remarkPlugins={REMARK} components={markdownComponents}>
         {text}
       </ReactMarkdown>
@@ -251,14 +266,25 @@ const Markdown = memo(function Markdown({ text }: { text: string }) {
   );
 });
 
-function Thinking({ part, now }: { part: Extract<Part, { type: "thinking" }>; now: number }) {
+function Thinking({
+  part,
+  now,
+  index,
+  forceOpen,
+}: {
+  part: Extract<Part, { type: "thinking" }>;
+  now: number;
+  index: number;
+  forceOpen: boolean;
+}) {
   const active = part.end === undefined && part.start !== undefined && now > 0;
-  const [open, setOpen] = useState(false);
+  const [userOpen, setOpen] = useState(false);
+  const open = userOpen || forceOpen;
   const secs =
     part.start !== undefined ? formatDuration((part.end ?? (now || part.start)) - part.start) : "";
   const label = active ? `Myśli… ${secs}` : secs && part.end !== part.start ? `Myślał ${secs}` : "Przemyślenia";
   return (
-    <div className={`thinking ${open || active ? "open" : ""} ${active ? "active" : ""}`}>
+    <div className={`thinking ${open || active ? "open" : ""} ${active ? "active" : ""}`} data-part={index}>
       <button className="thinking-row" onClick={() => setOpen((o) => !o)}>
         <ChevronRight size={14} className="tool-chevron" />
         <span className={active ? "shimmer" : ""}>{label}</span>
