@@ -1,8 +1,9 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { look } from "./look.js";
+import { afterAll, describe, expect, it } from "vitest";
+import { closeBrowser } from "./browser.js";
+import { look, lookCompare } from "./look.js";
 
 const PNG = /^iVBORw0KGgo/; // base64 of the PNG signature
 
@@ -29,4 +30,25 @@ describe("look", () => {
     await expect(look({ target: "x.bin" }, dir)).rejects.toThrow(/don't know how/);
     await expect(look({ target: "nope.svg" }, dir)).rejects.toThrow(/not found/);
   });
+});
+
+describe("look extras", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-gui-look-x-"));
+  writeFileSync(join(dir, "a.html"), "<body style='margin:0;background:#fff'><h1 style='font:600 32px system-ui'>Left</h1></body>");
+  writeFileSync(join(dir, "b.html"), "<body style='margin:0;background:#222;color:#eee'><h1 style='font:600 32px system-ui'>Right</h1></body>");
+
+  it("puts two renders side by side in one image no wider than the render width", async () => {
+    const r = await lookCompare({ a: "a.html", b: "b.html", width: 800 }, dir);
+    expect(r.data).toMatch(PNG);
+    expect(r.note).toMatch(/left REFERENCE = a\.html, right YOURS = b\.html/);
+    const [, w] = /→ (\d+)x/.exec(r.note)!;
+    expect(Number(w)).toBeLessThanOrEqual(804);
+  }, 60000);
+
+  it("zooms a crop 2x", async () => {
+    const r = await look({ target: "a.html", width: 640, height: 480, crop: { x: 0, y: 0, w: 100, h: 50 } }, dir);
+    expect(r.note).toMatch(/crop 100x50 at 0,0 zoomed 2x → 200x100 px/);
+  }, 60000);
+
+  afterAll(() => closeBrowser());
 });

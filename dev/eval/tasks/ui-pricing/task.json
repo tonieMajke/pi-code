@@ -1,0 +1,1 @@
+{ "prompt": "W index.html zrób stronę cennika aplikacji do fakturowania „Fakturka”: trzy plany (Darmowy, Pro, Firma) z ceną miesięczną i listą funkcji, wyróżniony plan Pro, pod spodem krótkie FAQ (4 pytania). Jeden plik HTML i CSS, bez frameworków.", "check": "test -s index.html", "visual": "index.html", "timeoutSec": 900 }

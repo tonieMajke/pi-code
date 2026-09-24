@@ -168,6 +168,27 @@ export type GuiConfig = {
     revert: boolean;
   };
   sampling: SamplingConfig;
+  taste: TasteConfig;
+};
+
+/**
+ * "Taste": references before visual work, hard UI measurements, and a fresh-eyes
+ * critic that compares the result with the reference before the run may finish.
+ */
+export type TasteConfig = {
+  enabled: boolean;
+  /** Collect references before the first visual change: on its own, after asking, or never. */
+  research: "auto" | "ask" | "off";
+  /** Fresh-context visual review at the end of a run with visual changes. */
+  critic: boolean;
+  /** "provider/id"; empty = the session's model. */
+  criticModel: string;
+  /** Critic rounds per answer before giving up (→ escalation card). */
+  maxRounds: number;
+  /** Page changes must pass ui_audit (no HIGH items) before the run may finish. */
+  requireAudit: boolean;
+  /** llama.cpp slot for the critic (needs --parallel ≥ 2); null = share the main slot. */
+  criticSlot: number | null;
 };
 
 /** Everything the settings dialog shows: pi's global settings + live session state. */
@@ -190,6 +211,8 @@ export type PiSettings = {
   gui: GuiConfig;
   /** Tokens at which pi auto-compacts for the current model (window − reserve). */
   compactAt: number;
+  /** The session's model accepts images. */
+  modelVision: boolean;
   contextWindow: number;
 };
 
@@ -216,6 +239,7 @@ export type SettingsPatch = {
   context?: Partial<GuiConfig["context"]>;
   review?: Partial<GuiConfig["review"]>;
   escalation?: Partial<GuiConfig["escalation"]>;
+  taste?: Partial<TasteConfig>;
   sampling?: Partial<SamplingConfig>;
   /** Auto-compact threshold for the current model; 0 = pi's default. */
   compactAt?: number;
@@ -286,6 +310,8 @@ export type ModelSummary = {
   id: string;
   name: string;
   contextWindow: number;
+  /** Accepts images (the visual critic can look instead of reading an outline). */
+  vision?: boolean;
 };
 
 export type ToolResultSummary = {

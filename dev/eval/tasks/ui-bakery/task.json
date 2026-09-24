@@ -1,0 +1,1 @@
+{ "prompt": "Zrób stronę główną małej piekarni rzemieślniczej „Zakwas” z Krakowa w pliku index.html (HTML i CSS w jednym pliku, bez frameworków): nagłówek, oferta chlebów (4 pozycje z cenami), godziny otwarcia, adres i kontakt.", "check": "test -s index.html", "visual": "index.html", "timeoutSec": 900 }

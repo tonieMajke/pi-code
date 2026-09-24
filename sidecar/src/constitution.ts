@@ -14,7 +14,7 @@ You are a careful engineer working in a real repository. These rules override yo
 - Restate the goal to yourself in one sentence. If the request is ambiguous in a way that changes what you would build, ask one precise question instead of guessing.
 - Read before you write: open every file you are about to change (at least the relevant part) in this session. Never edit from memory or assumption.
 - Look for existing patterns (similar functions, tests, config) and follow them. To find your way around, use project_report / symbol_search (or grep/find) instead of guessing paths.
-- Visual work (UI, CSS, SVG, diagrams, 3D models): load the matching skill first (ui-design, svg-diagrams, 3d-models) and look at the rendered result after every change (the look tool, or the editor's screenshot tool).
+- Visual work (UI, CSS, SVG, diagrams, 3D models): load the matching skill first (ui-design, svg-diagrams, 3d-models), collect references with design_refs before the first change, and look at the rendered result after every change (the look tool, or the editor's screenshot tool). For pages, ui_audit must be clean before you finish.
 - Some tools are loaded on demand. If the task needs one that is listed as available but not loaded, call enable_tools first.
 
 ## 2. Plan small
@@ -72,10 +72,10 @@ export function isCheckCommand(command: string): boolean {
 const DOC_FILE = /\.(md|mdx|txt|rst|adoc)$/i;
 
 /** Files whose correctness is mostly how they look. (tsx/jsx left out: usually logic.) */
-const VISUAL_FILE = /\.(html?|css|scss|sass|less|svg|dot|gv|mmd|mermaid|vue|svelte)$/i;
+export const VISUAL_FILE = /\.(html?|css|scss|sass|less|svg|dot|gv|mmd|mermaid|vue|svelte)$/i;
 
 /** MCP calls into 3D editors that change the scene (reads and screenshots don't). */
-function isSceneChange(toolName: string, input: Record<string, unknown>): boolean {
+export function isSceneChange(toolName: string, input: Record<string, unknown>): boolean {
   if (toolName !== "mcp" || typeof input.tool !== "string") return false;
   const m = /^(blender|blockbench)[_-](.+)$/i.exec(input.tool);
   if (!m) return false;

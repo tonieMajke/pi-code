@@ -35,3 +35,37 @@ export function elideOldToolOutput<M extends Msg>(messages: M[], aboveChars: num
   });
   return changed ? out : messages;
 }
+
+/**
+ * Screenshots cost ~1–1.5k tokens each. Within the current run (after the latest user
+ * message) only the newest `keep` image-bearing tool results stay as pictures; older
+ * ones become a one-line note. Earlier runs are handled by elideOldToolOutput.
+ */
+export function elideOldImages<M extends Msg>(messages: M[], keep: number): M[] {
+  let lastUser = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      lastUser = i;
+      break;
+    }
+  }
+  const withImages: number[] = [];
+  for (let i = lastUser + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === "toolResult" && Array.isArray(m.content) && (m.content as Block[]).some((b) => b.type === "image")) withImages.push(i);
+  }
+  const drop = new Set(withImages.slice(0, Math.max(0, withImages.length - keep)));
+  if (!drop.size) return messages;
+  return messages.map((m, i) => {
+    if (!drop.has(i)) return m;
+    const blocks = m.content as Block[];
+    const n = blocks.filter((b) => b.type === "image").length;
+    return {
+      ...m,
+      content: [
+        ...blocks.filter((b) => b.type !== "image"),
+        { type: "text", text: `[pi-gui: ${n} older screenshot(s) from this run removed to save context — look again if you need them.]` },
+      ],
+    };
+  });
+}

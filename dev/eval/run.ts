@@ -5,6 +5,8 @@
  *   pnpm eval                          # all tasks, profile "full"
  *   pnpm eval --profile base           # everything pi-gui adds switched off
  *   pnpm eval --only py-leap,js-async --repeat 3
+ *   pnpm eval --only ui-bakery,ui-pricing --profile no-taste   # visual tasks: screenshot + ui_audit saved
+ *   pnpm eval:taste <results-A.json> <results-B.json>           # pairwise judge of the screenshots
  *
  * Profiles only change a temporary pi-gui.json (PI_GUI_CONFIG) — the user's config is untouched.
  */
@@ -15,12 +17,16 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import type { GuiConfig, PiEvent, SidecarOut } from "../../shared/protocol.js";
+import { countBySeverity, uiAudit } from "../../sidecar/src/audit.js";
+import { closeBrowser } from "../../sidecar/src/browser.js";
+import { look } from "../../sidecar/src/look.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const TASKS = join(ROOT, "dev/eval/tasks");
 const RESULTS = join(ROOT, "dev/eval/results");
 
-type Task = { prompt: string; check: string; timeoutSec?: number };
+/** visual: a page the model must produce — screenshotted and measured after the run. */
+type Task = { prompt: string; check: string; timeoutSec?: number; visual?: string };
 type Result = {
   task: string;
   pass: boolean;
@@ -33,6 +39,11 @@ type Result = {
   outputTokens: number;
   checkOutput: string;
   error?: string;
+  /** Visual tasks: ui_audit counts and the screenshot for pairwise judging. */
+  audit?: { high: number; medium: number; low: number };
+  shot?: string;
+  /** Where the model left its files (visual tasks: kept for inspection). */
+  dir?: string;
 };
 
 const PROFILES: Record<string, Partial<GuiConfig>> = {
@@ -41,11 +52,16 @@ const PROFILES: Record<string, Partial<GuiConfig>> = {
     constitution: { enabled: false, hard: false, text: "", maxNudges: 0 },
     review: { enabled: false, model: "" },
     context: { elideOldToolOutput: false, elideAboveChars: 2000 },
+    taste: { enabled: false, research: "off", critic: false, criticModel: "", maxRounds: 3, requireAudit: false, criticSlot: null },
     // every tool always loaded, like plain pi
     tools: Object.fromEntries(["*"].map((k) => [k, "always" as const])),
   },
   "no-review": { review: { enabled: false, model: "" } },
+  "no-taste": { taste: { enabled: false, research: "off", critic: false, criticModel: "", maxRounds: 3, requireAudit: false, criticSlot: null } },
 };
+
+/** One folder per eval run: the JSON plus screenshots of visual tasks. */
+const STAMP = new Date().toISOString().replace(/[:.]/g, "-");
 
 function args() {
   const a = process.argv.slice(2);
@@ -81,7 +97,7 @@ function prepare(task: string): string {
 }
 
 /** One sidecar process per task: clean session state, no cross-talk. */
-async function runTask(task: string, spec: Task, cfgFile: string): Promise<Result> {
+async function runTask(task: string, spec: Task, cfgFile: string, runDir: string, n: number): Promise<Result> {
   const cwd = prepare(task);
   const child = spawn("npx", ["tsx", join(ROOT, "sidecar/src/main.ts")], {
     cwd: ROOT,
@@ -161,6 +177,17 @@ async function runTask(task: string, spec: Task, cfgFile: string): Promise<Resul
     const e = err as { stdout?: string; stderr?: string };
     r.checkOutput = `${e.stdout ?? ""}${e.stderr ?? ""}`.slice(-600);
   }
+  if (spec.visual && existsSync(join(cwd, spec.visual))) {
+    r.dir = cwd;
+    try {
+      r.audit = countBySeverity((await uiAudit({ target: spec.visual }, cwd)).issues);
+      const shot = await look({ target: spec.visual, width: 1280, height: 900 }, cwd);
+      r.shot = join(runDir, `${task}-${n}.png`);
+      writeFileSync(r.shot, Buffer.from(shot.data, "base64"));
+    } catch (err) {
+      r.checkOutput += `\n[visual] ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
   return r;
 }
 
@@ -196,14 +223,17 @@ async function main() {
   const cfg = configFile(profile, profile === "base" ? await toolNames() : []);
   console.log(`profile ${profile} · ${tasks.length} tasks × ${repeat}\n`);
   const results: Result[] = [];
+  const runDir = join(RESULTS, `${STAMP}-${profile}`);
+  mkdirSync(runDir, { recursive: true });
   for (let i = 0; i < repeat; i++) {
     for (const task of tasks) {
       const spec = JSON.parse(readFileSync(join(TASKS, task, "task.json"), "utf8")) as Task;
-      const r = await runTask(task, spec, cfg);
+      const r = await runTask(task, spec, cfg, runDir, i);
       results.push(r);
       console.log(
         `${r.pass ? "PASS" : "FAIL"}  ${task.padEnd(16)} ${String(r.seconds).padStart(4)}s  tools ${String(r.toolCalls).padStart(2)} (err ${r.toolErrors})` +
-          `  guards ${r.guards.length}${r.stuck ? " STUCK" : ""}${r.error ? `  [${r.error}]` : ""}`,
+          `  guards ${r.guards.length}${r.stuck ? " STUCK" : ""}${r.error ? `  [${r.error}]` : ""}` +
+          (r.audit ? `  audit ${r.audit.high}/${r.audit.medium}/${r.audit.low}` : ""),
       );
       if (!r.pass) console.log(`      ${r.checkOutput.trim().split("\n").slice(-3).join("\n      ")}`);
     }
@@ -211,10 +241,10 @@ async function main() {
   const passed = results.filter((r) => r.pass).length;
   const secs = results.reduce((a, r) => a + r.seconds, 0);
   console.log(`\n${profile}: ${passed}/${results.length} passed · ${Math.round(secs / 60)} min total`);
-  mkdirSync(RESULTS, { recursive: true });
-  const out = join(RESULTS, `${new Date().toISOString().replace(/[:.]/g, "-")}-${profile}.json`);
+  const out = join(runDir, "results.json");
   writeFileSync(out, JSON.stringify({ profile, repeat, passed, total: results.length, results }, null, 2));
   console.log(`results: ${out}`);
+  await closeBrowser();
   process.exit(0);
 }
 

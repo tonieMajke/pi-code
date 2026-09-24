@@ -8,10 +8,13 @@ description: Rules for building good-looking UI, web pages, dashboards and compo
 Taste is mostly constraints plus looking at the result. Follow the rules, then render and fix.
 
 ## The loop (mandatory)
-1. Build the smallest complete version.
-2. `look` at it: dev-server URL (e.g. `http://localhost:5173`) or the `.html` file. Also look at a narrow width (`width: 390`).
-3. Name 3 concrete problems (e.g. "card padding 12px vs 24px elsewhere", "grey text on grey fails contrast"). Fix them. Look again.
-4. Stop when a second look finds nothing specific. Never finish without having looked.
+1. **References first** (unless the user gave you one): `design_refs` with `kind: "ui"` and a query that names what you are building — "artisan bakery website", "kanban app for small teams", "dark personal photography portfolio" — never just "landing page". Results differ on every call; call again with another query if none fit. They are inspiration, not templates.
+2. **Brief**: decide which references actually look good for this task and why, and write `.pi/design-refs/<topic>/brief.md` (the tool gives the template): mood, density, type scale, one accent, radius, what they do NOT do. Put the tokens into CSS variables.
+3. Build the smallest complete version, to the brief.
+4. `look` at it: dev-server URL (e.g. `http://localhost:5173`) or the `.html` file. Also at a narrow width (`width: 390`). Use `crop` to zoom into details.
+5. `ui_audit` the page and fix every HIGH item (MEDIUM where easy). Numbers beat eyes: it catches 13px paddings, 3.9:1 contrast and 2px misalignments you won't see.
+6. `look_compare` with your favourite reference on the left and your page on the right. Name the 3 biggest differences in *quality* (hierarchy, spacing rhythm, type, colour restraint, detail) — not in content or layout — and fix them.
+7. Stop when a second look finds nothing specific. At the end a reviewer with fresh eyes does step 6 again.
 
 ## Hard rules
 - **Spacing**: only 4, 8, 12, 16, 24, 32, 48, 64 px. Related things closer than unrelated things. Generous outer padding (24–32 px on cards and pages).
@@ -29,4 +32,4 @@ Taste is mostly constraints plus looking at the result. Follow the rules, then r
 Default browser styles left in (Times, blue underlined links, 8px body margin) · inconsistent paddings between cards · too many colors · centered body text · text touching borders · buttons of different heights in one row · emoji instead of icons · placeholder "Lorem ipsum" left behind · repeated cards whose inner rows (titles, prices, buttons) don't line up across the row because one description is shorter — give variable-length blocks a min-height or use a subgrid.
 
 ## When the user gives a reference
-Match it: measure spacing, sizes and colors from the reference image and state them before building.
+It is saved to `.pi/design-refs/` automatically — it replaces step 1. Match it: measure spacing, sizes and colors from the reference image and state them in the brief before building.

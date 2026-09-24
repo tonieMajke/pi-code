@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronRight,
+  Columns2,
   Eye,
   FilePenLine,
   FilePlus2,
@@ -9,7 +10,9 @@ import {
   FolderTree,
   Globe,
   Hand,
+  Images,
   PackagePlus,
+  Ruler,
   Plug,
   Search,
   SquareTerminal,
@@ -35,6 +38,9 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   fetch_content: Globe,
   source_check: Globe,
   look: Eye,
+  look_compare: Columns2,
+  ui_audit: Ruler,
+  design_refs: Images,
   enable_tools: PackagePlus,
   mcp: Plug,
 };
@@ -52,6 +58,9 @@ const TOOL_VERBS: Record<string, string> = {
   fetch_content: "Pobranie",
   source_check: "Źródło",
   look: "Podgląd",
+  look_compare: "Porównanie",
+  ui_audit: "Audyt UI",
+  design_refs: "Wzorce",
   enable_tools: "Ładuje narzędzia",
   mcp: "MCP",
 };
@@ -119,6 +128,8 @@ export function shortPath(p: string, cwd: string): string {
 export function summarizeArgs(args: unknown, cwd = ""): string {
   if (!args || typeof args !== "object") return "";
   const a = args as Record<string, unknown>;
+  // look_compare: reference ↔ work
+  if (typeof a.a === "string" && typeof a.b === "string") return `${shortPath(a.a, cwd)} ↔ ${shortPath(a.b, cwd)}`;
   for (const key of ["path", "file", "command", "pattern", "query", "url", "target", "tool"]) {
     const v = a[key];
     if (typeof v === "string") {

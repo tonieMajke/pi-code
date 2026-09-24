@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { userInfo } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir, userInfo } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -43,8 +43,14 @@ import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
 import { elideOldToolOutput } from "./elide.js";
 import { HANDOFF_SYSTEM_PROMPT, handoffMessages, handoffUserText } from "./handoff.js";
 import { parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
-import { installFetchTap, onPerf, setSampling } from "./perf.js";
-import { look, LOOK_DESCRIPTION } from "./look.js";
+import { installFetchTap, onPerf, setSampling, withSlot } from "./perf.js";
+import { look, LOOK_COMPARE_DESCRIPTION, LOOK_DESCRIPTION, lookCompare } from "./look.js";
+import { AUDIT_DESCRIPTION, countBySeverity, formatAudit, uiAudit } from "./audit.js";
+import { designRefs, DESIGN_REFS_DESCRIPTION, hasRefs, refsRoot, topicSlug } from "./refs.js";
+import { TasteGuard, type VisualKind } from "./taste.js";
+import { CRITIC_SYSTEM_PROMPT, criticNudge, criticPrompt, pageOutline, pickReference } from "./critic.js";
+import { open as openPage, withPage } from "./browser.js";
+import { elideOldImages } from "./elide.js";
 
 const run = promisify(execFile);
 
@@ -157,8 +163,17 @@ export class PiGateway {
   private extension = (pi: ExtensionAPI) => {
     // One guard per session: the factory runs once per resource loader.
     const guard = new ConstitutionGuard(() => this.cwd);
+    const taste = new TasteGuard(() => this.cwd);
     let task = "";
     let reviewed = false;
+    const tasteOn = () => cfg().taste.enabled;
+    /** Load deferred tools without the model asking (the taste guard needs design_refs etc.). */
+    const loadTools = (names: string[]) => {
+      const known = new Set(this.session?.getAllTools().map((t) => t.name));
+      const ok = names.filter((n) => known.has(n) && this.config!.toolPolicy(n) !== "off");
+      ok.forEach((n) => this.onDemand.add(n));
+      pi.setActiveTools([...new Set([...pi.getActiveTools(), ...ok])]);
+    };
     const cfg = () => this.config!.get();
     const hard = () => cfg().constitution.enabled && cfg().constitution.hard;
 
@@ -185,16 +200,41 @@ export class PiGateway {
       },
     });
 
-    pi.on("tool_call", (event) => {
+    pi.on("tool_call", async (event, ctx) => {
       const input = event.input as Record<string, unknown>;
       // Constitution first: no point asking the user to approve a call that gets blocked anyway.
       const reason = hard() ? guard.beforeTool(event.toolName, input) : null;
       if (reason) return { block: true, reason };
+      if (tasteOn() && this.mode !== "plan") {
+        let research = cfg().taste.research;
+        if (research === "ask" && taste.beforeTool(event.toolName, input, "auto") !== null) {
+          // beforeTool counted a block; the user decides whether it stands.
+          const choice = await ctx.ui.select("Poszukać wzorców przed pracą wizualną?", ["Tak", "Nie, tym razem", "Zawsze szukaj", "Nigdy nie szukaj"]);
+          if (choice === "Zawsze szukaj") this.config!.update("taste", { research: "auto" });
+          if (choice === "Nigdy nie szukaj") this.config!.update("taste", { research: "off" });
+          if (choice === "Tak" || choice === "Zawsze szukaj") {
+            loadTools(["design_refs"]);
+            return { block: true, reason: "Taste: the user wants references first. Call design_refs (kind and a specific query), write brief.md, then build." };
+          }
+          taste.markResearched();
+          research = "off";
+        }
+        const tasteReason = research === "auto" ? taste.beforeTool(event.toolName, input, research) : null;
+        if (tasteReason) {
+          loadTools(["design_refs"]);
+          this.emit({ kind: "guard", label: "Gust: najpierw wzorce, potem budowanie" });
+          return { block: true, reason: tasteReason };
+        }
+      }
       return this.gate(event.toolCallId, event.toolName, input);
     });
     pi.on("tool_result", (event) => {
       const hasImage = event.content.some((c) => c.type === "image");
       guard.afterTool(event.toolName, event.input, event.isError, hasImage);
+      taste.afterTool(event.toolName, event.input, event.isError, event.content as { type: string; data?: string; mimeType?: string }[]);
+      // Visual work started: the measuring tools come along without the model asking.
+      if (tasteOn() && taste.visualKind === "ui") loadTools(["ui_audit", "look_compare"]);
+      if (tasteOn() && taste.visualKind === "image") loadTools(["look_compare"]);
     });
 
     pi.registerTool({
@@ -205,6 +245,13 @@ export class PiGateway {
         target: Type.String({ description: "URL (http://localhost:5173/…) or a file path: .html, .svg, .dot/.gv, .mmd, .png/.jpg" }),
         width: Type.Optional(Type.Number({ description: "Viewport width in px (default 1280)" })),
         height: Type.Optional(Type.Number({ description: "Viewport height in px (default 800)" })),
+        fullPage: Type.Optional(Type.Boolean({ description: "Capture the whole scrolling page (pages only)" })),
+        crop: Type.Optional(
+          Type.Object(
+            { x: Type.Number(), y: Type.Number(), w: Type.Number(), h: Type.Number() },
+            { description: "Zoom into a region (page px), shown at 2x — for checking small details" },
+          ),
+        ),
       }),
       execute: async (_id, params) => {
         const r = await look(params, this.cwd);
@@ -218,8 +265,76 @@ export class PiGateway {
       },
     });
 
+    pi.registerTool({
+      name: "look_compare",
+      label: "Porównanie",
+      description: LOOK_COMPARE_DESCRIPTION,
+      parameters: Type.Object({
+        a: Type.String({ description: "Left: the reference (e.g. .pi/design-refs/<topic>/01-….png)" }),
+        b: Type.String({ description: "Right: your work — page URL, .html, or an image file" }),
+        width: Type.Optional(Type.Number({ description: "Render width in px (default 1280)" })),
+      }),
+      execute: async (_id, params) => {
+        const r = await lookCompare(params, this.cwd);
+        return {
+          content: [
+            { type: "image", data: r.data, mimeType: r.mimeType },
+            { type: "text", text: `${r.note}. List the concrete differences that make the right side look worse (spacing, hierarchy, type, colour, detail) and fix the top 3.` },
+          ],
+          details: undefined,
+        };
+      },
+    });
+
+    pi.registerTool({
+      name: "ui_audit",
+      label: "Audyt UI",
+      description: AUDIT_DESCRIPTION,
+      parameters: Type.Object({
+        target: Type.String({ description: "Your page: dev-server URL or .html file" }),
+        width: Type.Optional(Type.Number({ description: "Desktop width in px (default 1280); 390 px is always checked too" })),
+      }),
+      execute: async (_id, params) => {
+        const r = await uiAudit(params, this.cwd);
+        taste.recordAudit(countBySeverity(r.issues).high);
+        return { content: [{ type: "text", text: formatAudit(r) }], details: undefined };
+      },
+    });
+
+    pi.registerTool({
+      name: "design_refs",
+      label: "Wzorce",
+      description: DESIGN_REFS_DESCRIPTION,
+      parameters: Type.Object({
+        topic: Type.String({ description: "Short folder name for this set, e.g. \"bakery-home\", \"goblin\"" }),
+        kind: Type.Union([Type.Literal("ui"), Type.Literal("image")], { description: "ui = websites/apps; image = pictures of any subject (3D, illustration)" }),
+        query: Type.String({ description: "Specific search, e.g. \"artisan sourdough bakery website\" or \"stylized goblin 3d character\"" }),
+        urls: Type.Optional(Type.Array(Type.String(), { description: "Use exactly these pages (ui) or image URLs (image) instead of searching" })),
+      }),
+      execute: async (_id, params) => {
+        const r = await designRefs(params, this.cwd);
+        const content: ({ type: "image"; data: string; mimeType: string } | { type: "text"; text: string })[] = [];
+        if (r.sheet) content.push({ type: "image", data: readFileSync(r.sheet).toString("base64"), mimeType: "image/jpeg" });
+        content.push({ type: "text", text: r.text });
+        return { content, details: undefined };
+      },
+    });
+
     pi.on("before_agent_start", async (event) => {
       guard.startRun();
+      taste.startRun();
+      if (hasRefs(this.cwd)) taste.markResearched();
+      // A picture the user attached is the reference — no search needed.
+      if (tasteOn() && event.images?.length) {
+        try {
+          const dir = join(refsRoot(this.cwd), topicSlug(event.prompt.split(/\s+/).slice(0, 4).join(" ")));
+          mkdirSync(dir, { recursive: true });
+          event.images.forEach((img, i) => writeFileSync(join(dir, `00-user${i ? `-${i}` : ""}.${img.mimeType.split("/")[1] ?? "png"}`), Buffer.from(img.data, "base64")));
+          taste.markResearched();
+        } catch {
+          /* read-only project etc. — the picture is still in the conversation */
+        }
+      }
       task = event.prompt;
       reviewed = false;
       this.runCheckpoint = await snapshot(this.cwd, task.slice(0, 60)).catch(() => null);
@@ -266,6 +381,27 @@ export class PiGateway {
         }
         if (result) this.emit({ kind: "guard", label: "Recenzja: bez uwag" });
       }
+      if (tasteOn()) {
+        const t = cfg().taste;
+        const step = taste.beforeSettle({ requireAudit: t.requireAudit, critic: t.critic, maxRounds: t.maxRounds, maxAuditNudges: cfg().constitution.maxNudges });
+        if (step?.kind === "nudge") return back(step.nudge.content, step.nudge.label);
+        if (step?.kind === "critic") {
+          const verdict = await this.critic(task, step.visual, step.target, taste.image).catch((err: unknown) => {
+            this.emit({ kind: "guard", label: `Krytyk nie wyszedł: ${err instanceof Error ? err.message : String(err)}` });
+            return null;
+          });
+          if (verdict) {
+            const { round } = taste.criticDone(verdict.ok);
+            if (!verdict.ok) {
+              const n = verdict.issues.split("\n").filter((l) => l.trim().startsWith("-")).length || 1;
+              return back(criticNudge(verdict.issues, round, t.maxRounds), `Krytyk (runda ${round}/${t.maxRounds}): ${n} ${n === 1 ? "uwaga" : n < 5 ? "uwagi" : "uwag"} — model poprawia`);
+            }
+            this.emit({ kind: "guard", label: "Krytyk: bez uwag" });
+          }
+        } else if (taste.exhausted(t.maxRounds)) {
+          this.emit({ kind: "guard", label: `Krytyk: wykorzystano ${t.maxRounds} rundy — ostatnich poprawek nikt nie ocenił` });
+        }
+      }
       return undefined;
     });
 
@@ -277,6 +413,8 @@ export class PiGateway {
           : event.messages.filter((m) => (m as { customType?: string }).customType !== "pi-gui-plan-mode");
       const c = cfg().context;
       if (c.elideOldToolOutput) messages = elideOldToolOutput(messages, c.elideAboveChars);
+      // Screenshots are heavy: within a run only the newest few stay as pictures.
+      if (tasteOn()) messages = elideOldImages(messages, 3);
       return messages === event.messages ? undefined : { messages };
     });
   };
@@ -355,6 +493,82 @@ export class PiGateway {
         last && last.role === "assistant"
           ? last.content.map((c) => (c.type === "text" ? c.text : "")).join("")
           : "";
+      return parseVerdict(text);
+    } finally {
+      this.reviewer = null;
+      session.dispose();
+    }
+  }
+
+  /**
+   * Fresh-eyes visual review: same model as the session unless the user chose another,
+   * new in-memory session with no tools, no history, no author reasoning. Sees the request,
+   * reference | work side by side (+ phone width for pages) and the raw ui_audit numbers.
+   */
+  private async critic(task: string, kind: VisualKind, target: string | null, lastImage: { data: string; mimeType: string } | null): Promise<ReviewVerdict | null> {
+    const cfg = this.config!.get().taste;
+    const key = cfg.criticModel;
+    const model = key ? this.modelByKey(key) : this.session!.model!;
+    const vision = (model as { input?: string[] }).input?.includes("image") ?? false;
+    const ref = pickReference(this.cwd);
+    const images: { type: "image"; data: string; mimeType: string }[] = [];
+    let audit: string | undefined;
+    let outline: string | undefined;
+    const tmp = mkdtempSync(join(tmpdir(), "pi-gui-critic-"));
+    this.emit({ kind: "guard", label: ref ? "Krytyk: porównuje z wzorcem…" : "Krytyk: ocenia wynik…" });
+    try {
+      if (kind === "ui") {
+        if (!target) return null; // nothing to render — the audit nudge already asked for a target
+        audit = formatAudit(await uiAudit({ target }, this.cwd));
+        if (vision) {
+          const main = ref ? await lookCompare({ a: ref, b: target }, this.cwd) : await look({ target, width: 1280, height: 800 }, this.cwd);
+          const narrow = await look({ target, width: 390, height: 800 }, this.cwd);
+          images.push({ type: "image", data: main.data, mimeType: main.mimeType }, { type: "image", data: narrow.data, mimeType: narrow.mimeType });
+        } else {
+          const url = /^https?:/i.test(target) ? target : `file://${target}`;
+          outline = await withPage({ width: 1280, height: 800 }, async (page) => {
+            await openPage(page, url);
+            return pageOutline(page);
+          });
+        }
+      } else {
+        // 3D / illustration: the newest picture the model took of its own work.
+        if (!vision || !lastImage) return null;
+        const mine = join(tmp, "work.png");
+        writeFileSync(mine, Buffer.from(lastImage.data, "base64"));
+        const main = ref ? await lookCompare({ a: ref, b: mine, labels: ["REFERENCE", "WORK"] }, this.cwd) : await look({ target: mine }, this.cwd);
+        images.push({ type: "image", data: main.data, mimeType: main.mimeType });
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+    const services = this.requireServices();
+    const loader = new DefaultResourceLoader({
+      cwd: this.cwd,
+      agentDir: services.agentDir,
+      settingsManager: services.settingsManager,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noContextFiles: true,
+      systemPrompt: CRITIC_SYSTEM_PROMPT,
+    });
+    await loader.reload();
+    const { session } = await createAgentSession({
+      cwd: this.cwd,
+      model,
+      modelRuntime: services.modelRuntime,
+      settingsManager: services.settingsManager,
+      sessionManager: SessionManager.inMemory(this.cwd),
+      resourceLoader: loader,
+      noTools: "all",
+    });
+    this.reviewer = session;
+    try {
+      const prompt = criticPrompt({ task, kind, hasReference: !!ref && vision, audit, outline });
+      await withSlot(cfg.criticSlot, () => session.prompt(prompt, images.length ? { images } : undefined));
+      const last = [...session.state.messages].reverse().find((m) => m.role === "assistant");
+      const text = last && last.role === "assistant" ? last.content.map((c) => (c.type === "text" ? c.text : "")).join("") : "";
       return parseVerdict(text);
     } finally {
       this.reviewer = null;
@@ -537,6 +751,7 @@ export class PiGateway {
       id: m.id,
       name: m.name ?? m.id,
       contextWindow: m.contextWindow ?? 0,
+      vision: m.input?.includes("image") ?? false,
     }));
   }
 
@@ -605,6 +820,7 @@ export class PiGateway {
       gui: this.config!.get(),
       contextWindow: s.model?.contextWindow ?? 0,
       compactAt: s.model ? (s.model.contextWindow ?? 0) - sm.getCompactionReserveTokens(s.model) : 0,
+      modelVision: s.model?.input?.includes("image") ?? false,
     };
   }
 
@@ -634,6 +850,7 @@ export class PiGateway {
     if (patch.context) config.update("context", patch.context);
     if (patch.review) config.update("review", patch.review);
     if (patch.escalation) config.update("escalation", patch.escalation);
+    if (patch.taste) config.update("taste", patch.taste);
     if (patch.sampling) {
       config.update("sampling", patch.sampling);
       setSampling(config.get().sampling);

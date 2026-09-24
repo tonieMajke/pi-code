@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Terminal, Trash2, Wrench, X } from "lucide-react";
+import { Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Sparkles, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Appearance, AppearancePatch, ModelSummary, PiSettings, QueueMode, SamplingConfig, SettingsPatch, ToolPolicy } from "../../shared/protocol";
 import { formatTokens } from "../lib/format";
 import { ACCENTS, BACKGROUNDS } from "../lib/appearance";
@@ -8,6 +8,7 @@ const SECTIONS = [
   { id: "model", label: "Model i myślenie", icon: Brain },
   { id: "constitution", label: "Konstytucja", icon: Scale },
   { id: "quality", label: "Recenzja i eskalacja", icon: ShieldCheck },
+  { id: "taste", label: "Gust", icon: Sparkles },
   { id: "context", label: "Kontekst", icon: Layers },
   { id: "tools", label: "Narzędzia", icon: Wrench },
   { id: "behavior", label: "Zachowanie", icon: RotateCw },
@@ -148,6 +149,7 @@ export function SettingsDialog({
               {section === "constitution" && <ConstitutionSection c={s.constitution} onPatch={onPatch} />}
 
               {section === "quality" && <QualitySection s={s} models={models} onPatch={onPatch} />}
+              {section === "taste" && <TasteSection s={s} models={models} onPatch={onPatch} />}
 
               {section === "context" && (
                 <>
@@ -594,6 +596,85 @@ function QualitySection({
         <Row label="Wróć do poprzedniego modelu" desc="Po zakończeniu eskalowanej odpowiedzi sesja wraca do modelu, który utknął.">
           <Toggle value={g.escalation.revert} onChange={(v) => onPatch({ escalation: { revert: v } })} />
         </Row>
+      )}
+    </>
+  );
+}
+
+export function TasteSection({ s, models, onPatch }: { s: PiSettings; models: ModelSummary[]; onPatch: (p: SettingsPatch) => void }) {
+  const t = s.gui.taste;
+  // A sidecar started before this version doesn't send the section yet.
+  if (!t) return <p className="s-row-desc">Uruchom ponownie sidecar (nowa wersja), żeby zobaczyć te ustawienia.</p>;
+  const critic = t.criticModel ? models.find((m) => `${m.provider}/${m.id}` === t.criticModel) : null;
+  const sees = t.criticModel ? !!critic?.vision : s.modelVision;
+  return (
+    <>
+      <h2>Gust</h2>
+      <Row
+        label="Pętla gustu"
+        desc="Przy pracy wizualnej (strony, SVG, modele 3D): najpierw wzorce, potem budowanie, pomiar strony i krytyk ze świeżym spojrzeniem, zanim model skończy."
+      >
+        <Toggle value={t.enabled} onChange={(v) => onPatch({ taste: { enabled: v } })} />
+      </Row>
+      {t.enabled && (
+        <>
+          <Row
+            label="Szukanie wzorców"
+            desc="Przed pierwszą zmianą wizualną model szuka inspiracji: stron podobnych do tej, którą robi, albo obrazów tematu (np. goblin do modelu 3D). Za każdym razem inne; słabe strony odpadają w pomiarze. Obraz dołączony do wiadomości zastępuje szukanie."
+          >
+            <Segmented
+              value={t.research}
+              options={[
+                { value: "auto", label: "samo" },
+                { value: "ask", label: "pytaj" },
+                { value: "off", label: "wył." },
+              ]}
+              onChange={(v) => onPatch({ taste: { research: v as typeof t.research } })}
+            />
+          </Row>
+          <Row
+            label="Wymagaj czystego ui_audit"
+            desc="Po zmianie strony model musi ją zmierzyć (kontrast, odstępy, wyrównanie, przepełnienie przy 390 px) i poprawić poważne problemy."
+          >
+            <Toggle value={t.requireAudit} onChange={(v) => onPatch({ taste: { requireAudit: v } })} />
+          </Row>
+          <Row
+            label="Krytyk"
+            desc="Na końcu osobna sesja bez historii i bez rozumowania autora porównuje wynik ze wzorcem i wypisuje konkretne różnice. Uwagi wracają do modelu."
+          >
+            <Toggle value={t.critic} onChange={(v) => onPatch({ taste: { critic: v } })} />
+          </Row>
+          {t.critic && (
+            <>
+              <Row
+                label="Model krytyka"
+                desc={
+                  sees
+                    ? "Widzi obrazy: porównuje zrzut ze wzorcem."
+                    : "Ten model nie widzi obrazów: przy stronach dostaje pomiary i zarys strony, przy 3D krytyk się nie uruchomi."
+                }
+              >
+                <ModelSelect value={t.criticModel} models={models} empty="ten sam co sesja" onChange={(v) => onPatch({ taste: { criticModel: v } })} />
+              </Row>
+              <Row label="Rundy krytyka" desc="Ile razy krytyk może odesłać wynik do poprawki w jednej odpowiedzi.">
+                <Segmented
+                  value={String(t.maxRounds)}
+                  options={["1", "2", "3", "4", "5"].map((v) => ({ value: v, label: v }))}
+                  onChange={(v) => onPatch({ taste: { maxRounds: Number(v) } })}
+                />
+              </Row>
+              <Row
+                label="Osobny slot llama.cpp"
+                desc="Krytyk na slocie 1, żeby nie wypierał z pamięci kontekstu rozmowy (bez tego następna tura przelicza cały prompt). Wymaga serwera z --parallel 2 lub więcej."
+              >
+                <Toggle value={t.criticSlot !== null} onChange={(v) => onPatch({ taste: { criticSlot: v ? 1 : null } })} />
+              </Row>
+            </>
+          )}
+          <Row label="Własna galeria" desc="Zrzuty i obrazy, które lubisz, w ~/.pi/agent/design-refs/ (podkatalogi dowolne). Używane, gdy sieć nic nie da albo nie ma sieci.">
+            <span className="s-row-desc">~/.pi/agent/design-refs</span>
+          </Row>
+        </>
       )}
     </>
   );

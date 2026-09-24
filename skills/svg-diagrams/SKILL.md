@@ -12,6 +12,7 @@ description: Rules for SVG graphics, icons, logos and diagrams (architecture, fl
 Don't hand-place diagram boxes in raw SVG when Graphviz/Mermaid can lay them out.
 
 ## The loop (mandatory)
+For an illustration, icon set or logo (not for diagrams): first `design_refs` with `kind: "image"` and a specific query ("flat vector windmill illustration", "line icon set outline 24px") and note palette, stroke weight and level of detail in `brief.md`.
 Write the file → `look` at it → list what's wrong (overlaps, cut-off text, lines crossing labels, uneven spacing) → fix → look again. Never finish without looking.
 
 ## SVG rules

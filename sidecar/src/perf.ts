@@ -138,6 +138,23 @@ export function setSampling(cfg: SamplingConfig): void {
   sampling = cfg;
 }
 
+let slot: number | null = null;
+
+/**
+ * Run fn with every local chat request pinned to one llama.cpp slot (id_slot). The critic
+ * uses slot 1 so it doesn't evict the main conversation's KV cache from slot 0 — only
+ * useful when the server runs with --parallel ≥ 2.
+ */
+export async function withSlot<T>(id: number | null, fn: () => Promise<T>): Promise<T> {
+  const prev = slot;
+  slot = id;
+  try {
+    return await fn();
+  } finally {
+    slot = prev;
+  }
+}
+
 const SAMPLING_KEYS = ["temperature", "top_p", "top_k", "min_p", "presence_penalty", "repeat_penalty"] as const;
 
 export function applySampling(obj: Record<string, unknown>, cfg: SamplingConfig | null): void {
@@ -159,6 +176,7 @@ export function installFetchTap(): void {
         obj.timings_per_token = true;
         obj.return_progress = true;
         applySampling(obj, sampling);
+        if (slot !== null) obj.id_slot = slot;
         body = JSON.stringify(obj);
       }
     } catch {

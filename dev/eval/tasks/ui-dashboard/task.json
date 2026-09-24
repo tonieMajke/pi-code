@@ -1,0 +1,1 @@
+{ "prompt": "W index.html zrób panel sklepu internetowego: boczne menu nawigacji, 4 kafelki z liczbami (przychód, zamówienia, średni koszyk, zwroty) z porównaniem do poprzedniego tygodnia i tabela 8 ostatnich zamówień ze statusami. Jeden plik HTML i CSS, bez frameworków i bez bibliotek do wykresów.", "check": "test -s index.html", "visual": "index.html", "timeoutSec": 900 }

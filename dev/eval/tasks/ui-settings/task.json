@@ -1,0 +1,1 @@
+{ "prompt": "W index.html zrób stronę ustawień konta: sekcje Profil (imię, e-mail, zdjęcie), Powiadomienia (kilka przełączników), Hasło (zmiana hasła) i strefa niebezpieczna (usunięcie konta). Jeden plik HTML i CSS, bez frameworków.", "check": "test -s index.html", "visual": "index.html", "timeoutSec": 900 }

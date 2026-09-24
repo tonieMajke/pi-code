@@ -18,6 +18,7 @@ export const DEFAULT_CONFIG: GuiConfig = {
     presence_penalty: null,
     repeat_penalty: null,
   },
+  taste: { enabled: true, research: "auto", critic: true, criticModel: "", maxRounds: 2, requireAudit: true, criticSlot: null },
 };
 
 /** Loaded with every request: the core loop plus cheap project navigation (pi-lens). */
@@ -52,6 +53,7 @@ export class GuiConfigStore {
       review: { ...DEFAULT_CONFIG.review, ...raw.review },
       escalation: { ...DEFAULT_CONFIG.escalation, ...raw.escalation },
       sampling: { ...DEFAULT_CONFIG.sampling, ...raw.sampling },
+      taste: { ...DEFAULT_CONFIG.taste, ...raw.taste },
     };
   }
 

@@ -10,7 +10,8 @@
     "desktop": "GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1 sh -c 'cd src-tauri && cargo build && cd .. && ./src-tauri/target/debug/pi-gui'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "eval": "tsx dev/eval/run.ts"
+    "eval": "tsx dev/eval/run.ts",
+    "eval:taste": "tsx dev/eval/taste.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",
@@ -20,6 +21,7 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "lucide-react": "^1.47.0",
+    "puppeteer-core": "^25.11.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
