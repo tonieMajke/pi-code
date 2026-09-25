@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Plug, ArrowUp, Brain, Check, ChevronDown, Clock, Cpu, Folder, FolderPlus, GitBranch, Paperclip, Square, X } from "lucide-react";
-import type { Attachment, ModelSummary, PermissionMode, PiSettings, SessionSummary, Usage } from "../../shared/protocol";
+import type { Attachment, GuiConfig, ModelSummary, PermissionMode, PiSettings, SessionSummary, SettingsPatch, Usage } from "../../shared/protocol";
+import { AddonsMenu } from "./AddonsMenu";
 import { Menu, type MenuItem } from "./Menu";
 import { t } from "../../shared/i18n";
 import { basename, formatTokens } from "../lib/format";
@@ -59,6 +60,9 @@ export function Composer({
   pickItems,
   onNeedPick,
   onCommand,
+  addons,
+  onAddonsPatch,
+  onAddonsSettings,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -101,6 +105,10 @@ export function Composer({
   pickItems: (pick: SlashPick) => PickItem[] | null;
   onNeedPick: (pick: SlashPick) => void;
   onCommand: (name: string, args: string) => void;
+  /** Pi Code's additions (pi-gui.json); null until settings load. */
+  addons?: GuiConfig | null;
+  onAddonsPatch?: (patch: SettingsPatch) => void;
+  onAddonsSettings?: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
@@ -507,6 +515,7 @@ export function Composer({
               <span>{branch}</span>
             </span>
           )}
+          {addons && onAddonsPatch && <AddonsMenu gui={addons} onPatch={onAddonsPatch} onSettings={() => onAddonsSettings?.()} />}
           <span className="bar-spacer" />
           {pct !== null && pct >= HANDOFF_AT && !busy && (
             <button

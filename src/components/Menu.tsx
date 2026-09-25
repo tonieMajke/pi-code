@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 export type MenuItem = {
   key: string;
@@ -27,6 +27,18 @@ export function Menu({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // A tall pop-up near the window edge scrolls instead of going off-screen.
+  useLayoutEffect(() => {
+    const pop = open ? ref.current?.querySelector<HTMLElement>(".menu-pop") : null;
+    if (!pop) return;
+    const r = pop.getBoundingClientRect();
+    const room = Math.floor(placement === "up" ? r.bottom - 8 : window.innerHeight - r.top - 8);
+    if (r.height > room) {
+      pop.style.maxHeight = `${Math.max(room, 120)}px`;
+      pop.style.overflowY = "auto";
+    }
+  }, [open, placement]);
 
   useEffect(() => {
     if (!open) return;

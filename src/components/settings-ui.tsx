@@ -12,9 +12,9 @@ export function Row({ label, desc, children }: { label: ReactNode; desc?: ReactN
   );
 }
 
-export function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+export function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <button role="switch" aria-checked={value} className={`toggle ${value ? "on" : ""}`} onClick={() => onChange(!value)}>
+    <button role="switch" aria-checked={value} disabled={disabled} className={`toggle ${value ? "on" : ""}`} onClick={() => onChange(!value)}>
       <span />
     </button>
   );

@@ -1076,6 +1076,9 @@ export default function App() {
       pickItems={pickItems}
       onNeedPick={onNeedPick}
       onCommand={runSlash}
+      addons={settings?.gui ?? null}
+      onAddonsPatch={(patch) => send({ cmd: "settings_set", patch })}
+      onAddonsSettings={() => openSettings("constitution")}
     />
   );
 

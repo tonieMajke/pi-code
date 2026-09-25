@@ -600,6 +600,21 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .ctx-row.free .ctx-label, .ctx-row.free .ctx-val { color: var(--faint); }
 .ctx-actions { display: flex; gap: 8px; padding-top: 10px; margin-top: 2px; border-top: 1px solid var(--border); }
 .ctx-actions .btn { flex: 1; font-size: 12.5px; }
+.addons-chip.off { color: var(--faint); }
+.addons-menu .menu-pop { min-width: 340px; padding: 14px 16px; }
+.addons-menu .menu-items { display: none; }
+.addons-menu .menu-footer { border: none; padding: 0; margin: 0; }
+.addons-pop { display: flex; flex-direction: column; gap: 10px; font-size: 13px; color: var(--text-2); }
+.addons-head { color: var(--text); font-weight: 600; font-size: 14px; }
+.addons-row { display: flex; align-items: center; gap: 12px; }
+.addons-row.sub { padding-left: 16px; }
+.addons-row.dim { opacity: 0.45; }
+.addons-text { flex: 1; min-width: 0; }
+.addons-label { color: var(--text); }
+.addons-desc { font-size: 11.5px; color: var(--faint); line-height: 1.35; }
+.addons-note { font-size: 11.5px; color: var(--faint); }
+.addons-row .toggle { flex: none; }
+.toggle:disabled { cursor: default; }
 .ctx-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--border-strong); flex: none; }
 .c-system { background: #a3a3a3; }
 .c-tools { background: var(--m-edit); }
