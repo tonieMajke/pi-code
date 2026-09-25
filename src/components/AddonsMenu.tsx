@@ -1,4 +1,4 @@
-import { ChevronDown, ShieldCheck } from "lucide-react";
+import { Paperclip, Plus } from "lucide-react";
 import type { GuiConfig, SettingsPatch } from "../../shared/protocol";
 import { Menu } from "./Menu";
 import { Toggle } from "./settings-ui";
@@ -90,14 +90,16 @@ function effective(g: GuiConfig, a: Addon): boolean {
   return a.on(g) && (!parent || parent.on(g));
 }
 
-/** Composer chip with a pop-up of on/off switches for Pi Code's additions (global, pi-gui.json). */
+/** The composer's "+" button: attach an image, plus on/off switches for Pi Code's additions (global, pi-gui.json). */
 export function AddonsMenu({
   gui,
   onPatch,
   onSettings,
+  onAttach,
   extensions,
 }: {
   gui: GuiConfig;
+  onAttach: () => void;
   /** Names of installed pi extensions (loaded or switched off). */
   extensions: string[];
   onPatch: (patch: SettingsPatch) => void;
@@ -107,8 +109,8 @@ export function AddonsMenu({
   const top = shown.filter((a) => !a.parent);
   const on = top.filter((a) => a.on(gui)).length;
   const label = on === 0 ? "Dodatki: wył." : on === top.length ? "Dodatki" : `Dodatki ${on}/${top.length}`;
-  /** Icon-only chip (the bar is tight already) — the count lives in the tooltip and the popover. */
-  const partial = on > 0 && on < top.length;
+  /** The dot says "not everything is on"; the count lives in the tooltip. */
+  const partial = on < top.length;
   const setAll = (v: boolean) => {
     for (const a of shown) if (a.on(gui) !== v) onPatch(a.patch(v));
   };
@@ -117,14 +119,25 @@ export function AddonsMenu({
       className="chip-menu addons-menu"
       items={[]}
       trigger={
-        <span className={`chip addons-chip ${on === 0 ? "off" : ""}`} title={`${label} — szybkie włączanie i wyłączanie`}>
-          <ShieldCheck size={13} />
-          {partial && <span className="addons-dot" />}
-          <ChevronDown size={12} className="chev" />
+        <span className="icon-btn addons-plus" title={`Dołącz obraz · ${label}`}>
+          <Plus size={16} />
+          {partial && <span className={`addons-dot ${on === 0 ? "off" : ""}`} />}
         </span>
       }
       footer={(close) => (
         <div className="addons-pop">
+          <button
+            type="button"
+            className="menu-item addons-attach"
+            onClick={() => {
+              close();
+              onAttach();
+            }}
+          >
+            <Paperclip size={14} />
+            <span className="menu-label">Dołącz obraz</span>
+            <span className="menu-hint">albo wklej / upuść</span>
+          </button>
           <div className="addons-head">Dodatki Pi Code</div>
           {shown.map((a) => {
             const parentOff = a.parent ? !ADDONS.find((p) => p.key === a.parent)!.on(gui) : false;

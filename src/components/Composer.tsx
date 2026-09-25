@@ -343,13 +343,16 @@ export function Composer({
     onSelect: onProviders,
   });
 
-  const thinkingItems: MenuItem[] = (thinking?.available ?? []).map((l) => ({
-    key: l,
-    label: l,
-    hint: l === thinking?.level ? <Check size={14} /> : undefined,
-    active: l === thinking?.level,
-    onSelect: () => onThinking(l),
-  }));
+  /** Thinking rides on the model chip: the level pi sets, or the server's budget when pi can't steer it. */
+  const thinkingText = !thinking
+    ? ""
+    : thinking.available.length > 0
+      ? thinking.level
+      : thinking.server
+        ? thinking.server.budget
+          ? `≤${formatTokens(thinking.server.budget)}`
+          : "serwer"
+        : "";
 
   const pct =
     usage && usage.contextTokens !== null && usage.contextWindow > 0
@@ -560,9 +563,19 @@ export function Composer({
           }} boxRef={boxRef} />
         ) : (
         <div className="composer-bar">
-          <button className="icon-btn attach" onClick={() => fileRef.current?.click()} title="Dołącz obraz (albo wklej / upuść)">
-            <Paperclip size={15} />
-          </button>
+          {addons && onAddonsPatch ? (
+            <AddonsMenu
+              gui={addons}
+              extensions={extensions}
+              onPatch={onAddonsPatch}
+              onSettings={() => onAddonsSettings?.()}
+              onAttach={() => fileRef.current?.click()}
+            />
+          ) : (
+            <button className="icon-btn attach" onClick={() => fileRef.current?.click()} title="Dołącz obraz (albo wklej / upuść)">
+              <Paperclip size={15} />
+            </button>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -587,24 +600,23 @@ export function Composer({
             items={modeItems}
           />
           <Menu
-            className="chip-menu"
-            title="Projekt (nowa sesja w katalogu)"
+            className="chip-menu project-menu"
+            title={branch ? `Projekt (nowa sesja w katalogu) · gałąź ${branch}` : "Projekt (nowa sesja w katalogu)"}
             trigger={
-              <span className="chip" title={cwd}>
+              <span className="chip project-chip" title={branch ? `${cwd} · gałąź git: ${branch}` : cwd}>
                 <Folder size={13} />
-                <span>{basename(cwd) || "projekt"}</span>
+                <span className="chip-label">{basename(cwd) || "projekt"}</span>
+                {branch && (
+                  <span className="project-branch">
+                    <GitBranch size={12} />
+                    <span>{branch}</span>
+                  </span>
+                )}
                 <ChevronDown size={12} className="chev" />
               </span>
             }
             items={projectItems}
           />
-          {branch && (
-            <span className="chip static branch-chip" title={`gałąź git: ${branch}`}>
-              <GitBranch size={13} />
-              <span>{branch}</span>
-            </span>
-          )}
-          {addons && onAddonsPatch && <AddonsMenu gui={addons} extensions={extensions} onPatch={onAddonsPatch} onSettings={() => onAddonsSettings?.()} />}
           <span className="bar-spacer" />
           {pct !== null && pct >= HANDOFF_AT && !busy && (
             <button
@@ -616,40 +628,45 @@ export function Composer({
             </button>
           )}
           {pct !== null && <ContextMenu usage={usage!} pct={pct} busy={busy} onCommand={onCommand} />}
-          {thinking && thinking.available.length === 0 && thinking.server && (
-            <span
-              className="chip static thinking-chip"
-              title="pi nie steruje myśleniem tego modelu — decyduje serwer llama.cpp (zwykle myśli). Budżet ustawisz w Ustawienia → Model i myślenie."
-            >
-              <Brain size={13} />
-              <span>{thinking.server.budget ? `≤${formatTokens(thinking.server.budget)}` : "serwer"}</span>
-            </span>
-          )}
-          {thinking && thinking.available.length > 0 && (
-            <Menu
-              className="chip-menu"
-              title="Poziom myślenia"
-              trigger={
-                <span className="chip thinking-chip">
-                  <Brain size={13} />
-                  <span>{thinking.level}</span>
-                  <ChevronDown size={12} className="chev" />
-                </span>
-              }
-              items={thinkingItems}
-            />
-          )}
           <Menu
-            className="chip-menu"
+            className="chip-menu model-menu"
             title="Model"
             trigger={
-              <span className="chip model-chip" title={`${provider}/${model}`}>
+              <span className="chip model-chip" title={`${provider}/${model}${thinkingText ? ` · myślenie: ${thinkingText}` : ""}`}>
                 <Cpu size={13} />
-                <span>{model || t("wybierz model")}</span>
+                <span className="chip-label">{model || t("wybierz model")}</span>
+                {thinkingText && (
+                  <span className="model-thinking">
+                    <Brain size={12} />
+                    <span>{thinkingText}</span>
+                  </span>
+                )}
                 <ChevronDown size={12} className="chev" />
               </span>
             }
             items={modelItems}
+            footer={
+              thinking && (thinking.available.length > 0 || thinking.server) ? (
+                <div className="model-thinking-pop">
+                  <div className="model-thinking-head">
+                    <Brain size={13} /> Myślenie
+                  </div>
+                  {thinking.available.length > 0 ? (
+                    <div className="seg">
+                      {thinking.available.map((l) => (
+                        <button key={l} type="button" className={`seg-btn ${l === thinking.level ? "on" : ""}`} onClick={() => onThinking(l)}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="model-thinking-note">
+                      Decyduje serwer llama.cpp{thinking.server?.budget ? ` (budżet ≤${formatTokens(thinking.server.budget)})` : ""} — zmienisz w Ustawienia → Model i myślenie.
+                    </div>
+                  )}
+                </div>
+              ) : undefined
+            }
           />
           {dictOn && <MicButton phase={dict.phase} ready={dict.voice?.ready ?? false} onClick={dict.toggle} />}
           {busy && !value.trim() && attachments.length === 0 ? (

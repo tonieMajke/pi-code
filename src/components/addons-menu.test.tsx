@@ -11,18 +11,27 @@ function gui(patch: Partial<GuiConfig> = {}): GuiConfig {
   return { ...DEFAULT_CONFIG, ...patch };
 }
 
-function open(g: GuiConfig, extensions: string[] = [], onPatch = vi.fn(), onSettings = vi.fn()) {
-  render(<AddonsMenu gui={g} extensions={extensions} onPatch={onPatch} onSettings={onSettings} />);
-  fireEvent.click(screen.getByTitle(/^Dodatki/));
-  return { onPatch, onSettings };
+function open(g: GuiConfig, extensions: string[] = [], onPatch = vi.fn(), onSettings = vi.fn(), onAttach = vi.fn()) {
+  render(<AddonsMenu gui={g} extensions={extensions} onPatch={onPatch} onSettings={onSettings} onAttach={onAttach} />);
+  fireEvent.click(screen.getByTitle(/Dodatki/));
+  return { onPatch, onSettings, onAttach };
 }
 
 const switchOf = (label: string) => screen.getByText(label, { selector: ".addons-label" }).closest(".addons-row")!.querySelector("button[role=switch]") as HTMLButtonElement;
 
 describe("AddonsMenu", () => {
   it("counts the top-level additions in the chip", () => {
-    render(<AddonsMenu gui={gui({ review: { ...DEFAULT_CONFIG.review, enabled: false } })} extensions={[]} onPatch={vi.fn()} onSettings={vi.fn()} />);
-    expect(screen.getByTitle(/^Dodatki 4\/5/)).toBeTruthy();
+    render(<AddonsMenu gui={gui({ review: { ...DEFAULT_CONFIG.review, enabled: false } })} extensions={[]} onPatch={vi.fn()} onSettings={vi.fn()} onAttach={vi.fn()} />);
+    expect(screen.getByTitle(/Dodatki 4\/5/)).toBeTruthy();
+    expect(document.querySelector(".addons-dot")).toBeTruthy();
+  });
+
+  it("attaches an image from the top of the pop-up", () => {
+    const { onAttach } = open(gui());
+    expect(document.querySelector(".addons-dot")).toBeNull();
+    fireEvent.click(screen.getByText("Dołącz obraz"));
+    expect(onAttach).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Dodatki Pi Code")).toBeNull();
   });
 
   it("patches the section a switch belongs to", () => {
@@ -67,7 +76,7 @@ describe("AddonsMenu", () => {
       extensions: { disabled: ["pi-lens"] },
     });
     const again = open(off, ["pi-lens"]);
-    expect(screen.getByTitle(/^Dodatki: wył\./)).toBeTruthy();
+    expect(screen.getByTitle(/Dodatki: wył\./)).toBeTruthy();
     fireEvent.click(screen.getByText("Włącz wszystkie"));
     expect(again.onPatch).toHaveBeenCalledTimes(8);
   });
