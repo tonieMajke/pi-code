@@ -256,6 +256,19 @@ export function SettingsDialog({
                   <Row label="Blokuj obrazy" desc="Nie wysyłaj obrazów do modelu wcale.">
                     <Toggle value={s.images.blockImages} onChange={(v) => onPatch({ blockImages: v })} />
                   </Row>
+                  <h3>{t("Długie ciche tury")}</h3>
+                  <Row
+                    label={t("Limit tury bez słowa")}
+                    desc={t("Po tylu wywołaniach narzędzi albo minutach bez widocznego tekstu model musi napisać status. Jeśli to zignoruje, Pi Code zatrzymuje turę.")}
+                  >
+                    <Toggle value={s.gui.turnLimit.enabled} onChange={(v) => onPatch({ turnLimit: { enabled: v } })} />
+                  </Row>
+                  <Row label={t("Wywołań narzędzi")} desc={t("Bez tekstu dla ciebie między nimi.")}>
+                    <NumberField value={s.gui.turnLimit.toolCalls} min={1} max={100} onCommit={(v) => onPatch({ turnLimit: { toolCalls: v } })} />
+                  </Row>
+                  <Row label={t("Minut")} desc={t("Liczone od ostatniego tekstu modelu.")}>
+                    <NumberField value={s.gui.turnLimit.minutes} min={1} max={60} onCommit={(v) => onPatch({ turnLimit: { minutes: v } })} />
+                  </Row>
                   <h3>{t("Sesje w tle")}</h3>
                   <p className="settings-note">
                     {t("Gdy przełączysz się na inny czat, pracująca sesja nie jest zatrzymywana, tylko pracuje dalej w tle. Na modelach z API nie ma limitu.")}

@@ -279,6 +279,8 @@ export type GuiConfig = {
   };
   sampling: SamplingConfig;
   taste: TasteConfig;
+  /** Silent chains: after this many tool calls or minutes without visible text the model must give a status. */
+  turnLimit: { enabled: boolean; toolCalls: number; minutes: number };
   background: {
     /**
      * Working sessions on local models (private-network servers) that may run while another
@@ -368,6 +370,7 @@ export type SettingsPatch = {
   sampling?: Partial<SamplingConfig>;
   memory?: Partial<GuiConfig["memory"]>;
   background?: Partial<GuiConfig["background"]>;
+  turnLimit?: Partial<GuiConfig["turnLimit"]>;
   /** Auto-compact threshold for the current model; 0 = pi's default. */
   compactAt?: number;
 };

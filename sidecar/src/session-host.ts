@@ -34,6 +34,7 @@ import { ExtensionDialogs } from "./extension-ui.js";
 import { decide, foreignKill, PLAN_PROMPT, startedByApp } from "./permissions.js";
 import { repairEdit } from "./editfix.js";
 import { ProgressWatch } from "./progress.js";
+import { TurnLimit } from "./turn-limit.js";
 import { PlanRecital, TODO_DESCRIPTION, TodoList, type TodoItem } from "./todo.js";
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, finishIntent } from "./constitution.js";
 import type { GuiConfigStore } from "./config.js";
@@ -360,6 +361,7 @@ export class SessionHost {
     const progress = new ProgressWatch(() => this.cwd);
     const todo = new TodoList();
     const recital = new PlanRecital();
+    const limit = new TurnLimit();
     /** The plan was written or updated in this run (a stale plan from an old task is not enforced). */
     let todoTouched = false;
     let todoNudges = 0;
@@ -404,8 +406,22 @@ export class SessionHost {
       },
     });
 
+    // Text the user can read resets the silent-chain limit.
+    pi.on("message_end", (event) => {
+      const m = event.message as { role?: string; content?: unknown };
+      if (m.role === "assistant" && Array.isArray(m.content) && m.content.some((b: { type?: string; text?: string }) => b.type === "text" && !!b.text?.trim()))
+        limit.reset();
+    });
+
     pi.on("tool_call", async (event, ctx) => {
       const input = event.input as Record<string, unknown>;
+      const silent = limit.beforeTool(cfg().turnLimit);
+      if (silent) this.emit({ kind: "guard", label: silent.label });
+      if (silent?.kind === "status") return { block: true, reason: silent.reason };
+      if (silent?.kind === "stop") {
+        setTimeout(() => void this.abort(), 0); // not from inside the run's own hook
+        return { block: true, reason: "Pi Code stopped the run: no status after the limit." };
+      }
       // Constitution first: no point asking the user to approve a call that gets blocked anyway.
       const reason = hard() ? guard.beforeTool(event.toolName, input) : null;
       if (reason) return { block: true, reason };
@@ -582,6 +598,7 @@ export class SessionHost {
 
     pi.on("before_agent_start", async (event) => {
       guard.startRun();
+      limit.reset();
       taste.startRun();
       progress.startRun();
       todoTouched = false;
