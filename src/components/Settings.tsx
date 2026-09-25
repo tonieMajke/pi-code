@@ -312,9 +312,9 @@ export function SettingsDialog({
                   <ul className="settings-list">
                     {s.extensions.length === 0 && <li className="dim">brak</li>}
                     {s.extensions.map((e) => (
-                      <li key={e.path} title={e.path}>
-                        <span>{e.name}</span>
-                        {e.source !== e.name && <span className="dim">{e.source}</span>}
+                      <li key={e.path || e.name} title={e.path}>
+                        <span className={e.disabled ? "dim" : undefined}>{e.name}</span>
+                        {e.disabled ? <span className="dim">wyłączone w Pi Code</span> : e.source !== e.name && <span className="dim">{e.source}</span>}
                       </li>
                     ))}
                   </ul>

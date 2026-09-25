@@ -896,7 +896,8 @@ export class PiGateway {
       extensions: loader
         .getExtensions()
         .extensions.filter((e) => !e.hidden)
-        .map((e) => ({ name: extensionName(e.resolvedPath), path: e.resolvedPath, source: src(e.sourceInfo) })),
+        .map((e) => ({ name: extensionName(e.resolvedPath), path: e.resolvedPath, source: src(e.sourceInfo) }))
+        .concat(this.config!.get().extensions.disabled.map((name) => ({ name, path: "", source: "", disabled: true }))),
       skills: loader.getSkills().skills.map((k) => ({ name: k.name, description: k.description, source: src(k.sourceInfo) })),
       contextFiles: loader.getAgentsFiles().agentsFiles.map((f) => f.path),
       constitution: {
@@ -947,6 +948,10 @@ export class PiGateway {
         ...(steps !== undefined ? { steps: Math.max(1, Math.min(100, Math.round(steps))) } : {}),
         ...(minutes !== undefined ? { minutes: Math.max(1, Math.min(60, Math.round(minutes))) } : {}),
       });
+    }
+    if (patch.extension) {
+      config.setExtension(patch.extension.name, patch.extension.enabled);
+      for (const h of this.hosts.values()) h.extensionsChanged();
     }
     if (patch.memory) {
       config.update("memory", patch.memory);

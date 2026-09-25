@@ -281,6 +281,8 @@ export type GuiConfig = {
   taste: TasteConfig;
   /** Silent chains: after this many steps (model messages with tool calls) or minutes without visible text the model must give a status. */
   turnLimit: { enabled: boolean; steps: number; minutes: number };
+  /** pi extensions (by name, e.g. "pi-lens", "guardian") Pi Code leaves out when loading a session. */
+  extensions: { disabled: string[] };
   background: {
     /**
      * Working sessions on local models (private-network servers) that may run while another
@@ -340,7 +342,8 @@ export type PiSettings = {
   shellPath: string;
   shellCommandPrefix: string;
   tools: { name: string; description: string; active: boolean; source: string; tokens: number; policy: ToolPolicy }[];
-  extensions: { name: string; path: string; source: string }[];
+  /** Loaded ones, then the ones switched off in Pi Code (disabled, no path). */
+  extensions: { name: string; path: string; source: string; disabled?: boolean }[];
   skills: { name: string; description: string; source: string }[];
   contextFiles: string[];
   constitution: ConstitutionConfig & { defaultText: string; file: string };
@@ -380,6 +383,8 @@ export type SettingsPatch = {
   memory?: Partial<GuiConfig["memory"]>;
   background?: Partial<GuiConfig["background"]>;
   turnLimit?: Partial<GuiConfig["turnLimit"]>;
+  /** Switch one pi extension on or off; sessions reload it when idle. */
+  extension?: { name: string; enabled: boolean };
   /** Auto-compact threshold for the current model; 0 = pi's default. */
   compactAt?: number;
 };

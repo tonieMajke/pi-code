@@ -23,6 +23,7 @@ export const DEFAULT_CONFIG: GuiConfig = {
   memory: { enabled: true, learn: true },
   background: { localLimit: 2 },
   turnLimit: { enabled: true, steps: 10, minutes: 5 },
+  extensions: { disabled: [] },
   onboarded: false,
 };
 
@@ -62,6 +63,7 @@ export class GuiConfigStore {
       memory: { ...DEFAULT_CONFIG.memory, ...raw.memory },
       background: { ...DEFAULT_CONFIG.background, ...raw.background },
       turnLimit: { ...DEFAULT_CONFIG.turnLimit, ...raw.turnLimit },
+      extensions: { disabled: Array.isArray(raw.extensions?.disabled) ? raw.extensions.disabled.filter((n) => typeof n === "string") : [] },
       onboarded: raw.onboarded === true,
     };
   }
@@ -91,6 +93,15 @@ export class GuiConfigStore {
   setOnboarded(): void {
     this.config = { ...this.config, onboarded: true };
     this.save();
+  }
+
+  setExtension(name: string, enabled: boolean): void {
+    const rest = this.config.extensions.disabled.filter((n) => n !== name);
+    this.update("extensions", { disabled: enabled ? rest : [...rest, name] });
+  }
+
+  extensionDisabled(name: string): boolean {
+    return this.config.extensions.disabled.includes(name);
   }
 
   setToolPolicy(name: string, policy: ToolPolicy): void {

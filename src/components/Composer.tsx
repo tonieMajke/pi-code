@@ -61,6 +61,7 @@ export function Composer({
   onNeedPick,
   onCommand,
   addons,
+  extensions = [],
   onAddonsPatch,
   onAddonsSettings,
 }: {
@@ -107,6 +108,8 @@ export function Composer({
   onCommand: (name: string, args: string) => void;
   /** Pi Code's additions (pi-gui.json); null until settings load. */
   addons?: GuiConfig | null;
+  /** Installed pi extensions (names) — the pop-up offers switches for the known ones. */
+  extensions?: string[];
   onAddonsPatch?: (patch: SettingsPatch) => void;
   onAddonsSettings?: () => void;
 }) {
@@ -510,12 +513,12 @@ export function Composer({
             items={projectItems}
           />
           {branch && (
-            <span className="chip static" title="gałąź git">
+            <span className="chip static branch-chip" title={`gałąź git: ${branch}`}>
               <GitBranch size={13} />
               <span>{branch}</span>
             </span>
           )}
-          {addons && onAddonsPatch && <AddonsMenu gui={addons} onPatch={onAddonsPatch} onSettings={() => onAddonsSettings?.()} />}
+          {addons && onAddonsPatch && <AddonsMenu gui={addons} extensions={extensions} onPatch={onAddonsPatch} onSettings={() => onAddonsSettings?.()} />}
           <span className="bar-spacer" />
           {pct !== null && pct >= HANDOFF_AT && !busy && (
             <button

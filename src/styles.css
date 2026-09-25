@@ -885,6 +885,9 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .composer-bar .chip-menu { flex-shrink: 1; min-width: 0; }
 .composer-bar .menu-trigger { min-width: 0; overflow: hidden; display: flex; }
 .composer-bar .chip { min-width: 0; }
+@container (max-width: 720px) {
+  .composer-bar .branch-chip > span, .addons-chip .chev { display: none; }
+}
 @container (max-width: 560px) {
   .composer-bar .chip.static, .ctx > span, .composer-bar .mode-chip > span { display: none; }
 }

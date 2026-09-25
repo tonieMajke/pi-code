@@ -128,6 +128,8 @@ export class SessionHost {
   handoffAbort: AbortController | null = null;
   /** Extensions' session_start (MCP connects etc.) runs after the session is shown; a prompt waits for it. */
   extensionsReady: Promise<void> = Promise.resolve();
+  /** An extension switch came in mid-turn; applied when the turn settles. */
+  private reloadPending = false;
   /** ctx.ui dialogs of pi extensions, answered in the GUI. */
   private dialogs = new ExtensionDialogs((e) => this.onDialogEvent(e));
   /** Agent runs that reached agent_settled — tells prompt() whether a "/command" ran the agent at all. */
@@ -159,6 +161,11 @@ export class SessionHost {
       agentDir: env.services.agentDir,
       settingsManager: env.services.settingsManager,
       extensionFactories: [{ name: "pi-gui", hidden: true, factory: host.extension }],
+      // Extensions switched off in Pi Code (add-ons pop-up); read on every reload.
+      extensionsOverride: (base) => ({
+        ...base,
+        extensions: base.extensions.filter((e) => e.hidden || !env.config.extensionDisabled(extensionName(e.resolvedPath))),
+      }),
       // GUI-bundled skills (visual design rules etc.), loaded on demand like any pi skill.
       additionalSkillPaths: [SKILLS_DIR],
     });
@@ -243,6 +250,7 @@ export class SessionHost {
       this.busySince = null;
       this.setStatus(this.env.activeHost() === this ? "idle" : this.failed() ? "error" : "done");
       this.env.settled(this);
+      if (this.reloadPending) this.extensionsChanged();
     }
   }
 
@@ -1036,6 +1044,18 @@ export class SessionHost {
     const s = this.session;
     const name = s.sessionFile ? `pi-session-${basename(s.sessionFile, ".jsonl")}.html` : "pi-session.html";
     return s.exportToHtml(join(this.cwd, name));
+  }
+
+  /** An extension was switched on or off: reload now, or once the running turn settles. */
+  extensionsChanged(): void {
+    if (this.busy) {
+      this.reloadPending = true;
+      return;
+    }
+    this.reloadPending = false;
+    this.reload().catch((err: unknown) =>
+      this.emit({ kind: "notice", level: "error", text: `Przeładowanie rozszerzeń: ${err instanceof Error ? err.message : String(err)}` }),
+    );
   }
 
   /** pi's /reload: extensions, skills, prompt templates, context files. */

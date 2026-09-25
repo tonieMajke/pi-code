@@ -11,7 +11,21 @@ type Addon = {
   patch: (v: boolean) => SettingsPatch;
   /** Sub-switch: only matters while the parent is on. */
   parent?: string;
+  /** A pi extension: the row shows only when it is installed. */
+  extension?: string;
 };
+
+/** A pi extension Pi Code can leave out of its sessions. */
+function extensionAddon(name: string, label: string, desc: string): Addon {
+  return {
+    key: `ext:${name}`,
+    label,
+    desc,
+    on: (g) => !g.extensions.disabled.includes(name),
+    patch: (v) => ({ extension: { name, enabled: v } }),
+    extension: name,
+  };
+}
 
 /** Pi Code's own additions to plain pi — the ones worth switching off mid-task. */
 export const ADDONS: Addon[] = [
@@ -59,6 +73,15 @@ export const ADDONS: Addon[] = [
     on: (g) => g.turnLimit.enabled,
     patch: (v) => ({ turnLimit: { enabled: v } }),
   },
+  {
+    key: "memory",
+    label: "Pamięć",
+    desc: "zapamiętane fakty w prompcie i nauka po sesji; zmiana przelicza kontekst",
+    on: (g) => g.memory.enabled,
+    patch: (v) => ({ memory: { enabled: v } }),
+  },
+  extensionAddon("pi-lens", "pi-lens", "diagnostyka LSP i lint po każdej edycji; przeładowanie po skończonej turze"),
+  extensionAddon("guardian", "Strażnik pi", "limit czytań z ~/.pi/agent/extensions; przeładowanie po skończonej turze"),
 ];
 
 /** Effective state: a sub-switch under a disabled parent does nothing. */
@@ -72,16 +95,20 @@ export function AddonsMenu({
   gui,
   onPatch,
   onSettings,
+  extensions,
 }: {
   gui: GuiConfig;
+  /** Names of installed pi extensions (loaded or switched off). */
+  extensions: string[];
   onPatch: (patch: SettingsPatch) => void;
   onSettings: () => void;
 }) {
-  const top = ADDONS.filter((a) => !a.parent);
+  const shown = ADDONS.filter((a) => !a.extension || extensions.includes(a.extension));
+  const top = shown.filter((a) => !a.parent);
   const on = top.filter((a) => a.on(gui)).length;
   const label = on === 0 ? "Dodatki: wył." : on === top.length ? "Dodatki" : `Dodatki ${on}/${top.length}`;
   const setAll = (v: boolean) => {
-    for (const a of ADDONS) if (a.on(gui) !== v) onPatch(a.patch(v));
+    for (const a of shown) if (a.on(gui) !== v) onPatch(a.patch(v));
   };
   return (
     <Menu
@@ -97,7 +124,7 @@ export function AddonsMenu({
       footer={(close) => (
         <div className="addons-pop">
           <div className="addons-head">Dodatki Pi Code</div>
-          {ADDONS.map((a) => {
+          {shown.map((a) => {
             const parentOff = a.parent ? !ADDONS.find((p) => p.key === a.parent)!.on(gui) : false;
             return (
               <div key={a.key} className={`addons-row ${a.parent ? "sub" : ""} ${parentOff ? "dim" : ""}`}>
