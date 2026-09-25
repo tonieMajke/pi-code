@@ -133,6 +133,22 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "appearance_image", dataUrl: cmd.dataUrl };
     case "stats_query":
       return { id, cmd: "stats_query", range: cmd.range };
+    case "voice_get":
+      return { id, cmd: "voice_get" };
+    case "voice_set":
+      return { id, cmd: "voice_set", patch: cmd.patch };
+    case "voice_key":
+      return { id, cmd: "voice_key", provider: cmd.provider, key: cmd.key };
+    case "voice_test":
+      return { id, cmd: "voice_test" };
+    case "voice_inputs":
+      return { id, cmd: "voice_inputs" };
+    case "voice_start":
+      return { id, cmd: "voice_start" };
+    case "voice_stop":
+      return { id, cmd: "voice_stop" };
+    case "voice_cancel":
+      return { id, cmd: "voice_cancel" };
     case "dispose":
       return { id, cmd: "dispose" };
   }

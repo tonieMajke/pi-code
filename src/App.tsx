@@ -14,6 +14,7 @@ import { ArrowDown, FileDiff, FolderOpen, ImagePlus, PanelLeftOpen, X } from "lu
 import { Welcome } from "./components/Welcome";
 import type { BackgroundBlock, ClientCommandInput, OnboardingState, SessionStatus } from "../shared/protocol";
 import { initialState, reducer, type InfoLevel, type LivePerf } from "./lib/reducer";
+import { pushVoiceLevel } from "./lib/voice-meter";
 import { createWsTransport, type PiRequest, type PiTransport } from "./lib/transport";
 import { lang, plural, t } from "../shared/i18n";
 import { invoke } from "@tauri-apps/api/core";
@@ -181,6 +182,10 @@ export default function App() {
     const off = tp.onMessage((msg) => {
       if ("event" in msg) {
         const e = msg.event;
+        if (e.kind === "voice") {
+          pushVoiceLevel(e.level, e.live);
+          return;
+        }
         if (e.kind === "session_status") {
           setBg((b) => ({ ...b, [e.session]: { path: e.path, cwd: e.cwd, title: e.title, status: e.status } }));
           if (e.session === sessionIdRef.current) return;
@@ -1080,6 +1085,9 @@ export default function App() {
       extensions={settings?.extensions.map((e) => e.name)}
       onAddonsPatch={(patch) => send({ cmd: "settings_set", patch })}
       onAddonsSettings={() => openSettings("constitution")}
+      request={request}
+      onDictationError={(msg) => toast(msg, "warning")}
+      onDictationSetup={() => openSettings("voice")}
     />
   );
 

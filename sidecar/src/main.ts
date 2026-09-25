@@ -7,6 +7,7 @@ import { AppearanceStore } from "./appearance.js";
 import { PiGateway } from "./gateway.js";
 import { OWNER_ENV } from "./permissions.js";
 import { t } from "../../shared/i18n.js";
+import { Dictation, RATE, VoiceKeys, VoiceStore, transcribe, wav } from "./voice.js";
 import { gitChanges, gitCommit, gitRevert, gitStage, gitUnstage, listFiles, notify, routerStatus } from "./workspace.js";
 import type { ClientCommand, CommandName, PiEvent, SidecarOut } from "../../shared/protocol.js";
 
@@ -25,6 +26,19 @@ function checkDir(path: string): string {
 }
 
 const appearance = new AppearanceStore(process.env.PI_GUI_APPEARANCE_DIR ?? getAgentDir());
+
+const dictation = new Dictation(
+  new VoiceStore(process.env.PI_GUI_CONFIG ?? `${getAgentDir()}/pi-gui.json`),
+  new VoiceKeys(process.env.PI_GUI_VOICE_KEYS ?? `${getAgentDir()}/pi-gui-voice-keys.json`, `${getAgentDir()}/auth.json`),
+);
+
+/** 0.6 s of a quiet tone: enough for the endpoint to accept it, cheap to transcribe. */
+function testTone(): Buffer {
+  const n = Math.round(RATE * 0.6);
+  const pcm = Buffer.alloc(n * 2);
+  for (let i = 0; i < n; i++) pcm.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / RATE) * 3000), i * 2);
+  return wav(pcm);
+}
 
 function out(msg: SidecarOut): void {
   process.stdout.write(`${JSON.stringify(msg)}\n`);
@@ -96,6 +110,14 @@ const KNOWN = new Set<CommandName>([
   "onboarding_get",
   "onboarding_done",
   "stats_query",
+  "voice_get",
+  "voice_set",
+  "voice_key",
+  "voice_test",
+  "voice_inputs",
+  "voice_start",
+  "voice_stop",
+  "voice_cancel",
   "dispose",
 ]);
 
@@ -365,7 +387,40 @@ async function handle(cmd: ClientCommand): Promise<void> {
         requireReady();
         reply(cmd.id, cmd.cmd, true, gateway.statsQuery(cmd.range));
         return;
+      // Dictation needs no session: the composer works before init finishes.
+      case "voice_get":
+        reply(cmd.id, cmd.cmd, true, dictation.state());
+        return;
+      case "voice_set":
+        dictation.store.update(cmd.patch);
+        reply(cmd.id, cmd.cmd, true, dictation.state());
+        return;
+      case "voice_key":
+        dictation.keys.set(cmd.provider, cmd.key);
+        reply(cmd.id, cmd.cmd, true, dictation.state());
+        return;
+      case "voice_test": {
+        const c = dictation.store.get();
+        const started = Date.now();
+        await transcribe(testTone(), c, dictation.keys.resolve(c.provider).key);
+        reply(cmd.id, cmd.cmd, true, { ms: Date.now() - started });
+        return;
+      }
+      case "voice_inputs":
+        reply(cmd.id, cmd.cmd, true, await dictation.inputs());
+        return;
+      case "voice_start":
+        reply(cmd.id, cmd.cmd, true, dictation.start(({ level, live }) => emit({ kind: "voice", level, live })));
+        return;
+      case "voice_stop":
+        reply(cmd.id, cmd.cmd, true, await dictation.stop());
+        return;
+      case "voice_cancel":
+        dictation.cancel();
+        reply(cmd.id, cmd.cmd, true, { done: true });
+        return;
       case "dispose":
+        dictation.dispose();
         gateway.dispose();
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
@@ -401,7 +456,7 @@ rl.on("line", (line) => {
   // Abort/approve/mode jump the queue: they must work while anything else is pending.
   // Read-only status queries also skip it so a slow session swap can't stall the UI's polling.
   // ui_response too: an extension command waiting on a dialog holds the queue until it is answered.
-  if (["abort", "approve", "ui_response", "mode_set", "router_status", "git_changes", "files_list", "notify", "history_image", "endpoint_probe", "lang_set"].includes(cmd.cmd)) {
+  if (["abort", "approve", "ui_response", "mode_set", "router_status", "git_changes", "files_list", "notify", "history_image", "endpoint_probe", "lang_set", "voice_get", "voice_set", "voice_key", "voice_test", "voice_inputs", "voice_start", "voice_stop", "voice_cancel"].includes(cmd.cmd)) {
     void handle(cmd);
     return;
   }
@@ -409,6 +464,7 @@ rl.on("line", (line) => {
 });
 
 rl.on("close", () => {
+  dictation.dispose();
   gateway.dispose();
   // No process.exit(): let pending stdout writes flush and the process end naturally.
 });

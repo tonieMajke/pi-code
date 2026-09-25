@@ -107,10 +107,56 @@ export type ClientCommand =
   | { id: number; cmd: "onboarding_done" }
   /** Aggregated llama.cpp request log; reply StatsSummary. */
   | { id: number; cmd: "stats_query"; range: StatsRange }
+  /** Dictation settings, providers and which of them have a key; reply VoiceState. Works before init. */
+  | { id: number; cmd: "voice_get" }
+  | { id: number; cmd: "voice_set"; patch: Partial<VoiceConfig> }
+  /** Store (or with "" remove) the provider's API key in pi-gui-voice-keys.json; reply VoiceState. */
+  | { id: number; cmd: "voice_key"; provider: VoiceProvider; key: string }
+  /** Send a short tone to the configured endpoint: checks URL, key and model; reply {ms}. */
+  | { id: number; cmd: "voice_test" }
+  /** Microphones with a ~1 s signal probe each; reply VoiceInput[]. */
+  | { id: number; cmd: "voice_inputs" }
+  /** Start recording the default microphone; `voice` events carry the level. Reply {recorder, maxSeconds}. */
+  | { id: number; cmd: "voice_start" }
+  /** Stop and transcribe; reply {text, seconds, ms}. */
+  | { id: number; cmd: "voice_stop" }
+  /** Stop and throw the recording away (also aborts a transcription in flight). */
+  | { id: number; cmd: "voice_cancel" }
   | { id: number; cmd: "dispose" };
 
 export type { Lang } from "./i18n.js";
 import type { Lang } from "./i18n.js";
+
+/** OpenAI-compatible speech-to-text services (POST /audio/transcriptions). */
+export type VoiceProvider = "cortecs" | "openrouter" | "openai" | "groq" | "custom";
+
+/** Where the key for a provider comes from: Pi Code's own file, env, pi's auth.json, MowaWszędzie's config. */
+export type VoiceKeySource = "stored" | "env" | "pi" | "mowa" | "none";
+
+/** "voice" in pi-gui.json. Empty baseUrl / model = the provider's default. */
+export type VoiceConfig = {
+  /** Mic button in the composer. */
+  enabled: boolean;
+  provider: VoiceProvider;
+  baseUrl: string;
+  model: string;
+  /** ISO code ("pl", "en") or "auto". */
+  language: string;
+  /** PipeWire/Pulse source name; "" = the system default input. */
+  device: string;
+};
+
+/** A microphone and what it heard during a short probe (level 0..1, peak 0..32767; -1 = not measured); dead = no signal at all. */
+export type VoiceInput = { name: string; label: string; isDefault: boolean; level: number; peak: number; dead: boolean };
+
+export type VoiceState = {
+  config: VoiceConfig;
+  providers: { id: VoiceProvider; label: string; baseUrl: string; model: string; keyUrl: string; needsKey: boolean; keySource: VoiceKeySource }[];
+  /** pw-record / parecord / arecord; "" = none installed. */
+  recorder: string;
+  /** Recorder found and the chosen provider has a key (if it needs one). */
+  ready: boolean;
+};
 
 /** What a session in memory is doing — the sidebar marker. done/error = finished while not on screen. */
 export type SessionStatus = "working" | "slot" | "approval" | "done" | "error" | "idle";
@@ -610,7 +656,9 @@ export type PiEvent =
   /** A session kept in memory changed state (sent for background and on-screen sessions). */
   | { kind: "session_status"; session: string; path: string; cwd: string; title: string; status: SessionStatus }
   /** A session was released from memory (stopped, evicted, deleted). */
-  | { kind: "session_closed"; session: string; path: string };
+  | { kind: "session_closed"; session: string; path: string }
+  /** Microphone loudness while dictating, 0..1, ~25 times a second; live = the input has given any signal yet. */
+  | { kind: "voice"; level: number; live: boolean };
 
 export type SidecarOut =
   | { id: number; cmd?: CommandName; ok: true; result?: unknown }

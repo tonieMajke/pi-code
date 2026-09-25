@@ -1359,3 +1359,103 @@ button.welcome-folder:hover { background: var(--hover); border-color: var(--bord
 .limit-item svg { color: var(--err); flex: none; }
 .limit-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .limit-tag { font-size: 11.5px; color: var(--muted); flex: none; }
+
+/* ── Dyktowanie ─────────────────────────── */
+.mic-btn {
+  flex: none; width: 32px; height: 32px; margin-left: 2px; border-radius: 10px;
+  border: none; background: none; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s, transform 0.12s;
+}
+.mic-btn:hover { background: var(--hover); color: var(--text); }
+.mic-btn:active { transform: scale(0.92); }
+.mic-btn.unset { opacity: 0.6; }
+.mic-btn.on { color: var(--accent); }
+
+/* The box glows with the voice: --voice (0..1) is set every frame by the waveform. */
+.composer-box { --voice: 0; }
+.composer-box::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 calc(10px + var(--voice) * 34px) calc(var(--voice) * 4px) var(--accent-soft), 0 0 calc(4px + var(--voice) * 14px) 0 color-mix(in srgb, var(--accent) 35%, transparent);
+  opacity: 0; transition: opacity 0.35s ease;
+}
+.composer-box.dictating::after { opacity: calc(0.45 + var(--voice) * 0.55); transition: opacity 0.08s linear; }
+.composer-box.dictating.transcribing::after { opacity: 0.5; animation: dict-breathe 1.6s ease-in-out infinite; }
+.composer-box.dictated::after { animation: dict-flash 0.9s ease-out; }
+@keyframes dict-breathe { 50% { opacity: 0.2; } }
+@keyframes dict-flash { from { opacity: 0.9; } to { opacity: 0; } }
+
+.dictation-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px; margin-left: -6px; height: 32px;
+  animation: dict-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes dict-in { from { opacity: 0; transform: translateY(3px); } }
+.dict-cancel { flex: none; }
+.dict-dot {
+  flex: none; position: relative; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--err); margin: 0 2px;
+}
+.dict-dot::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: var(--err); animation: dict-ripple 1.4s ease-out infinite;
+}
+@keyframes dict-ripple { from { transform: scale(1); opacity: 0.55; } to { transform: scale(2.8); opacity: 0; } }
+.dictation-bar.transcribing .dict-dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.dictation-bar.transcribing .dict-dot::after { display: none; }
+.dictation-bar.starting .dict-dot { background: var(--faint); }
+.dictation-bar.starting .dict-dot::after { display: none; }
+.dict-wave { flex: 1; min-width: 0; height: 28px; display: block; }
+.dict-clock {
+  flex: none; min-width: 40px; text-align: right;
+  font: 500 12.5px var(--mono); font-variant-numeric: tabular-nums; color: var(--text-2);
+}
+.dictation-bar.transcribing .dict-clock { font-family: var(--sans); color: var(--muted); }
+.dict-clock.warn { color: var(--err); }
+.dict-done { margin-left: 2px; }
+.dict-done:disabled { opacity: 0.7; }
+
+.voice-key { display: flex; gap: 6px; align-items: center; }
+.voice-key .s-input { width: 220px; }
+.voice-key-ok { color: var(--ok); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dictation-bar, .dict-dot::after, .composer-box.dictated::after, .composer-box.dictating.transcribing::after { animation: none; }
+}
+.dict-wave-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; }
+.dict-silent {
+  position: absolute; inset: 0; margin: auto; height: 24px; width: fit-content; max-width: 100%;
+  padding: 0 10px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--err) 45%, transparent);
+  background: var(--surface); color: var(--err); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  animation: dict-in 0.25s ease-out;
+}
+.dict-silent:hover { background: var(--hover); }
+
+.voice-mics { padding: 12px 0 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.voice-mics-head { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; margin-bottom: 6px; }
+.voice-mics-head .s-row-desc { grid-column: 1; }
+.voice-mics-head .icon-btn { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.voice-mic {
+  display: grid; grid-template-columns: 18px 1fr 120px 44px; align-items: center; gap: 8px;
+  padding: 7px 8px; border-radius: 8px; border: none; background: none; text-align: left; color: var(--text-2); font-size: 13px;
+}
+.voice-mic:hover { background: var(--hover); }
+.voice-mic.on { background: var(--accent-soft); color: var(--text); }
+.voice-mic-check { color: var(--accent); display: flex; }
+.voice-mic-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-mic-meter { height: 5px; border-radius: 3px; background: var(--active); overflow: hidden; position: relative; }
+.voice-mic-meter > span { display: block; height: 100%; border-radius: 3px; background: var(--ok); transition: width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.voice-mic-meter > .meter-busy {
+  width: 40%; background: linear-gradient(90deg, transparent, var(--faint), transparent);
+  animation: meter-scan 1s ease-in-out infinite;
+}
+@keyframes meter-scan { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.voice-mic-tag { font-size: 11.5px; color: var(--err); text-align: right; }
+.voice-mic.dead .voice-mic-name { color: var(--muted); }
+
+/* A shrinking chip menu keeps its chip inside (the chip used to overflow onto the mic/send buttons). */
+.composer-bar > .menu { min-width: 0; }
+.composer-bar > .menu > .menu-trigger { max-width: 100%; display: flex; }
+.composer-bar > .menu .chip { max-width: min(220px, 100%); min-width: 0; }
+.composer-bar > .menu .chip > svg { flex: none; }

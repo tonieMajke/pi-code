@@ -2,6 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject }
 import { Plug, ArrowUp, Brain, Check, ChevronDown, Clock, Cpu, Folder, FolderPlus, GitBranch, Paperclip, Square, X } from "lucide-react";
 import type { Attachment, GuiConfig, ModelSummary, PermissionMode, PiSettings, SessionSummary, SettingsPatch, Usage } from "../../shared/protocol";
 import { AddonsMenu } from "./AddonsMenu";
+import { DictationBar, MicButton, useDictation } from "./Dictation";
+import type { PiRequest } from "../lib/transport";
+import { insertDictation } from "../lib/voice-meter";
 import { Menu, type MenuItem } from "./Menu";
 import { t } from "../../shared/i18n";
 import { basename, formatTokens } from "../lib/format";
@@ -64,6 +67,9 @@ export function Composer({
   extensions = [],
   onAddonsPatch,
   onAddonsSettings,
+  request,
+  onDictationError,
+  onDictationSetup,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -112,7 +118,81 @@ export function Composer({
   extensions?: string[];
   onAddonsPatch?: (patch: SettingsPatch) => void;
   onAddonsSettings?: () => void;
+  /** Dictation (mic button) — absent in tests and the welcome screen: no button. */
+  request?: PiRequest;
+  onDictationError?: (msg: string) => void;
+  /** Open Settings → Dyktowanie. */
+  onDictationSetup?: () => void;
 }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const [flash, setFlash] = useState(0);
+
+  /** Dictated text goes in at the caret, a few words per frame — it reads as being typed. */
+  const typeIn = (text: string) => {
+    const el = inputRef.current;
+    const cur = valueRef.current;
+    const start = el && document.activeElement === el ? el.selectionStart : cur.length;
+    const end = el && document.activeElement === el ? el.selectionEnd : cur.length;
+    const { value: full, caret } = insertDictation(cur, start, end, text);
+    const head = full.slice(0, caret - text.length);
+    const tail = full.slice(caret);
+    const words = text.split(/(?<=\s)/);
+    const per = Math.max(1, Math.ceil(words.length / 24));
+    let i = 0;
+    const step = () => {
+      i = Math.min(words.length, i + per);
+      onChange(head + words.slice(0, i).join("") + tail);
+      if (i < words.length) setTimeout(step, 22);
+      else {
+        setFlash((f) => f + 1);
+        requestAnimationFrame(() => {
+          const t = inputRef.current;
+          if (!t) return;
+          t.focus();
+          t.setSelectionRange(caret, caret);
+        });
+      }
+    };
+    step();
+  };
+  const noop = () => undefined;
+  const dict = useDictation({
+    request: request ?? (() => Promise.reject(new Error("no transport"))),
+    onText: typeIn,
+    onError: onDictationError ?? noop,
+    onSetup: onDictationSetup ?? noop,
+  });
+  const dictOn = Boolean(request) && dict.voice?.config.enabled !== false;
+  const dictRefresh = dict.refresh;
+  useEffect(() => {
+    if (request && connected) dictRefresh();
+  }, [request, connected, dictRefresh]);
+  // Ctrl+M: start / finish dictation from anywhere in the window.
+  const dictToggle = dict.toggle;
+  useEffect(() => {
+    if (!dictOn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        dictToggle();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dictOn, dictToggle]);
+  useEffect(() => {
+    if (!flash) return;
+    const el = boxRef.current;
+    el?.classList.remove("dictated");
+    void el?.offsetWidth;
+    el?.classList.add("dictated");
+    const id = setTimeout(() => el?.classList.remove("dictated"), 900);
+    return () => clearTimeout(id);
+  }, [flash]);
+  const dictLabel = dict.voice?.providers.find((p) => p.id === dict.voice?.config.provider)?.label ?? "";
+
   const fileRef = useRef<HTMLInputElement>(null);
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
   const [mentionSel, setMentionSel] = useState(0);
@@ -314,7 +394,7 @@ export function Composer({
           ))}
         </div>
       )}
-      <div className={`composer-box mode-${mode}`}>
+      <div ref={boxRef} className={`composer-box mode-${mode} ${dict.phase !== "idle" ? `dictating ${dict.phase}` : ""}`}>
         {slash && (
           <div className="mention-pop slash-pop" ref={slashPopRef}>
             {slash.kind === "pick" && <div className="slash-head">{PICK_TITLE[slash.entry.pick!]}</div>}
@@ -473,6 +553,12 @@ export function Composer({
           rows={1}
           autoFocus
         />
+        {dict.phase !== "idle" ? (
+          <DictationBar phase={dict.phase} since={dict.since} provider={dictLabel} onCancel={dict.cancel} onDone={() => void dict.stop()} onSetup={() => {
+            dict.cancel();
+            onDictationSetup?.();
+          }} boxRef={boxRef} />
+        ) : (
         <div className="composer-bar">
           <button className="icon-btn attach" onClick={() => fileRef.current?.click()} title="Dołącz obraz (albo wklej / upuść)">
             <Paperclip size={15} />
@@ -565,6 +651,7 @@ export function Composer({
             }
             items={modelItems}
           />
+          {dictOn && <MicButton phase={dict.phase} ready={dict.voice?.ready ?? false} onClick={dict.toggle} />}
           {busy && !value.trim() && attachments.length === 0 ? (
             <button className="send stop" onClick={onStop} title="Przerwij (Esc)">
               <Square size={11} fill="currentColor" />
@@ -575,12 +662,23 @@ export function Composer({
             </button>
           )}
         </div>
+        )}
       </div>
       {!hero && (
         <div className="composer-hint">
-          {connected ? (
+          {dict.phase !== "idle" ? (
+            <>
+              <kbd>Enter</kbd> {t("wstaw tekst")} · <kbd>Esc</kbd> {t("odrzuć nagranie")}
+            </>
+          ) : connected ? (
             <>
               <kbd>Enter</kbd> wyślij · <kbd>Shift Enter</kbd> nowa linia · <kbd>/</kbd> komendy · <kbd>Shift Tab</kbd> tryb
+              {dictOn && (
+                <>
+                  {" "}
+                  · <kbd>Ctrl M</kbd> dyktuj
+                </>
+              )}
               {busy && (
                 <>
                   {" "}

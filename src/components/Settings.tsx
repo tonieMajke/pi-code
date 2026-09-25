@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BookMarked, Plug, Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Sparkles, Terminal, Trash2, Wrench, X } from "lucide-react";
+import { BookMarked, Mic, Plug, Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Sparkles, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Appearance, AppearancePatch, ModelSummary, PiSettings, QueueMode, SamplingConfig, SettingsPatch, ToolPolicy } from "../../shared/protocol";
 import { formatTokens } from "../lib/format";
 import { NumberField, Row, Segmented, TextField, Toggle } from "./settings-ui";
 import { MemorySection } from "./MemorySection";
 import { ProvidersPanel } from "./Providers";
+import { VoiceSection } from "./VoiceSection";
 import type { PiRequest } from "../lib/transport";
 import { lang, LANGS, t, type Lang } from "../../shared/i18n";
 import { ACCENTS, BACKGROUNDS } from "../lib/appearance";
@@ -12,6 +13,7 @@ import { ACCENTS, BACKGROUNDS } from "../lib/appearance";
 const SECTIONS = [
   { id: "model", label: "Model i myślenie", icon: Brain },
   { id: "providers", label: "Dostawcy modeli", icon: Plug },
+  { id: "voice", label: "Dyktowanie", icon: Mic },
   { id: "memory", label: "Pamięć", icon: BookMarked },
   { id: "constitution", label: "Konstytucja", icon: Scale },
   { id: "quality", label: "Recenzja i eskalacja", icon: ShieldCheck },
@@ -126,6 +128,8 @@ export function SettingsDialog({
               </p>
               <ProvidersPanel request={request} onChanged={onProvidersChanged} />
             </>
+          ) : section === "voice" ? (
+            <VoiceSection request={request} />
           ) : !s ? (
             <div className="s-empty">wczytywanie ustawień pi…</div>
           ) : (
