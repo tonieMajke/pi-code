@@ -147,9 +147,9 @@ describe("GuiConfigStore", () => {
 
 describe("finishIntent", () => {
   it("hears 'wrap it up' without catching ordinary requests", () => {
-    for (const t of ["dobra kończ już", "kończ już i odpal w firefox", "skończ to", "zakończ", "wystarczy.", "zostaw to tak", "ok that's enough", "wrap it up", "ship it"])
+    for (const t of ["dobra kończ już", "kończ już i odpal w firefox", "skończ to", "zakończ", "wystarczy.", "zostaw to tak", "ok that's enough", "wrap it up", "ship it", "stop", "Stop, co ty robisz?", "stój", "zatrzymaj się", "przestań!", "zapętliłeś się, musimy zwolnić", "zwolnij.", "stop!"])
       expect(finishIntent(t), t).toBe(true);
-    for (const t of ["dokończ stronę", "dodaj zakończenie sekcji", "wystarczy że dodasz stopkę", "add a stop button", "kończę na tym? nie, dodaj menu", "enough padding on the cards please"])
+    for (const t of ["dokończ stronę", "dodaj zakończenie sekcji", "wystarczy że dodasz stopkę", "add a stop button", "kończę na tym? nie, dodaj menu", "enough padding on the cards please", "dodaj przycisk stop", "zapętl animację", "zatrzymaj animację po kliknięciu", "zwolnij pamięć bufora", "przestań używać var"])
       expect(finishIntent(t), t).toBe(false);
   });
 
@@ -161,5 +161,23 @@ describe("finishIntent", () => {
     g.startRun();
     g.afterTool("edit", { path: "a.ts" }, false);
     expect(g.beforeSettle(3)).not.toBeNull();
+  });
+});
+
+describe("non-code changes", () => {
+  it("asks to look at an SVG, never to run a check on it", () => {
+    const { g } = setup();
+    g.afterTool("write", { path: "pelican.svg" }, false);
+    const n = g.beforeSettle(3);
+    expect(n && "content" in n && n.content).toMatch(/look at your work/);
+    g.afterTool("look", { target: "pelican.svg" }, false, true);
+    expect(g.beforeSettle(3)).toBeNull();
+  });
+
+  it("does not demand verification for data files or pictures", () => {
+    const { g } = setup();
+    g.afterTool("write", { path: "shapes/gun.json" }, false);
+    g.afterTool("write", { path: "notes.md" }, false);
+    expect(g.beforeSettle(3)).toBeNull();
   });
 });

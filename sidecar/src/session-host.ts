@@ -368,6 +368,8 @@ export class SessionHost {
     let stopNoted = false;
     let task = "";
     let reviewed = false;
+    /** The reviewer or the critic already sent the model back once this run: no second round. */
+    let extraRound = false;
     const tasteOn = () => cfg().taste.enabled;
     /** Load deferred tools without the model asking (the taste guard needs design_refs etc.). */
     const loadTools = (names: string[]) => {
@@ -605,6 +607,7 @@ export class SessionHost {
       }
       task = event.prompt;
       reviewed = false;
+      extraRound = false;
       this.runCheckpoint = await snapshot(this.cwd, task.slice(0, 60)).catch(() => null);
       const extra = [
         cfg().constitution.enabled ? this.config.constitutionText : "",
@@ -649,7 +652,7 @@ export class SessionHost {
         stopNoted = true;
         this.emit({ kind: "guard", label: "Strażnicy wstrzymani — użytkownik kazał kończyć" });
       }
-      if (cfg().review.enabled && !reviewed && !guard.finishedByUser && guard.changedFiles.length > 0) {
+      if (cfg().review.enabled && !reviewed && !extraRound && !guard.finishedByUser && guard.changedFiles.length > 0) {
         reviewed = true;
         const result = await this.review(task, guard.changedFiles, guard.verified).catch((err: unknown) => {
           this.emit({ kind: "guard", label: `Recenzja nie wyszła: ${err instanceof Error ? err.message : String(err)}` });
@@ -657,6 +660,7 @@ export class SessionHost {
         });
         if (result && !result.ok) {
           const n = result.issues.split("\n").filter((l) => l.trim()).length;
+          extraRound = true;
           return back(reviewNudge(result.issues), `Recenzja: ${n} ${n === 1 ? "uwaga" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "uwagi" : "uwag"} — model poprawia`);
         }
         if (result && !result.skipped) this.emit({ kind: "guard", label: "Recenzja: bez uwag" });
@@ -669,7 +673,9 @@ export class SessionHost {
           this.emit({ kind: "guard", label: "Gust: wstrzymany — użytkownik przejął" });
         }
         if (step?.kind === "nudge") return back(step.nudge.content, step.nudge.label);
-        if (step?.kind === "critic") {
+        if (step?.kind === "critic" && extraRound) {
+          this.emit({ kind: "guard", label: "Krytyk pominięty — w tej turze była już runda poprawek" });
+        } else if (step?.kind === "critic") {
           const verdict = await this.critic(task, step.visual, step.target, taste.image).catch((err: unknown) => {
             this.emit({ kind: "guard", label: `Krytyk nie wyszedł: ${err instanceof Error ? err.message : String(err)}` });
             return null;
@@ -678,6 +684,7 @@ export class SessionHost {
             const { round } = taste.criticDone(verdict.ok);
             if (!verdict.ok) {
               const n = verdict.issues.split("\n").filter((l) => l.trim().startsWith("-")).length || 1;
+              extraRound = true;
               return back(criticNudge(verdict.issues, round, t.maxRounds), `Krytyk (runda ${round}/${t.maxRounds}): ${n} ${n === 1 ? "uwaga" : n < 5 ? "uwagi" : "uwag"} — model poprawia`);
             }
             this.emit({ kind: "guard", label: "Krytyk: bez uwag" });

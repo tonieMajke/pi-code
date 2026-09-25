@@ -69,8 +69,8 @@ export function isCheckCommand(command: string): boolean {
   return CHECK.test(command);
 }
 
-/** Edits to prose don't need a test run. */
-const DOC_FILE = /\.(md|mdx|txt|rst|adoc)$/i;
+/** Edits to prose, data and pictures don't need a test run (a look or a re-read is the check). */
+const DOC_FILE = /\.(md|mdx|txt|rst|adoc|csv|tsv|json|png|jpe?g|gif|webp|ico)$/i;
 
 /** Files whose correctness is mostly how they look. (tsx/jsx left out: usually logic.) */
 export const VISUAL_FILE = /\.(html?|css|scss|sass|less|svg|dot|gv|mmd|mermaid|vue|svelte)$/i;
@@ -100,6 +100,15 @@ const FINISH = new RegExp(
     "\\bwrap\\s+(it\\s+)?up\\b",
     "\\bgood\\s+enough\\b",
     "\\bship\\s+it\\b",
+    // "stop" / "you are looping, slow down" — the user has taken over just the same
+    "^\\s*stop\\b",
+    "\\bstop\\s*!",
+    `\\bst[oó]j${WORD_END}`,
+    "\\bzatrzymaj(\\s+si[eę])?\\s*([.!,]|$)",
+    "\\bprzesta[nń]\\s*([.!,]|$)",
+    "\\bzap[eę]tl(i[lł]e[sś]|i[lł]a[sś]|asz)", // not "zapętl animację"
+    "\\bzwolnij\\s*([.!,]|$)",
+    "\\bmusimy\\s+zwolni[cć]",
   ].join("|"),
   "i",
 );
@@ -235,15 +244,18 @@ export class ConstitutionGuard {
     let nudge: Nudge | null = null;
     // For purely visual files, looking at the render after the last change is the check.
     const codeFiles = this.edited.filter((p) => !DOC_FILE.test(p));
-    const lookedIsEnough = codeFiles.length > 0 && codeFiles.every((p) => VISUAL_FILE.test(p)) && this.sawSeq >= this.editSeq;
-    if (this.editSeq > 0 && this.checkSeq < this.editSeq && !lookedIsEnough) {
+    // Only visual files: the "look at your work" nudge below is their check — never a checker script
+    // (a model once rewrote an SVG checker four times to satisfy this).
+    const visualOnly = codeFiles.length > 0 && codeFiles.every((p) => VISUAL_FILE.test(p));
+    if (this.editSeq > 0 && this.checkSeq < this.editSeq && !visualOnly) {
       const files = this.edited.filter((p) => !DOC_FILE.test(p)).map(rel);
       nudge = {
         label: `Wymuszona weryfikacja: zmieniono ${files.length} plik(i) bez sprawdzenia`,
         content:
           `[Constitution: verification required]\nYou changed ${files.join(", ")} but ran no check after the last change. ` +
           "Before you finish: run the most relevant check (tests, type check, build, or run the program), read the whole output, and fix any failure. " +
-          "If no automated check exists for this change, run `git diff` (or re-read the changed regions), then say explicitly that no automated check was possible.",
+          "If no automated check exists for this change, run `git diff` (or re-read the changed regions), then say explicitly that no automated check was possible. " +
+          "Do not write a new checker script just to satisfy this.",
       };
     } else if (this.lastCheck?.failed && this.checkSeq >= this.editSeq) {
       nudge = {
