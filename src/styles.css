@@ -578,6 +578,7 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .ctx circle { fill: none; stroke-width: 2.4; }
 .ctx-bg { stroke: var(--border-strong); }
 .ctx-fg { stroke: var(--accent); stroke-linecap: round; }
+.ctx-suggest { color: var(--accent); }
 .ctx-menu .menu-trigger { display: flex; align-items: center; height: 28px; border-radius: 8px; }
 .ctx-menu .menu-trigger:hover .ctx, .ctx-menu .menu-trigger.on .ctx { color: var(--text); }
 .ctx-menu .menu-trigger:hover, .ctx-menu .menu-trigger.on { background: var(--hover); }

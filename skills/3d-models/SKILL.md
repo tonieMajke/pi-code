@@ -18,7 +18,8 @@ Both editors are reached through the `mcp` tool (load it with `enable_tools` if 
 5. Fix, screenshot again. Never finish a modelling step without a screenshot after the last change. At the end a reviewer with fresh eyes compares your last screenshot with the reference.
 
 ## Blockbench / Vintage Story
-- For Vintage Story shapes, first read the project's `MODELE-VINTAGE-STORY.md` notes if present (search the workspace for it) — measured skeleton sizes, coordinate conventions (blocks vs clothing differ), rotation signs and known traps. Measure from the game's assets, don't assume Minecraft conventions.
+- For Vintage Story shapes, first read `MODELE-VINTAGE-STORY.md` — it is usually not in the workspace: find it with `find ~ -name MODELE-VINTAGE-STORY.md -not -path '*/node_modules/*' 2>/dev/null | head -1`. It has measured skeleton sizes, coordinate conventions (blocks vs clothing differ), rotation signs and known traps. The same folder has the checking tools: `vs_item_preview.py` (items/blocks with the real rotations) and `vs_fit_check.py` (clothing on the skeleton). Measure from the game's assets, don't assume Minecraft conventions.
+- MCP tools: call the server's describe/list tool for a tool's schema before the first call instead of guessing arguments. Place many cubes in one call (one `elements` array), not one call per cube. Save the project when a step is done.
 - Cube sizes on the 1/16 grid; keep the element count low; name every element and group meaningfully.
 - Pivots at real joints (hinge of a lid, base of a handle) so rotation/animation works.
 - Textures: consistent texel density across parts (same pixels per unit), limited palette (4–8 colors per material), shading by hand: light top-left, darker bottom-right, 1-pixel outline only where the style uses it.

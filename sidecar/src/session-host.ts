@@ -35,6 +35,7 @@ import { decide, foreignKill, PLAN_PROMPT, startedByApp } from "./permissions.js
 import { repairEdit } from "./editfix.js";
 import { ProgressWatch } from "./progress.js";
 import { TurnLimit } from "./turn-limit.js";
+import { appContext } from "./app-context.js";
 import { PlanRecital, TODO_DESCRIPTION, TodoList, type TodoItem } from "./todo.js";
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, finishIntent } from "./constitution.js";
 import type { GuiConfigStore } from "./config.js";
@@ -406,11 +407,16 @@ export class SessionHost {
       },
     });
 
-    // Text the user can read resets the silent-chain limit.
     pi.on("message_end", (event) => {
       const m = event.message as { role?: string; content?: unknown };
-      if (m.role === "assistant" && Array.isArray(m.content) && m.content.some((b: { type?: string; text?: string }) => b.type === "text" && !!b.text?.trim()))
-        limit.reset();
+      if (m.role !== "assistant" || !Array.isArray(m.content)) return undefined;
+      const blocks = m.content as { type?: string; text?: string }[];
+      // Text the user can read resets the silent-chain limit.
+      if (blocks.some((b) => b.type === "text" && !!b.text?.trim())) limit.reset();
+      // Some providers stream thousands of empty text parts (one session file: 2465 of them).
+      const kept = blocks.filter((b) => b.type !== "text" || !!b.text);
+      if (kept.length === blocks.length || kept.length === 0) return undefined;
+      return { message: { ...event.message, content: kept } as typeof event.message };
     });
 
     pi.on("tool_call", async (event, ctx) => {
@@ -627,6 +633,7 @@ export class SessionHost {
       extraRound = false;
       this.runCheckpoint = await snapshot(this.cwd, task.slice(0, 60)).catch(() => null);
       const extra = [
+        appContext(),
         cfg().constitution.enabled ? this.config.constitutionText : "",
         this.toolCatalog(),
         this.memoryActive() ? memoryPrompt(this.env.memory!.read()) : "",

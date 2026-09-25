@@ -871,6 +871,9 @@ export class PiGateway {
         level: s.thinkingLevel,
         available: s.supportsThinking() ? s.getAvailableThinkingLevels() : [],
         defaultLevel: sm.getDefaultThinkingLevel() ?? "",
+        ...(!s.supportsThinking() && isLocalBaseUrl((s.model as { baseUrl?: string } | undefined)?.baseUrl)
+          ? { server: { budget: this.config?.get().sampling.reasoning_budget_tokens || null } }
+          : {}),
       },
       steeringMode: sm.getSteeringMode(),
       followUpMode: sm.getFollowUpMode(),

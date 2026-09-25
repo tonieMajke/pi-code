@@ -322,7 +322,16 @@ export type TasteConfig = {
 export type PiSettings = {
   settingsFile: string;
   defaultModel: string;
-  thinking: { level: string; available: string[]; defaultLevel: string };
+  thinking: {
+    level: string;
+    available: string[];
+    defaultLevel: string;
+    /**
+     * pi sees no thinking levels, but the model runs on llama.cpp, whose own settings decide
+     * (it usually thinks); budget = Pi Code's reasoning_budget_tokens, null = unlimited.
+     */
+    server?: { budget: number | null };
+  };
   steeringMode: QueueMode;
   followUpMode: QueueMode;
   compaction: { enabled: boolean; reserveTokens: number; keepRecentTokens: number };

@@ -508,7 +508,25 @@ export function Composer({
             </span>
           )}
           <span className="bar-spacer" />
+          {pct !== null && pct >= HANDOFF_AT && !busy && (
+            <button
+              className="chip ctx-suggest"
+              title="Kontekst prawie pełny: model streści sesję, a streszczenie trafi do nowej (/handoff)"
+              onClick={() => onCommand("handoff", "")}
+            >
+              Handoff?
+            </button>
+          )}
           {pct !== null && <ContextMenu usage={usage!} pct={pct} busy={busy} onCommand={onCommand} />}
+          {thinking && thinking.available.length === 0 && thinking.server && (
+            <span
+              className="chip static thinking-chip"
+              title="pi nie steruje myśleniem tego modelu — decyduje serwer llama.cpp (zwykle myśli). Budżet ustawisz w Ustawienia → Model i myślenie."
+            >
+              <Brain size={13} />
+              <span>{thinking.server.budget ? `serwer · ≤${formatTokens(thinking.server.budget)}` : "serwer"}</span>
+            </span>
+          )}
           {thinking && thinking.available.length > 0 && (
             <Menu
               className="chip-menu"
@@ -572,6 +590,9 @@ const CTX_PARTS = [
   { key: "tools", label: "Definicje narzędzi", cls: "c-tools" },
   { key: "messages", label: "Wiadomości", cls: "c-messages" },
 ] as const;
+
+/** From here on a long session gets slow and forgetful: offer a fresh one. */
+const HANDOFF_AT = 80;
 
 /** Context ring; click opens the Claude-style breakdown popover. */
 function ContextMenu({

@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { HistoryItem } from "../shared/protocol";
@@ -6,6 +9,7 @@ import WebSocket from "ws";
 
 const PORT = Number(process.env.PI_GUI_E2E_PORT ?? 9899);
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const SCRATCH = mkdtempSync(join(tmpdir(), "pi-gui-e2e-"));
 
 interface Out {
   id?: number;
@@ -72,7 +76,9 @@ describe("e2e smoke: bridge + sidecar over WS", () => {
     // detached => own process group, so we can kill bridge AND the sidecar it spawned
     const bridge = spawn("node", ["dev/ws-bridge.mjs"], {
       cwd: ROOT,
-      env: { ...process.env, PORT: String(PORT) },
+      // In-memory session, own stats log: every test run used to add a chat to the user's
+      // sidebar and a line to their model statistics.
+      env: { ...process.env, PORT: String(PORT), PI_GUI_EPHEMERAL: "1", PI_GUI_STATS: join(SCRATCH, "stats.jsonl") },
       stdio: ["ignore", "ignore", "inherit"],
       detached: true,
     });
