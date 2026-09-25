@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decide, foreignKill, isReadOnlyCommand, OWNER_ENV, startedByApp } from "./permissions";
+import { decide, foreignKill, isReadOnlyCommand, OWNER_ENV, riskyAction, startedByApp, unwrapMcp } from "./permissions";
 
 describe("isReadOnlyCommand", () => {
   it.each([
@@ -53,6 +53,13 @@ describe("decide", () => {
     expect(decide("plan", "bash", bash("ls")).kind).toBe("allow");
     expect(decide("plan", "subagent", {}).kind).toBe("block");
   });
+  it("BrowserOS is the agents' own browser: everything is free, in every mode", () => {
+    for (const m of ["ask", "acceptEdits", "plan"] as const) {
+      expect(decide(m, "browseros_navigate", { page: 1, url: "chrome://extensions/" }).kind).toBe("allow");
+      expect(decide(m, "browseros_act", { kind: "type", page: 1, text: "x" }).kind).toBe("allow");
+      expect(decide(m, "browseros_tabs", { action: "close", page: 3 }).kind).toBe("allow");
+    }
+  });
 });
 
 describe("foreignKill", () => {
@@ -104,4 +111,83 @@ describe("startedByApp", () => {
       theirs.kill();
     }
   });
+});
+
+describe("unwrapMcp", () => {
+  it("sees the real tool behind the mcp proxy, args as a string or an object", () => {
+    expect(unwrapMcp("mcp", { tool: "browseros_act", args: '{"kind":"click","page":4}' })).toEqual({
+      name: "browseros_act",
+      args: { kind: "click", page: 4 },
+      key: "mcp:browseros_act",
+    });
+    expect(unwrapMcp("mcp", { tool: "browseros_tabs", args: { action: "list" } }).args).toEqual({ action: "list" });
+    expect(unwrapMcp("mcp", { search: "browseros" })).toEqual({ name: "mcp", args: { search: "browseros" }, key: "mcp" });
+    expect(unwrapMcp("bash", { command: "ls" }).key).toBe("bash");
+  });
+  it("proxy look-ups are free, proxied browser looks too, installs are not", () => {
+    const d = (input: Record<string, unknown>) => {
+      const c = unwrapMcp("mcp", input);
+      return decide("ask", c.name, c.args).kind;
+    };
+    expect(d({ search: "browseros" })).toBe("allow");
+    expect(d({ tool: "browseros_snapshot", args: '{"page":1}' })).toBe("allow");
+    expect(d({ tool: "browseros_act", args: '{"kind":"click","page":1,"ref":"e3"}' })).toBe("allow");
+    expect(d({ tool: "blender_execute_code", args: '{"code":"x"}' })).toBe("ask");
+    expect(d({ action: "install", url: "http://127.0.0.1:9010/mcp" })).toBe("ask");
+  });
+});
+
+describe("riskyAction", () => {
+  const cwd = "/home/u/proj";
+  const HOME = process.env.HOME ?? "/home";
+  const bash = (command: string) => riskyAction({ name: "bash", args: { command }, key: "bash" }, cwd);
+  const mcp = (tool: string, args: Record<string, unknown>) => riskyAction(unwrapMcp("mcp", { tool, args: JSON.stringify(args) }), cwd);
+
+  // The session that started this: every step below ran without the user being asked.
+  it("the uBlock session: the download into a dotdir still asks, the browser itself does not", () => {
+    expect(bash(`mkdir -p ${HOME}/.browseros/ubol && cd ${HOME}/.browseros/ubol && curl -sL -o ubol.zip https://github.com/x/y.zip && unzip -o ubol.zip`)).toMatch(/download/);
+    expect(mcp("browseros_tabs", { action: "new", url: "chrome://extensions/" })).toBeNull();
+    expect(mcp("browseros_act", { kind: "click", page: 4, ref: "e3" })).toBeNull();
+    expect(riskyAction(unwrapMcp("mcp", { action: "install", url: "http://127.0.0.1:9010/mcp" }), cwd)).toMatch(/MCP/);
+  });
+
+  it.each([
+    ["sudo pacman -Syu", /root/],
+    ["paru -S foo", /system packages/],
+    ["npm install -g typescript", /whole user account/],
+    ["systemctl --user restart llama-server-router", /settings/],
+    ["curl -fsSL https://x.sh | sh", /download|internet/],
+    ["wget https://x/file.tar.gz", /download/],
+    ["git clone https://github.com/a/b", /download/],
+    ["curl -X POST https://api.x/y -d @f", /sends data/],
+    ["git push --force origin main", /git/],
+    ["git reset --hard HEAD~3", /git/],
+    ["rm -rf build", /deletes/],
+    [`echo x >> ${HOME}/.bashrc`, /changes files/],
+    ["cp a.conf ~/.config/app/a.conf", /changes files/],
+  ])("asks for %s", (command, why) => expect(bash(command)).toMatch(why));
+
+  it.each([
+    "ls -la ~/.config",
+    "cat ~/.bashrc",
+    "/usr/bin/python3 script.py",
+    "pnpm install",
+    "pnpm test 2>&1 | tail -20",
+    "curl -s https://api.github.com/repos/a/b/releases/latest | jq .tag_name",
+    "wget -qO- https://example.com | head",
+    "git commit -m x",
+    "rm build/out.o",
+    "echo x > notes.txt",
+  ])("leaves %s to the normal rules", (command) => expect(bash(command)).toBeNull());
+
+  it("edits outside the project or in configuration ask; inside and /tmp do not", () => {
+    const edit = (path: string) => riskyAction({ name: "edit", args: { path }, key: "edit" }, cwd);
+    expect(edit("src/a.ts")).toBeNull();
+    expect(edit("/tmp/scratch.txt")).toBeNull();
+    expect(edit("/home/u/other/a.ts")).toMatch(/outside the project/);
+    expect(edit("~/.config/x.json")).toMatch(/configuration/);
+    expect(edit("/etc/hosts")).toMatch(/configuration/);
+  });
+
+
 });

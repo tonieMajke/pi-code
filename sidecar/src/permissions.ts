@@ -1,9 +1,20 @@
 import type { PermissionMode } from "../../shared/protocol.js";
 import { readFileSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 
 /** Tools that only look at things. Allowed in every mode, never prompt. */
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls", "glob", "web_search", "fetch_content", "source_check"]);
 const EDIT_TOOLS = new Set(["edit", "write"]);
+
+/**
+ * BrowserOS (MCP direct tools, ~/.pi/agent/mcp.json) is a browser set up for agents only — the
+ * user said to let the model do whatever it wants there. Every browseros_* call is free.
+ */
+function isReadOnlyTool(toolName: string, input: Record<string, unknown>): boolean {
+  if (READ_ONLY_TOOLS.has(toolName) || toolName.startsWith("browseros_")) return true;
+  // The MCP proxy's own look-ups: search, describe, status, instructions, connect.
+  return toolName === "mcp" && !input.tool && !input.action;
+}
 
 const DESTRUCTIVE = [
   /\b(rm|rmdir|mv|cp|mkdir|touch|chmod|chown|chgrp|ln|tee|truncate|dd|shred|kill|pkill|killall|reboot|shutdown|sudo|su)\b/i,
@@ -41,7 +52,7 @@ export type Verdict = { kind: "allow" } | { kind: "ask" } | { kind: "block"; rea
 
 export function decide(mode: PermissionMode, toolName: string, input: Record<string, unknown>): Verdict {
   if (mode === "yolo") return { kind: "allow" };
-  if (READ_ONLY_TOOLS.has(toolName)) return { kind: "allow" };
+  if (isReadOnlyTool(toolName, input)) return { kind: "allow" };
   const command = typeof input.command === "string" ? input.command : "";
 
   if (mode === "plan") {
@@ -126,5 +137,91 @@ export function foreignKill(command: string, isOwn: (pid: number) => boolean): s
       }
     }
   }
+  return null;
+}
+
+export type ToolCall = { name: string; args: Record<string, unknown>; /** "always allow" key */ key: string };
+
+/**
+ * pi-mcp-adapter's proxy tool `mcp` hides the real tool in its arguments (`{tool, args}`, args a
+ * JSON string or object). Permissions look at the real call, and "always allow" remembers the real
+ * tool — allowing `mcp` for a snapshot must not allow every browser click that follows.
+ */
+export function unwrapMcp(toolName: string, input: Record<string, unknown>): ToolCall {
+  if (toolName !== "mcp" || typeof input.tool !== "string" || !input.tool) return { name: toolName, args: input, key: toolName };
+  let args: Record<string, unknown> = {};
+  if (typeof input.args === "string") {
+    try {
+      const parsed = JSON.parse(input.args) as unknown;
+      if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>;
+    } catch {
+      /* the adapter rejects it too */
+    }
+  } else if (input.args && typeof input.args === "object") args = input.args as Record<string, unknown>;
+  return { name: input.tool, args, key: `mcp:${input.tool}` };
+}
+
+const HOME = process.env.HOME ?? "/home";
+
+const RISKY_BASH: [RegExp, string][] = [
+  [/\b(sudo|pkexec|doas|su)\b/, "runs as root"],
+  [/\b(pacman|yay|paru|pamac)\s+-[A-Za-z]*[SRU]|\b(apt|apt-get|dnf|zypper)\s+(install|remove|purge)\b|\bflatpak\s+(install|uninstall|remote-add)\b|\bsnap\s+(install|remove)\b/, "installs or removes system packages"],
+  [/\b(npm|pnpm|yarn|bun)\s+(i|install|add|remove|uninstall)\b[^;&|\n]*\s(-g|--global)\b|\bpipx\s+install\b|\bpip3?\s+install\b[^;&|\n]*(--user|--break-system-packages)|\b(cargo|go)\s+install\b|\buv\s+tool\s+install\b/, "installs a program for the whole user account"],
+  [/\bsystemctl\b[^;&|\n]*\b(enable|disable|start|stop|restart|mask|unmask|daemon-reload|edit)\b|\bcrontab\b|\b(gsettings|dconf)\s+(set|write|reset)|\bkwriteconfig\d*\b|\bxdg-(settings|mime)\s+(set|default)\b|\b(chsh|usermod|passwd|ufw|firewall-cmd|iptables|nft)\b/, "changes system or desktop settings"],
+  [/\bcurl\b[^;&|\n]*\s(-[a-zA-Z]*[oO]\b|--output|--remote-name)|\bwget\b(?![^;&|\n]*\s(-q?O\s*-|--output-document=?-)(\s|$))|\b(aria2c|yt-dlp|youtube-dl)\b|\bgit\s+clone\b/, "downloads files from the internet"],
+  [/\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?(ba|z|fi)?sh\b|\b(curl|wget)\b[^\n]*\|\s*python/, "runs a script straight from the internet"],
+  [/\bcurl\b[^;&|\n]*\s(-X\s*(POST|PUT|PATCH|DELETE)|-d\b|--data|-F\b|--form|-T\b|--upload-file)/i, "sends data to a server"],
+  [/\b(ssh|scp|sftp|rsync)\b[^;&|\n]*\S+@?\S*:/, "connects to another machine"],
+  [/\bgit\s+push\b|\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-[a-z]*f|\bgit\s+branch\s+-D\b|\bgit\s+stash\s+(drop|clear)\b|\bgit\s+(checkout|restore)\s+(--\s+)?\.(\s|$)|\bgit\s+filter-(branch|repo)\b/, "publishes or throws away git history/changes"],
+  [/\brm\s+(-[a-zA-Z]*[rR]|--recursive)|\bfind\b[^;&|\n]*\s-delete\b|\bshred\b|\bdd\b[^;&|\n]*\bof=/, "deletes recursively or overwrites a device/file"],
+];
+
+/** A home dotfile/dotdir (~/.config, ~/.ssh, ~/.bashrc…) or a system path. */
+function configPath(p: string): boolean {
+  return new RegExp(`^(${HOME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/\\.|/etc/|/usr/|/boot/|/var/)`).test(p);
+}
+
+/** Configuration the user lives with: home dotfiles/dotdirs and /etc. */
+function userConfigPath(p: string): boolean {
+  return p.startsWith(`${HOME}/.`) || p.startsWith("/etc/");
+}
+
+const WRITE_OP = /(^|[^0-9&<])>{1,2}(?!&)|\b(tee|cp|mv|ln|mkdir|touch|rm|rmdir|chmod|chown|install|unzip|truncate)\b|\bsed\s+(-[a-z]*i|--in-place)|\btar\s+[^;&|\n]*x/;
+
+function resolvePath(p: string, cwd: string): string {
+  const clean = p.startsWith("@") ? p.slice(1) : p;
+  const home = clean.replace(/^~(?=\/|$)/, HOME);
+  return isAbsolute(home) ? resolve(home) : resolve(cwd, home);
+}
+
+/**
+ * Actions the model must not take on its own, whatever the mode ("always allow" and yolo
+ * included — like foreignKill): changing the system, downloading or running things from the
+ * internet, publishing or destroying work, writing outside the project. One session: the model
+ * curl-ed an extension into ~/.browseros without a word. BrowserOS itself is the agents' own
+ * browser and is not policed here. Returns why, or null.
+ */
+export function riskyAction(call: ToolCall, cwd: string): string | null {
+  const { name, args } = call;
+  if (name === "bash" && typeof args.command === "string") {
+    const command = args.command;
+    for (const [re, why] of RISKY_BASH) if (re.test(command)) return why;
+    // Writing next to a config path: running /usr/bin/python3 or reading ~/.config is fine.
+    if (!isReadOnlyCommand(command) && WRITE_OP.test(command)) {
+      const paths = command.match(/(~|\$HOME|\/)[^\s'";&|<>()]*/g) ?? [];
+      const hit = paths.map((p) => p.replace(/^\$HOME/, HOME)).find((p) => userConfigPath(resolvePath(p, cwd)));
+      if (hit) return `changes files in ${hit}`;
+    }
+    return null;
+  }
+  if ((name === "edit" || name === "write") && typeof (args.path ?? args.file_path) === "string") {
+    const p = resolvePath(String(args.path ?? args.file_path), cwd);
+    if (configPath(p)) return `writes ${p} (configuration outside the project)`;
+    const inside = p === cwd || p.startsWith(`${cwd}/`);
+    if (!inside && !p.startsWith("/tmp/")) return `writes ${p}, outside the project`;
+    return null;
+  }
+  if (name === "mcp" && typeof args.action === "string" && /^(install|auth)/.test(args.action))
+    return `changes the MCP configuration (${args.action})`;
   return null;
 }

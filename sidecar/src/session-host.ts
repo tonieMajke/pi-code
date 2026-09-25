@@ -31,7 +31,8 @@ import type {
 } from "../../shared/protocol.js";
 import { withMidrunNote } from "../../shared/midrun.js";
 import { ExtensionDialogs } from "./extension-ui.js";
-import { decide, foreignKill, PLAN_PROMPT, startedByApp } from "./permissions.js";
+import { AnswerFirst } from "./answer-first.js";
+import { decide, foreignKill, PLAN_PROMPT, riskyAction, startedByApp, unwrapMcp } from "./permissions.js";
 import { repairEdit } from "./editfix.js";
 import { ProgressWatch } from "./progress.js";
 import { TurnLimit } from "./turn-limit.js";
@@ -116,6 +117,8 @@ export class SessionHost {
   private guard: ConstitutionGuard | null = null;
   /** Tool names the user approved "always" for this session. */
   private alwaysAllowed = new Set<string>();
+  /** After an interruption or a mid-run message, the next reply is text only. */
+  private answerFirst = new AnswerFirst();
   private pendingApprovals = new Map<
     string,
     { resolve: (d: { decision: ApprovalDecision; reason?: string }) => void; toolName: string; args: unknown }
@@ -334,14 +337,18 @@ export class SessionHost {
 
   /** pi `tool_call` hook: returns a block result or undefined (allowed). */
   async gate(toolCallId: string, toolName: string, input: Record<string, unknown>) {
-    // Signalling a process this app did not start asks in every mode, "always allow" included.
-    const killing = toolName === "bash" && this.mode !== "plan" && typeof input.command === "string" ? foreignKill(input.command, startedByApp) : null;
+    const call = unwrapMcp(toolName, input);
+    const verdict = decide(this.mode, call.name, call.args);
+    if (verdict.kind === "block") return { block: true, reason: verdict.reason };
+    // Signalling a process this app did not start, and risky actions (system, browser settings,
+    // downloads, publishing, writing outside the project) ask in every mode, "always allow" included.
+    const killing = toolName === "bash" && typeof input.command === "string" ? foreignKill(input.command, startedByApp) : null;
+    const risky = killing ? null : riskyAction(call, this.cwd);
     if (killing) this.emit({ kind: "guard", label: `Zabijanie procesu spoza Pi Code — pytam (${killing})` });
+    else if (risky) this.emit({ kind: "guard", label: `Ryzykowna akcja — pytam (${risky})` });
     else {
-      const verdict = decide(this.mode, toolName, input);
       if (verdict.kind === "allow") return undefined;
-      if (verdict.kind === "block") return { block: true, reason: verdict.reason };
-      if (this.alwaysAllowed.has(toolName)) return undefined;
+      if (this.alwaysAllowed.has(call.key)) return undefined;
     }
 
     const answer = await new Promise<{ decision: ApprovalDecision; reason?: string }>((resolve) => {
@@ -350,7 +357,7 @@ export class SessionHost {
       this.emit({ kind: "approval_request", toolCallId, toolName, args: input });
     });
     this.emit({ kind: "approval_done", toolCallId, decision: answer.decision });
-    if (answer.decision === "always" && !killing) this.alwaysAllowed.add(toolName);
+    if (answer.decision === "always" && !killing && !risky) this.alwaysAllowed.add(call.key);
     if (answer.decision === "deny") {
       return {
         block: true,
@@ -610,7 +617,15 @@ export class SessionHost {
       },
     });
 
+    pi.on("before_provider_request", (event) => {
+      const payload = this.answerFirst.apply(event.payload);
+      if (!payload) return undefined;
+      this.emit({ kind: "guard", label: "Przerwano — model najpierw odpowiada (narzędzia wyłączone na tę odpowiedź)" });
+      return payload;
+    });
+
     pi.on("before_agent_start", async (event) => {
+      this.answerFirst.startRun();
       guard.startRun();
       limit.reset();
       taste.startRun();
@@ -656,6 +671,8 @@ export class SessionHost {
     // The run may not end with unverified edits, a failing check, or unreviewed changes.
     pi.on("agent_before_settle", async (event) => {
       if (event.outcome !== "completed" || this.mode === "plan") return undefined;
+      // The reply to an interruption ends the run: the user decides what happens next.
+      if (this.answerFirst.answered) return undefined;
       const back = (content: string, label: string) => {
         this.emit({ kind: "guard", label });
         return {
@@ -1181,6 +1198,7 @@ export class SessionHost {
   async prompt(text: string, images?: Attachment[], behavior?: "steer" | "followUp"): Promise<void> {
     const s = this.session;
     const imgs = images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
+    this.answerFirst.userMessage(text, this.busy);
     if (this.busy) {
       // The user is steering: the taste loop stops pushing its own agenda.
       this.taste?.userSpoke();
@@ -1216,7 +1234,10 @@ export class SessionHost {
     this.dialogs.cancelAll();
     void this.reviewer?.abort();
     this.handoffAbort?.abort();
-    if (this.busy) await this.session.abort();
+    if (this.busy) {
+      this.answerFirst.interrupt();
+      await this.session.abort();
+    }
   }
 
   dispose(): void {

@@ -195,7 +195,16 @@ function AssistantTurn({
           );
         }
         if (b.part.type === "thinking") {
-          return <Thinking key={i} part={b.part} now={now} index={b.index} forceOpen={openPart === b.index} />;
+          return (
+            <Thinking
+              key={i}
+              part={b.part}
+              now={now}
+              index={b.index}
+              forceOpen={openPart === b.index}
+              defaultOpen={hiddenReply(parts, b.index)}
+            />
+          );
         }
         return <Markdown key={i} text={b.part.text} index={b.index} />;
       })}
@@ -266,26 +275,44 @@ const Markdown = memo(function Markdown({ text, index }: { text: string; index: 
   );
 });
 
+/** Reasoning that talks about the user's question ("The user is asking me…", "Użytkownik pyta…"). */
+const ADDRESSES_USER = /\b(the user('s)? (is )?(asking|asks|asked|wants to know|question)|u[żz]ytkownik (pyta|chce wiedzie[cć]))/i;
+
+/**
+ * The model answered the user in its reasoning and went straight to a tool call — the answer
+ * would stay collapsed and the user sees only tool cards. Keep that reasoning open.
+ */
+export function hiddenReply(parts: Part[], index: number): boolean {
+  const part = parts[index];
+  if (part?.type !== "thinking" || !ADDRESSES_USER.test(part.text)) return false;
+  if (parts.slice(0, index).some((p) => p.type !== "thinking")) return false; // not the reply's start
+  const next = parts.slice(index + 1).find((p) => p.type !== "thinking");
+  return next?.type === "tool";
+}
+
 function Thinking({
   part,
   now,
   index,
   forceOpen,
+  defaultOpen = false,
 }: {
   part: Extract<Part, { type: "thinking" }>;
   now: number;
   index: number;
   forceOpen: boolean;
+  /** Start expanded (the user can still collapse it). */
+  defaultOpen?: boolean;
 }) {
   const active = part.end === undefined && part.start !== undefined && now > 0;
-  const [userOpen, setOpen] = useState(false);
-  const open = userOpen || forceOpen;
+  const [userOpen, setOpen] = useState<boolean | null>(null);
+  const open = (userOpen ?? defaultOpen) || forceOpen;
   const secs =
     part.start !== undefined ? formatDuration((part.end ?? (now || part.start)) - part.start) : "";
   const label = active ? `Myśli… ${secs}` : secs && part.end !== part.start ? `Myślał ${secs}` : "Przemyślenia";
   return (
     <div className={`thinking ${open || active ? "open" : ""} ${active ? "active" : ""}`} data-part={index}>
-      <button className="thinking-row" onClick={() => setOpen((o) => !o)}>
+      <button className="thinking-row" onClick={() => setOpen(!open)}>
         <ChevronRight size={14} className="tool-chevron" />
         <span className={active ? "shimmer" : ""}>{label}</span>
       </button>
