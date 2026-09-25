@@ -279,8 +279,8 @@ export type GuiConfig = {
   };
   sampling: SamplingConfig;
   taste: TasteConfig;
-  /** Silent chains: after this many tool calls or minutes without visible text the model must give a status. */
-  turnLimit: { enabled: boolean; toolCalls: number; minutes: number };
+  /** Silent chains: after this many steps (model messages with tool calls) or minutes without visible text the model must give a status. */
+  turnLimit: { enabled: boolean; steps: number; minutes: number };
   background: {
     /**
      * Working sessions on local models (private-network servers) that may run while another

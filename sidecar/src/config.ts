@@ -22,7 +22,7 @@ export const DEFAULT_CONFIG: GuiConfig = {
   taste: { enabled: true, research: "auto", critic: true, criticModel: "", maxRounds: 2, requireAudit: true, criticSlot: null },
   memory: { enabled: true, learn: true },
   background: { localLimit: 2 },
-  turnLimit: { enabled: true, toolCalls: 10, minutes: 5 },
+  turnLimit: { enabled: true, steps: 10, minutes: 5 },
   onboarded: false,
 };
 

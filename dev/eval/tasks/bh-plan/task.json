@@ -1,0 +1,1 @@
+{ "prompt": "Dodaj do total() w shop.py rabat procentowy liczony przed VAT i rozszerz testy. Stwórz plan.", "check": "python3 check.py", "timeoutSec": 300 }

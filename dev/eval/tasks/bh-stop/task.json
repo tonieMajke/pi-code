@@ -1,0 +1,6 @@
+{
+  "prompt": "Dodaj docstringi do wszystkich funkcji w lib/ (plik po pliku).",
+  "check": "python3 check.py",
+  "midrun": { "afterToolCalls": 2, "text": "stop" },
+  "timeoutSec": 420
+}

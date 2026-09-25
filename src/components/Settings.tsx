@@ -259,12 +259,12 @@ export function SettingsDialog({
                   <h3>{t("Długie ciche tury")}</h3>
                   <Row
                     label={t("Limit tury bez słowa")}
-                    desc={t("Po tylu wywołaniach narzędzi albo minutach bez widocznego tekstu model musi napisać status. Jeśli to zignoruje, Pi Code zatrzymuje turę.")}
+                    desc={t("Po tylu krokach albo minutach bez widocznego tekstu model musi napisać status. Jeśli to zignoruje, Pi Code zatrzymuje turę.")}
                   >
                     <Toggle value={s.gui.turnLimit.enabled} onChange={(v) => onPatch({ turnLimit: { enabled: v } })} />
                   </Row>
-                  <Row label={t("Wywołań narzędzi")} desc={t("Bez tekstu dla ciebie między nimi.")}>
-                    <NumberField value={s.gui.turnLimit.toolCalls} min={1} max={100} onCommit={(v) => onPatch({ turnLimit: { toolCalls: v } })} />
+                  <Row label={t("Kroków")} desc={t("Wiadomości modelu z narzędziami, bez tekstu dla ciebie. Równoległe wywołania w jednej wiadomości to jeden krok.")}>
+                    <NumberField value={s.gui.turnLimit.steps} min={1} max={100} onCommit={(v) => onPatch({ turnLimit: { steps: v } })} />
                   </Row>
                   <Row label={t("Minut")} desc={t("Liczone od ostatniego tekstu modelu.")}>
                     <NumberField value={s.gui.turnLimit.minutes} min={1} max={60} onCommit={(v) => onPatch({ turnLimit: { minutes: v } })} />

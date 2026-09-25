@@ -411,8 +411,8 @@ export class SessionHost {
       const m = event.message as { role?: string; content?: unknown };
       if (m.role !== "assistant" || !Array.isArray(m.content)) return undefined;
       const blocks = m.content as { type?: string; text?: string }[];
-      // Text the user can read resets the silent-chain limit.
-      if (blocks.some((b) => b.type === "text" && !!b.text?.trim())) limit.reset();
+      // Text the user can read resets the silent-chain limit; a message of tool calls is a step.
+      limit.messageEnd(blocks.some((b) => b.type === "text" && !!b.text?.trim()));
       // Some providers stream thousands of empty text parts (one session file: 2465 of them).
       const kept = blocks.filter((b) => b.type !== "text" || !!b.text);
       if (kept.length === blocks.length || kept.length === 0) return undefined;
@@ -422,7 +422,7 @@ export class SessionHost {
     pi.on("tool_call", async (event, ctx) => {
       const input = event.input as Record<string, unknown>;
       const silent = limit.beforeTool(cfg().turnLimit);
-      if (silent) this.emit({ kind: "guard", label: silent.label });
+      if (silent?.label) this.emit({ kind: "guard", label: silent.label });
       if (silent?.kind === "status") return { block: true, reason: silent.reason };
       if (silent?.kind === "stop") {
         setTimeout(() => void this.abort(), 0); // not from inside the run's own hook

@@ -1,0 +1,1 @@
+{ "prompt": "Narysuj w house.svg prostą ikonę domku 64×64: dach, ściany, drzwi.", "check": "python3 check.py", "timeoutSec": 300 }

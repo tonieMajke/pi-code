@@ -189,10 +189,11 @@ export const EN: Record<string, string> = {
   "Sesje w tle na modelach lokalnych": "Background sessions on local models",
   "Długie ciche tury": "Long silent turns",
   "Limit tury bez słowa": "Silent turn limit",
-  "Po tylu wywołaniach narzędzi albo minutach bez widocznego tekstu model musi napisać status. Jeśli to zignoruje, Pi Code zatrzymuje turę.":
-    "After this many tool calls or minutes without visible text the model must write a status. If it ignores that, Pi Code stops the turn.",
-  "Wywołań narzędzi": "Tool calls",
-  "Bez tekstu dla ciebie między nimi.": "With no text for you in between.",
+  "Po tylu krokach albo minutach bez widocznego tekstu model musi napisać status. Jeśli to zignoruje, Pi Code zatrzymuje turę.":
+    "After this many steps or minutes without visible text the model must write a status. If it ignores that, Pi Code stops the turn.",
+  "Kroków": "Steps",
+  "Wiadomości modelu z narzędziami, bez tekstu dla ciebie. Równoległe wywołania w jednej wiadomości to jeden krok.":
+    "Model messages with tool calls and no text for you. Parallel calls in one message are one step.",
   "Minut": "Minutes",
   "Liczone od ostatniego tekstu modelu.": "Counted from the model's last text.",
   "Ile sesji na lokalnym serwerze (llama.cpp, vLLM, Ollama…) może pracować, gdy patrzysz na inny czat. 0 = opuszczenie czatu zatrzymuje model, jak dawniej. Po osiągnięciu limitu Pi Code zapyta, którą sesję zatrzymać.": "How many sessions on a local server (llama.cpp, vLLM, Ollama…) may work while you look at another chat. 0 = leaving a chat stops the model, as before. At the limit Pi Code asks which session to stop.",

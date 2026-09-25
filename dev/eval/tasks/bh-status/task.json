@@ -1,0 +1,5 @@
+{
+  "prompt": "W każdym pliku w mods/ popraw literówkę recieve → receive (w nazwach i komentarzach). Edytuj pliki narzędziem edit, bez sed i bez skryptów.",
+  "check": "python3 check.py",
+  "timeoutSec": 900
+}

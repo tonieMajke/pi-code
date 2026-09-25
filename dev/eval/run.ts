@@ -7,6 +7,12 @@
  *   pnpm eval --only py-leap,js-async --repeat 3
  *   pnpm eval --only ui-bakery,ui-pricing --profile no-taste   # visual tasks: screenshot + ui_audit saved
  *   pnpm eval:taste <results-A.json> <results-B.json>           # pairwise judge of the screenshots
+ *   pnpm eval --only bh-plan --model llama-server/Swift1.5-Qwen3.8-27B-Q6_K-2GPU
+ *   pnpm eval --sidecar /path/to/old/checkout/sidecar/src/main.ts   # "before" of an A/B
+ *
+ * Behaviour tasks (bh-*) are checked from the run itself: the check script reads
+ * .eval/transcript.json (texts, tool calls, approvals, mid-run messages, guards) in the task dir.
+ * Every approval request is denied, like a user saying no.
  *
  * Profiles only change a temporary pi-gui.json (PI_GUI_CONFIG) — the user's config is untouched.
  */
@@ -33,7 +39,19 @@ type Task = {
   visual?: string;
   /** A real codebase instead of files/: this repo at a commit, a bug patched in, some tests taken away. */
   repo?: { commit: string; patch: string; remove?: string[] };
+  /** A message the user sends while the model works, after this many tool calls. */
+  midrun?: { afterToolCalls: number; text: string };
+  /** A process the model did not start: spawned in the task dir, its PID in foreign.pid. */
+  foreign?: string;
 };
+type Step =
+  | { t: "text"; text: string }
+  | { t: "tool"; name: string; args: unknown }
+  | { t: "approval"; name: string; args: unknown }
+  | { t: "user"; text: string }
+  | { t: "guard"; label: string }
+  /** End of an assistant message: its text came before, its tool calls come after. */
+  | { t: "end" };
 type Result = {
   task: string;
   pass: boolean;
@@ -51,6 +69,10 @@ type Result = {
   shot?: string;
   /** Where the model left its files (visual tasks: kept for inspection). */
   dir?: string;
+  /** From the run's own stats log: time reading the prompt vs generating (main model). */
+  promptSeconds?: number;
+  genSeconds?: number;
+  approvals?: number;
 };
 
 const PROFILES: Record<string, Partial<GuiConfig>> = {
@@ -88,6 +110,9 @@ function args() {
     profile: get("profile") ?? "full",
     only: get("only")?.split(",") ?? null,
     repeat: Number(get("repeat") ?? 1),
+    /** "provider/id"; default = pi's default model. */
+    model: get("model") ?? null,
+    sidecar: get("sidecar") ?? join(ROOT, "sidecar/src/main.ts"),
   };
 }
 
@@ -128,11 +153,16 @@ function killTree(pid: number | undefined): void {
 }
 
 /** One sidecar process per task: clean session state, no cross-talk. */
-async function runTask(task: string, spec: Task, cfgFile: string, runDir: string, n: number, extraEnv: Record<string, string> = {}): Promise<Result> {
+type RunOpts = { model: string | null; sidecar: string };
+
+async function runTask(task: string, spec: Task, cfgFile: string, runDir: string, n: number, extraEnv: Record<string, string>, opts: RunOpts): Promise<Result> {
   const cwd = prepare(task, spec);
-  const child = spawn("npx", ["tsx", join(ROOT, "sidecar/src/main.ts")], {
-    cwd: ROOT,
-    env: { ...process.env, ...extraEnv, PI_GUI_CONFIG: cfgFile, PI_GUI_EPHEMERAL: "1" },
+  const foreign = spec.foreign ? spawn("sh", ["-c", spec.foreign], { cwd, stdio: "ignore", detached: true }) : null;
+  if (foreign?.pid) writeFileSync(join(cwd, "foreign.pid"), `${foreign.pid}\n`);
+  const statsFile = join(runDir, `${task}-${n}-stats.jsonl`);
+  const child = spawn("npx", ["tsx", opts.sidecar], {
+    cwd: dirname(dirname(dirname(opts.sidecar))),
+    env: { ...process.env, ...extraEnv, PI_GUI_CONFIG: cfgFile, PI_GUI_EPHEMERAL: "1", PI_GUI_STATS: statsFile },
     stdio: ["pipe", "pipe", "ignore"],
     detached: true,
   });
@@ -149,7 +179,15 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
     inputTokens: 0,
     outputTokens: 0,
     checkOutput: "",
+    approvals: 0,
   };
+  const steps: Step[] = [];
+  let text = "";
+  const flush = () => {
+    if (text.trim()) steps.push({ t: "text", text });
+    text = "";
+  };
+  let midrunSent = false;
   const t0 = Date.now();
   const timeout = (spec.timeoutSec ?? 420) * 1000;
   try {
@@ -165,9 +203,29 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
         }
         if ("event" in msg) {
           const e: PiEvent = msg.event;
-          if (e.kind === "tool_start") r.toolCalls++;
-          else if (e.kind === "tool_end" && e.result.isError) r.toolErrors++;
-          else if (e.kind === "guard") r.guards.push(e.label);
+          if (e.kind === "text_delta") text += e.delta;
+          else if (e.kind === "message_end") {
+            flush();
+            steps.push({ t: "end" });
+          }
+          else if (e.kind === "tool_start") {
+            flush();
+            r.toolCalls++;
+            steps.push({ t: "tool", name: e.toolName, args: e.args });
+            if (spec.midrun && !midrunSent && r.toolCalls >= spec.midrun.afterToolCalls) {
+              midrunSent = true;
+              steps.push({ t: "user", text: spec.midrun.text });
+              send({ cmd: "prompt", text: spec.midrun.text, behavior: "steer" });
+            }
+          } else if (e.kind === "approval_request") {
+            r.approvals = (r.approvals ?? 0) + 1;
+            steps.push({ t: "approval", name: e.toolName, args: e.args });
+            send({ cmd: "approve", toolCallId: e.toolCallId, decision: "deny" });
+          } else if (e.kind === "tool_end" && e.result.isError) r.toolErrors++;
+          else if (e.kind === "guard") {
+            r.guards.push(e.label);
+            steps.push({ t: "guard", label: e.label });
+          }
           else if (e.kind === "stuck") r.stuck = true;
           else if (e.kind === "usage") {
             r.inputTokens = e.usage.inputTokens;
@@ -183,11 +241,19 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
           reject(new Error(`${msg.cmd}: ${msg.error}`));
           return;
         }
-        if (msg.cmd === "init" && !prompted) {
+        const go = () => {
           prompted = true;
           send({ cmd: "mode_set", mode: "yolo" });
           send({ cmd: "prompt", text: spec.prompt });
+        };
+        if (msg.cmd === "init" && !prompted) {
+          if (!opts.model) go();
+          else {
+            const [provider, ...rest] = opts.model.split("/");
+            send({ cmd: "model_set", provider, modelId: rest.join("/") });
+          }
         }
+        if (msg.cmd === "model_set" && !prompted) go();
       });
       child.on("exit", () => reject(new Error("sidecar exited")));
       send({ cmd: "init", cwd });
@@ -199,6 +265,17 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
     child.stdin.end();
     killTree(child.pid);
   }
+  flush();
+  mkdirSync(join(cwd, ".eval"), { recursive: true });
+  writeFileSync(join(cwd, ".eval/transcript.json"), JSON.stringify(steps, null, 2));
+  try {
+    const rows = readFileSync(statsFile, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { role: string; promptMs: number; genMs: number });
+    const main = rows.filter((x) => x.role === "main");
+    r.promptSeconds = Math.round(main.reduce((a, x) => a + (x.promptMs ?? 0), 0) / 1000);
+    r.genSeconds = Math.round(main.reduce((a, x) => a + (x.genMs ?? 0), 0) / 1000);
+  } catch {
+    /* no local requests */
+  }
   // Hidden tests arrive only now — the model could not tailor code (or tests) to them.
   const hidden = join(TASKS, task, "hidden");
   if (existsSync(hidden)) cpSync(hidden, cwd, { recursive: true });
@@ -209,6 +286,7 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
     const e = err as { stdout?: string; stderr?: string };
     r.checkOutput = `${e.stdout ?? ""}${e.stderr ?? ""}`.slice(-600);
   }
+  if (foreign?.pid) killTree(foreign.pid);
   if (spec.visual && existsSync(join(cwd, spec.visual))) {
     r.dir = cwd;
     try {
@@ -250,7 +328,7 @@ async function toolNames(): Promise<string[]> {
 }
 
 async function main() {
-  const { profile, only, repeat } = args();
+  const { profile, only, repeat, model, sidecar } = args();
   if (!(profile in PROFILES)) throw new Error(`unknown profile ${profile}; known: ${Object.keys(PROFILES).join(", ")}`);
   const tasks = readdirSync(TASKS).filter((t) => !only || only.includes(t)).sort();
   const cfg = configFile(profile, profile === "base" ? await toolNames() : []);
@@ -261,11 +339,13 @@ async function main() {
   for (let i = 0; i < repeat; i++) {
     for (const task of tasks) {
       const spec = JSON.parse(readFileSync(join(TASKS, task, "task.json"), "utf8")) as Task;
-      const r = await runTask(task, spec, cfg, runDir, i, PROFILE_ENV[profile]);
+      const r = await runTask(task, spec, cfg, runDir, i, PROFILE_ENV[profile] ?? {}, { model, sidecar });
       results.push(r);
       console.log(
         `${r.pass ? "PASS" : "FAIL"}  ${task.padEnd(16)} ${String(r.seconds).padStart(4)}s  tools ${String(r.toolCalls).padStart(2)} (err ${r.toolErrors})` +
           `  guards ${r.guards.length}${r.stuck ? " STUCK" : ""}${r.error ? `  [${r.error}]` : ""}` +
+          (r.promptSeconds !== undefined ? `  prompt ${r.promptSeconds}s gen ${r.genSeconds}s` : "") +
+          (r.approvals ? `  asked ${r.approvals}×` : "") +
           (r.audit ? `  audit ${r.audit.high}/${r.audit.medium}/${r.audit.low}` : ""),
       );
       if (!r.pass) console.log(`      ${r.checkOutput.trim().split("\n").slice(-3).join("\n      ")}`);

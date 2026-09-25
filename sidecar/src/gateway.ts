@@ -941,10 +941,10 @@ export class PiGateway {
     if (patch.taste) config.update("taste", patch.taste);
     if (patch.background?.localLimit !== undefined) config.update("background", { localLimit: Math.max(0, Math.min(8, Math.round(patch.background.localLimit))) });
     if (patch.turnLimit) {
-      const { enabled, toolCalls, minutes } = patch.turnLimit;
+      const { enabled, steps, minutes } = patch.turnLimit;
       config.update("turnLimit", {
         ...(enabled !== undefined ? { enabled } : {}),
-        ...(toolCalls !== undefined ? { toolCalls: Math.max(1, Math.min(100, Math.round(toolCalls))) } : {}),
+        ...(steps !== undefined ? { steps: Math.max(1, Math.min(100, Math.round(steps))) } : {}),
         ...(minutes !== undefined ? { minutes: Math.max(1, Math.min(60, Math.round(minutes))) } : {}),
       });
     }
