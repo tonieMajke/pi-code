@@ -107,6 +107,8 @@ export function AddonsMenu({
   const top = shown.filter((a) => !a.parent);
   const on = top.filter((a) => a.on(gui)).length;
   const label = on === 0 ? "Dodatki: wył." : on === top.length ? "Dodatki" : `Dodatki ${on}/${top.length}`;
+  /** Icon-only chip (the bar is tight already) — the count lives in the tooltip and the popover. */
+  const partial = on > 0 && on < top.length;
   const setAll = (v: boolean) => {
     for (const a of shown) if (a.on(gui) !== v) onPatch(a.patch(v));
   };
@@ -115,9 +117,9 @@ export function AddonsMenu({
       className="chip-menu addons-menu"
       items={[]}
       trigger={
-        <span className={`chip addons-chip ${on === 0 ? "off" : ""}`} title="Dodatki Pi Code — szybkie włączanie i wyłączanie">
+        <span className={`chip addons-chip ${on === 0 ? "off" : ""}`} title={`${label} — szybkie włączanie i wyłączanie`}>
           <ShieldCheck size={13} />
-          <span>{label}</span>
+          {partial && <span className="addons-dot" />}
           <ChevronDown size={12} className="chev" />
         </span>
       }

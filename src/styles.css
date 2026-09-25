@@ -569,10 +569,11 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
   font-size: 12.5px; color: var(--muted);
   padding: 4px 8px; border-radius: 8px; max-width: 220px;
 }
-.chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .chip .chev { opacity: 0.6; flex: none; }
 .chip svg { flex: none; }
 .model-chip, .thinking-chip { font-family: var(--sans); }
+.addons-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 
 .ctx { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--faint); padding: 0 6px; }
 .ctx circle { fill: none; stroke-width: 2.4; }
@@ -882,17 +883,20 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .composer { container-type: inline-size; }
 .composer-bar { min-width: 0; }
 .composer-bar > * { flex-shrink: 0; }
-.composer-bar .chip-menu { flex-shrink: 1; min-width: 0; }
+/* 28px floor = icon + padding, so a chip can never shrink to less than its own icon. */
+.composer-bar .chip-menu { flex-shrink: 1; min-width: 28px; max-width: 220px; }
 .composer-bar .menu-trigger { min-width: 0; overflow: hidden; display: flex; }
 .composer-bar .chip { min-width: 0; }
 @container (max-width: 720px) {
   .composer-bar .branch-chip > span, .addons-chip .chev { display: none; }
 }
-@container (max-width: 560px) {
+@container (max-width: 680px) {
   .composer-bar .chip.static, .ctx > span, .composer-bar .mode-chip > span { display: none; }
 }
-@container (max-width: 440px) {
-  .composer-bar .chip-menu:not(.mode-menu):first-of-type .chip > span { display: none; }
+@container (max-width: 460px) {
+  /* the project chip: the chip-menu right after the mode chip (":first-of-type" never
+     matched here — mode-menu is always the actual first <div>, so this used to be dead) */
+  .composer-bar .mode-menu + .chip-menu .chip > span { display: none; }
 }
 @media (max-width: 1180px) {
   .changes { width: 380px; }

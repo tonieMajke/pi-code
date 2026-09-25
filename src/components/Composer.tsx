@@ -622,7 +622,7 @@ export function Composer({
               title="pi nie steruje myśleniem tego modelu — decyduje serwer llama.cpp (zwykle myśli). Budżet ustawisz w Ustawienia → Model i myślenie."
             >
               <Brain size={13} />
-              <span>{thinking.server.budget ? `serwer · ≤${formatTokens(thinking.server.budget)}` : "serwer"}</span>
+              <span>{thinking.server.budget ? `≤${formatTokens(thinking.server.budget)}` : "serwer"}</span>
             </span>
           )}
           {thinking && thinking.available.length > 0 && (

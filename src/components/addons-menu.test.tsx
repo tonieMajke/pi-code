@@ -13,7 +13,7 @@ function gui(patch: Partial<GuiConfig> = {}): GuiConfig {
 
 function open(g: GuiConfig, extensions: string[] = [], onPatch = vi.fn(), onSettings = vi.fn()) {
   render(<AddonsMenu gui={g} extensions={extensions} onPatch={onPatch} onSettings={onSettings} />);
-  fireEvent.click(screen.getByText(/^Dodatki/));
+  fireEvent.click(screen.getByTitle(/^Dodatki/));
   return { onPatch, onSettings };
 }
 
@@ -22,7 +22,7 @@ const switchOf = (label: string) => screen.getByText(label, { selector: ".addons
 describe("AddonsMenu", () => {
   it("counts the top-level additions in the chip", () => {
     render(<AddonsMenu gui={gui({ review: { ...DEFAULT_CONFIG.review, enabled: false } })} extensions={[]} onPatch={vi.fn()} onSettings={vi.fn()} />);
-    expect(screen.getByText("Dodatki 4/5")).toBeTruthy();
+    expect(screen.getByTitle(/^Dodatki 4\/5/)).toBeTruthy();
   });
 
   it("patches the section a switch belongs to", () => {
@@ -67,7 +67,7 @@ describe("AddonsMenu", () => {
       extensions: { disabled: ["pi-lens"] },
     });
     const again = open(off, ["pi-lens"]);
-    expect(screen.getByText("Dodatki: wył.")).toBeTruthy();
+    expect(screen.getByTitle(/^Dodatki: wył\./)).toBeTruthy();
     fireEvent.click(screen.getByText("Włącz wszystkie"));
     expect(again.onPatch).toHaveBeenCalledTimes(8);
   });

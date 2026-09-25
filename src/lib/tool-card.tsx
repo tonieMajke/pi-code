@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AppWindow,
   Check,
   ChevronRight,
   Columns2,
@@ -68,12 +69,14 @@ const TOOL_VERBS: Record<string, string> = {
   mcp: "MCP",
 };
 
+const BROWSER = "browseros_";
+
 export function toolIcon(name: string) {
-  return TOOL_ICONS[name] ?? Wrench;
+  return TOOL_ICONS[name] ?? (name.startsWith(BROWSER) ? AppWindow : Wrench);
 }
 
 export function toolVerb(name: string): string {
-  return TOOL_VERBS[name] ?? name;
+  return TOOL_VERBS[name] ?? (name.startsWith(BROWSER) ? `Przeglądarka: ${name.slice(BROWSER.length)}` : name);
 }
 
 type Edit = { oldText: string; newText: string };
