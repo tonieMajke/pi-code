@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -63,6 +63,75 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// WebKitGTK variables this process set itself (not inherited from the user).
+static OWN_ENV: OnceLock<Vec<&'static str>> = OnceLock::new();
+
+/// WebKitGTK on NVIDIA + Wayland renders a black window; `pnpm desktop` sets these in the
+/// shell, a packaged build (AppImage) has to set them itself. User values win.
+pub fn set_webview_env() {
+    let mut own = Vec::new();
+    #[cfg(target_os = "linux")]
+    for (key, value) in [
+        ("GDK_BACKEND", "x11"),
+        ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),
+        ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
+        ("LIBGL_ALWAYS_SOFTWARE", "1"),
+    ] {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+            own.push(key);
+        }
+    }
+    let _ = OWN_ENV.set(own);
+}
+
+/// The sidecar runs the model's tools (bash, git, python...), so it must see the user's
+/// environment, not the AppImage's: AppRun points PYTHONHOME, LD_LIBRARY_PATH, PATH, XDG_*
+/// etc. into the mounted image (python3 dies on start with that PYTHONHOME).
+fn clean_sidecar_env(cmd: &mut Command) {
+    for key in OWN_ENV.get().into_iter().flatten() {
+        cmd.env_remove(key);
+    }
+    let Some(appdir) = std::env::var("APPDIR").ok().filter(|d| !d.is_empty()) else { return };
+    for (key, value) in std::env::vars_os() {
+        let Some(value) = value.to_str() else { continue };
+        if key == "APPIMAGE" || !value.contains(&appdir) {
+            continue;
+        }
+        let kept: Vec<&str> = value.split(':').filter(|p| !p.is_empty() && !p.contains(&appdir)).collect();
+        if kept.is_empty() {
+            cmd.env_remove(&key);
+        } else {
+            cmd.env(&key, kept.join(":"));
+        }
+    }
+    cmd.env_remove("APPDIR");
+}
+
+/// Dev: `pnpm sidecar` (tsx) from the project root. Release (AppImage): the esbuild bundle
+/// from the app resources, run by `$PI_CODE_NODE` or the system `node`.
+fn sidecar_command(app: &tauri::App) -> Command {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if cfg!(debug_assertions) {
+        let mut cmd = Command::new("pnpm");
+        cmd.arg("sidecar").current_dir(cwd);
+        return cmd;
+    }
+    let res = app.path().resource_dir().expect("resource dir");
+    let node = std::env::var_os("PI_CODE_NODE").unwrap_or_else(|| "node".into());
+    let mut cmd = Command::new(node);
+    cmd.arg(res.join("sidecar/dist/main.mjs"));
+    clean_sidecar_env(&mut cmd);
+    // AppRun cds into the mounted image; $OWD is where the AppImage was started. From a menu
+    // that is often "/", so fall back to the home folder.
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let owd = std::env::var_os("OWD").map(std::path::PathBuf::from).filter(|p| p.as_os_str() != "/");
+    if let Some(dir) = owd.or(home) {
+        cmd.current_dir(dir);
+    }
+    cmd
+}
+
 fn log_sidecar_started(_app: &tauri::App) {
     eprintln!("[sidecar] spawned, cwd={:?}", std::env::current_dir().ok());
 }
@@ -86,17 +155,12 @@ pub fn run() {
                 eprintln!("[tray] unavailable: {e}");
                 app.state::<CloseToTray>().0.store(false, Ordering::Relaxed);
             }
-            // Dev sidecar: `pnpm sidecar` (tsx) from the project root.
-            // Production: swap for a bundled single-file node build.
-            // Dev: launched from the project root (or cwd); prod will carry its own sidecar.
-            let mut child = Command::new("pnpm")
-                .args(["sidecar"])
-                .current_dir(std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")))
+            let mut child = sidecar_command(app)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::inherit())
                 .spawn()
-                .expect("failed to spawn sidecar (pnpm sidecar)");
+                .expect("failed to spawn sidecar");
 
             let stdin = child.stdin.take().expect("sidecar stdin");
             let stdout = child.stdout.take().expect("sidecar stdout");

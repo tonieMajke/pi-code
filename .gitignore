@@ -4,3 +4,5 @@ dist/
 src-tauri/target/
 .vitest/
 dev/eval/results/
+sidecar/dist/
+sidecar-rt/node_modules/

@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval": "tsx dev/eval/run.ts",
-    "eval:taste": "tsx dev/eval/taste.ts"
+    "eval:taste": "tsx dev/eval/taste.ts",
+    "sidecar-rt": "pnpm --dir sidecar-rt install --config.node-linker=hoisted --frozen-lockfile",
+    "appimage": "pnpm sidecar-rt && NO_STRIP=1 tauri build"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",
@@ -31,6 +33,7 @@
     "typebox": "1.3.27"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.2",
