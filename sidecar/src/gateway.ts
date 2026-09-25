@@ -1,5 +1,5 @@
-import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -38,6 +38,7 @@ import type {
   ProviderInfo,
   UiAnswer,
 } from "../../shared/protocol.js";
+import { TERMINAL_PRESETS } from "../../shared/terminal.js";
 import { SidebarStore } from "./sidebar-store.js";
 import { DEFAULT_CONSTITUTION } from "./constitution.js";
 import { GuiConfigStore } from "./config.js";
@@ -101,9 +102,22 @@ export class PiGateway {
   private learnedUpTo = new Map<string, number>();
   /** Messages last rendered as history — historyImage looks images up here. */
   private shown: { sessionId: string; messages: readonly AgentMessage[] } | null = null;
+  /** The session on screen was handed to a real pi terminal: the GUI must not write to its file. */
+  private terminal: { proc: ChildProcess; sessionPath: string; sessionDir: string; startedAt: number } | null = null;
+  /** Injectable for tests; the default opens the user's console (detached: false, sidecar stays in charge). */
+  spawnTerminal: (argv: string[], cwd: string) => ChildProcess = (argv, cwd) => {
+    const proc = spawn(argv[0], argv.slice(1), { cwd, detached: false, stdio: "ignore" });
+    proc.on("error", () => undefined); // a missing console must not crash the sidecar
+    return proc;
+  };
 
   get ready(): boolean {
     return this.active !== null;
+  }
+
+  /** The session is in a real pi terminal right now (see openInTerminal). */
+  get terminalOpen(): boolean {
+    return this.terminal !== null;
   }
 
   get busy(): boolean {
@@ -161,6 +175,7 @@ export class PiGateway {
   }
 
   private requireHost(): SessionHost {
+    if (this.terminal) throw new Error("Sesja otwarta w terminalu");
     if (!this.active) throw new Error("session not initialized");
     return this.active;
   }
@@ -368,9 +383,89 @@ export class PiGateway {
     await this.startSession(target, SessionManager.create(target));
   }
 
+  // ── Session in a real terminal (pi TUI: /settings, /login…) ──────────────
+
+  /**
+   * The terminal is a second process on the same session file, so the GUI releases the
+   * session and stops writing to it until the terminal exits (or terminalTakeback).
+   */
+  async openInTerminal(): Promise<void> {
+    const host = this.requireHost();
+    const sessionPath = host.path;
+    if (!sessionPath) throw new Error("sesja nie ma jeszcze pliku");
+    const sessionDir = host.session.sessionManager.getSessionDir();
+    const cwd = host.cwd;
+    const template = this.config!.get().terminal ?? TERMINAL_PRESETS.konsole;
+    // Plain space split after placeholder substitution (paths with spaces are not supported).
+    let argv = template.replaceAll("{cwd}", cwd).replaceAll("{session}", sessionPath).split(" ").filter(Boolean);
+    if (this.config!.get().terminalFork) {
+      // A copy of the session (--fork): the GUI keeps the original and keeps working — no abort, no release,
+      // nothing to restore when the terminal exits (the copy shows up in the session list on its own).
+      argv = argv.map((a) => (a === "--session" ? "--fork" : a));
+      const proc = this.spawnTerminal(argv, cwd);
+      // A spawn failure (missing console) would be invisible otherwise — the UI toasts the error from this event.
+      proc.on("error", (err) => this.out({ kind: "terminal_state", open: false, error: err instanceof Error ? err.message : String(err) }));
+      return;
+    }
+    if (host.busy) await host.abort();
+    await this.release(host);
+    this.active = null;
+    const proc = this.spawnTerminal(argv, cwd);
+    this.terminal = { proc, sessionPath, sessionDir, startedAt: Date.now() };
+    proc.on("exit", () => void this.closeTerminal());
+    // A spawn that fails (missing console) emits only "error" — close through the same path.
+    proc.on("error", (err) => void this.closeTerminal(err instanceof Error ? err.message : String(err)));
+    this.out({ kind: "terminal_state", open: true, sessionPath });
+  }
+
+  /** Kill the terminal and bring the session back now; a second call is a no-op. */
+  async terminalTakeback(): Promise<void> {
+    if (!this.terminal) return;
+    this.terminal.proc.kill();
+    await this.closeTerminal();
+  }
+
+  /**
+   * The terminal exited (or was taken back): refresh resources and bring the session back.
+   * Always ends with terminal_state {open:false}; failures go to the UI as its error.
+   */
+  private async closeTerminal(terminalError?: string): Promise<void> {
+    const term = this.terminal;
+    if (!term) return; // takeback and the exit event must not double-close
+    this.terminal = null;
+    let error = terminalError;
+    try {
+      // The terminal may have added extensions, skills or credentials — same refresh as /reload.
+      await this.services?.resourceLoader.reload().catch(() => undefined);
+      // pi may have started a new session file in there (/new): take the newest one touched since.
+      const file = this.newestSessionFile(term.sessionDir, term.startedAt) ?? term.sessionPath;
+      await this.openSession(file);
+    } catch (err) {
+      error ??= err instanceof Error ? err.message : String(err);
+    }
+    this.out({ kind: "terminal_state", open: false, ...(error ? { error } : {}) });
+  }
+
+  /** Newest .jsonl in the session directory modified after startedAt; null = keep the original. */
+  private newestSessionFile(dir: string, startedAt: number): string | null {
+    let newest: string | null = null;
+    let mtime = startedAt;
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      if (!name.isFile() || !name.name.endsWith(".jsonl")) continue;
+      const path = join(dir, name.name);
+      const m = statSync(path).mtimeMs;
+      if (m > mtime) {
+        mtime = m;
+        newest = path;
+      }
+    }
+    return newest;
+  }
+
   // ── Commands routed to a session ──────────────────────────────────────────
 
   private hostFor(session?: string): SessionHost {
+    if (this.terminal) throw new Error("Sesja otwarta w terminalu");
     if (!session) return this.requireHost();
     const host = this.hosts.get(session);
     if (!host) throw new Error(t("tej sesji nie ma już w pamięci"));
@@ -961,6 +1056,8 @@ export class PiGateway {
       config.update("sampling", patch.sampling);
       setSampling(config.get().sampling);
     }
+    if (patch.terminal !== undefined) config.setTerminal(patch.terminal ?? undefined);
+    if (patch.terminalFork !== undefined) config.setTerminalFork(patch.terminalFork);
     if (patch.toolPolicy) {
       config.setToolPolicy(patch.toolPolicy.name, patch.toolPolicy.policy);
       for (const h of this.hosts.values()) h.policyChanged(patch.toolPolicy);
@@ -988,6 +1085,8 @@ export class PiGateway {
   }
 
   dispose(): void {
+    this.terminal?.proc.kill();
+    this.terminal = null;
     for (const h of this.hosts.values()) h.dispose();
     this.hosts.clear();
     this.active = null;

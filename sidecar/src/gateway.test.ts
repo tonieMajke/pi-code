@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PiEvent } from "../../shared/protocol";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PiGateway } from "./gateway";
@@ -45,6 +46,7 @@ type Internal = {
   out: (e: PiEvent, session?: string) => void;
   services: unknown;
   config: unknown;
+  terminal: unknown;
   startSession: (...a: unknown[]) => Promise<void>;
   newSession: (...a: unknown[]) => Promise<void>;
 };
@@ -578,6 +580,173 @@ describe("PiGateway switching", () => {
       expect(internal.hosts.has("old")).toBe(true); // still working, in the background
     } finally {
       SessionHost.start = orig;
+    }
+  });
+});
+
+describe("PiGateway terminal", () => {
+  /** A real session file in a tmp dir, a fake host on screen, SessionHost.start stubbed. */
+  function setup() {
+    const { gw, internal, events, add } = gateway();
+    const dir = mkdtempSync(join(tmpdir(), "pi-gui-terminal-"));
+    const sm = SessionManager.create("/w", dir);
+    sm.newSession();
+    const file = sm.getSessionFile()!;
+    add({ ...fakeSession(), sessionId: sm.getSessionId(), sessionFile: file, sessionManager: sm });
+    const reloaded: string[] = [];
+    internal.services = {
+      settingsManager: { getDefaultProvider: () => undefined, getDefaultModel: () => undefined },
+      modelRuntime: { getAvailableSnapshot: () => [], getModel: () => undefined },
+      resourceLoader: { reload: async () => reloaded.push("reload") },
+    };
+    // The real start boots extensions and MCP; the test only wants the session back on screen.
+    const origStart = SessionHost.start;
+    SessionHost.start = (async (env: HostEnv, cwd: string, m: SessionManager) =>
+      SessionHost.adopt(env, cwd, { ...fakeSession(), prompt: async () => undefined, sessionId: m.getSessionId(), sessionFile: m.getSessionFile() } as never)) as typeof SessionHost.start;
+    return {
+      gw, internal, events, dir, file, reloaded,
+      cleanup: () => {
+        SessionHost.start = origStart;
+        rmSync(dir, { recursive: true, force: true });
+      },
+    };
+  }
+
+  /** EventEmitter standing in for the terminal's ChildProcess. */
+  function fakeProc() {
+    const proc = new EventEmitter() as EventEmitter & { killed: boolean; kill(): void };
+    proc.killed = false;
+    proc.kill = () => {
+      proc.killed = true;
+      process.nextTick(() => proc.emit("exit"));
+    };
+    return proc;
+  }
+
+  it("openInTerminal emits terminal_state, blocks prompt, brings the session back when the terminal exits", async () => {
+    const { gw, internal, events, file, reloaded, cleanup } = setup();
+    try {
+      const proc = fakeProc();
+      gw.spawnTerminal = () => proc as never;
+      await gw.openInTerminal();
+      expect(events).toContainEqual({ kind: "terminal_state", open: true, sessionPath: file });
+      expect(gw.ready).toBe(false);
+      expect(() => gw.prompt("hej")).toThrow("Sesja otwarta w terminalu");
+      proc.emit("exit");
+      await vi.waitFor(() => expect(events).toContainEqual({ kind: "terminal_state", open: false }));
+      expect(reloaded).toEqual(["reload"]);
+      expect(gw.ready).toBe(true);
+      expect(internal.active?.path).toBe(file); // same session file back on screen
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("terminalFork opens a copy (--fork): the GUI keeps the session, no terminal_state, exit restores nothing", async () => {
+    const { gw, internal, events, file, cleanup } = setup();
+    try {
+      const proc = fakeProc();
+      let argv: string[] = [];
+      gw.spawnTerminal = (a: string[]) => {
+        argv = a;
+        return proc as never;
+      };
+      internal.config = { get: () => ({ terminalFork: true }) };
+      await gw.openInTerminal();
+      // --session became --fork after placeholder substitution
+      expect(argv).toEqual(["konsole", "--separate", "--workdir", "/w", "-e", "pi", "--fork", file]);
+      expect(events).toEqual([]); // no terminal_state — the GUI was never blocked
+      expect(gw.ready).toBe(true);
+      expect(internal.active?.path).toBe(file); // the session was not released — the GUI keeps it
+      expect(internal.terminal).toBeNull(); // nothing tracked to restore later
+      proc.emit("exit"); // the copy exits — nothing is restored, nothing is sent
+      await new Promise((r) => setTimeout(r, 25));
+      expect(events).toEqual([]);
+      expect(internal.active?.path).toBe(file);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("a fork copy that fails to spawn reports the error (terminal_state) without blocking the GUI", async () => {
+    const { gw, internal, events, file, cleanup } = setup();
+    try {
+      const proc = new EventEmitter() as EventEmitter & { killed: boolean; kill(): void };
+      proc.killed = false;
+      proc.kill = () => {
+        proc.killed = true;
+      };
+      gw.spawnTerminal = () => proc as never;
+      internal.config = { get: () => ({ terminalFork: true }) };
+      await gw.openInTerminal();
+      proc.emit("error", new Error("spawn kitty ENOENT"));
+      await vi.waitFor(() => expect(events).toContainEqual({ kind: "terminal_state", open: false, error: "spawn kitty ENOENT" }));
+      expect(gw.ready).toBe(true);
+      expect(internal.active?.path).toBe(file); // the GUI never lost the session
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("terminalTakeback kills the process and restores the session exactly once", async () => {
+    const { gw, internal, events, file, cleanup } = setup();
+    try {
+      const proc = fakeProc();
+      gw.spawnTerminal = () => proc as never;
+      await gw.openInTerminal();
+      await gw.terminalTakeback();
+      expect(proc.killed).toBe(true);
+      expect(internal.active?.path).toBe(file);
+      const closed = () => events.filter((e) => e.kind === "terminal_state" && !e.open).length;
+      expect(closed()).toBe(1);
+      await gw.terminalTakeback(); // second one is a no-op (the exit event is too)
+      expect(closed()).toBe(1);
+      expect(internal.active?.path).toBe(file);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("a terminal that dies with a spawn error (missing console) reports it and unblocks the GUI", async () => {
+    const { gw, internal, events, file, cleanup } = setup();
+    try {
+      const proc = new EventEmitter() as EventEmitter & { killed: boolean; kill(): void };
+      proc.killed = false;
+      proc.kill = () => {
+        proc.killed = true;
+      };
+      gw.spawnTerminal = () => proc as never;
+      await gw.openInTerminal();
+      // No "exit" follows — only the spawn error (e.g. konsole not installed).
+      proc.emit("error", new Error("spawn konsole ENOENT"));
+      await vi.waitFor(() => expect(events).toContainEqual({ kind: "terminal_state", open: false, error: "spawn konsole ENOENT" }));
+      expect(gw.ready).toBe(true);
+      expect(internal.active?.path).toBe(file);
+      await gw.prompt("hej"); // the GUI can write to the session again
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("a session file pi started in the terminal (/new) is picked up on return", async () => {
+    const { gw, internal, events, dir, cleanup } = setup();
+    try {
+      const proc = fakeProc();
+      gw.spawnTerminal = () => proc as never;
+      await gw.openInTerminal();
+      // pi opens a fresh session in the same dir while the terminal is open
+      const sm2 = SessionManager.create("/w", dir);
+      sm2.newSession();
+      // The SDK flushes the file on the first assistant message (user-only entries are deferred).
+      sm2.appendMessage({ role: "user", content: "w terminalu", timestamp: Date.now() });
+      sm2.appendMessage({ role: "assistant", content: [{ type: "text", text: "ok" }], api: "openai", provider: "test", model: "m", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: Date.now() });
+      const file2 = sm2.getSessionFile()!;
+      utimesSync(file2, Date.now() / 1000 + 60, Date.now() / 1000 + 60); // same-millisecond mtime is not "newer"
+      proc.emit("exit");
+      await vi.waitFor(() => expect(events).toContainEqual({ kind: "terminal_state", open: false }));
+      expect(internal.active?.path).toBe(file2);
+    } finally {
+      cleanup();
     }
   });
 });

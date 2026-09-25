@@ -118,10 +118,13 @@ const KNOWN = new Set<CommandName>([
   "voice_start",
   "voice_stop",
   "voice_cancel",
+  "terminal_open",
+  "terminal_takeback",
   "dispose",
 ]);
 
 function requireReady(): void {
+  if (gateway.terminalOpen) throw new Error(t("Sesja jest już otwarta w terminalu — przejmij ją, żeby wrócić do GUI."));
   if (!gateway.ready) throw new Error("not initialized — send init first");
 }
 
@@ -417,6 +420,15 @@ async function handle(cmd: ClientCommand): Promise<void> {
         return;
       case "voice_cancel":
         dictation.cancel();
+        reply(cmd.id, cmd.cmd, true, { done: true });
+        return;
+      case "terminal_open":
+        requireReady();
+        await gateway.openInTerminal();
+        reply(cmd.id, cmd.cmd, true, { done: true });
+        return;
+      case "terminal_takeback":
+        await gateway.terminalTakeback();
         reply(cmd.id, cmd.cmd, true, { done: true });
         return;
       case "dispose":

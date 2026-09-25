@@ -149,6 +149,10 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "voice_stop" };
     case "voice_cancel":
       return { id, cmd: "voice_cancel" };
+    case "terminal_open":
+      return { id, cmd: "terminal_open" };
+    case "terminal_takeback":
+      return { id, cmd: "terminal_takeback" };
     case "dispose":
       return { id, cmd: "dispose" };
   }

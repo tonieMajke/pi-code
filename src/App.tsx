@@ -10,7 +10,7 @@ import { clearFind, findMatches, hitsOf, paintFind } from "./lib/find";
 import { WindowControls } from "./components/WindowControls";
 import { WindowFrame } from "./components/WindowFrame";
 import { Logo } from "./components/Logo";
-import { ArrowDown, FileDiff, FolderOpen, ImagePlus, PanelLeftOpen, X } from "lucide-react";
+import { ArrowDown, FileDiff, FolderOpen, ImagePlus, PanelLeftOpen, SquareTerminal, X } from "lucide-react";
 import { Welcome } from "./components/Welcome";
 import type { BackgroundBlock, ClientCommandInput, OnboardingState, SessionStatus } from "../shared/protocol";
 import { initialState, reducer, type InfoLevel, type LivePerf } from "./lib/reducer";
@@ -51,7 +51,10 @@ import { modeInfo, nextMode } from "./lib/modes";
 import { Sidebar } from "./components/Sidebar";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
+import { TerminalBar } from "./components/TerminalBar";
 import { SettingsDialog, type AppPrefs, type SectionId } from "./components/Settings";
+import { TerminalOpenDialog } from "./components/TerminalOpenDialog";
+import { isTerminalWarnHidden, markTerminalWarnHidden } from "./lib/terminal-warn";
 import { saveLang } from "./lib/lang";
 import type { Lang } from "../shared/i18n";
 
@@ -87,6 +90,7 @@ export default function App() {
   const [router, setRouter] = useState<RouterStatus | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [terminalConfirm, setTerminalConfirm] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SectionId | undefined>(undefined);
   /** First-run welcome: shown while set. */
@@ -147,6 +151,12 @@ export default function App() {
   const [find, setFind] = useState<{ query: string; cur: number; focus: number } | null>(null);
 
   const send = useCallback((cmd: Parameters<PiTransport["send"]>[0]) => transportRef.current?.send(cmd), []);
+  /** Every "open in terminal" entry (topbar, Ctrl K, TUI-only /commands) goes through this: the one-time warning first, then terminal_open. */
+  const openInTerminal = () => {
+    if (!state.sessionPath || state.terminalOpen) return;
+    if (isTerminalWarnHidden()) return void send({ cmd: "terminal_open" });
+    setTerminalConfirm(true);
+  };
   const requestsRef = useRef(new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }[]>());
   /** Reply as a promise. Replies carry the command name, not the id: same-name requests are answered in order. */
   const request = useCallback<PiRequest>(
@@ -237,6 +247,10 @@ export default function App() {
             break;
           case "settled":
             commandOutputRef.current = false;
+            break;
+          case "terminal_state":
+            // The terminal died or the session did not come back: the sidecar's error, not a toast that fades.
+            if (e.error) toast(e.error, "error");
             break;
           case "history":
             imageStore.clear();
@@ -845,8 +859,14 @@ export default function App() {
     done();
     switch (entry.kind) {
       case "terminal":
+        if (state.terminalOpen) {
+          echo();
+          info(t("Sesja jest już otwarta w terminalu — przejmij ją, żeby wrócić do GUI."), "warning");
+          return;
+        }
         echo();
-        info(`\`/${name}\` działa tylko w pi w terminalu. Otwieranie sesji w terminalu będzie w następnym kroku.`, "warning");
+        info(t("Otwieram sesję w terminalu (pi)…"));
+        openInTerminal();
         return;
       case "extension":
         // pi runs it inside prompt(); its ctx.ui.notify output lands under this line.
@@ -1009,6 +1029,12 @@ export default function App() {
     { id: "compact", group: "Akcje", label: "Kompaktuj kontekst", keywords: "compact", run: () => { setCompacting(true); send({ cmd: "compact" }); } },
     { id: "stats", group: "Akcje", label: t("Statystyki modeli"), keywords: "stats statystyki prędkość t/s tokeny", run: () => setStatsOpen(true) },
     { id: "find", group: "Akcje", label: t("Szukaj w rozmowie"), hint: <kbd>Ctrl F</kbd>, keywords: "find search znajdź", run: openFind },
+    ...(state.sessionPath && !state.terminalOpen
+      ? [{ id: "terminal", group: "Akcje", label: t("Otwórz sesję w terminalu"), keywords: "terminal pi tui", run: openInTerminal }]
+      : []),
+    ...(state.terminalOpen
+      ? [{ id: "terminal-takeback", group: "Akcje", label: t("Przejmij sesję z powrotem z terminala"), keywords: "terminal pi przejmij", run: () => send({ cmd: "terminal_takeback" }) }]
+      : []),
     { id: "handoff", group: "Akcje", label: "Handoff → nowa sesja", keywords: "handoff podsumowanie przekazanie", run: () => runSlash("handoff", "") },
     ...(state.busy ? [{ id: "stop", group: "Akcje", label: "Przerwij model", hint: <kbd>Esc</kbd>, run: stop }] : []),
     ...MODES.map((m) => ({
@@ -1059,7 +1085,7 @@ export default function App() {
       attachments={attachments}
       onAddFiles={(f) => void addFiles(f)}
       onRemoveAttachment={(i) => setAttachments((cur) => cur.filter((_, j) => j !== i))}
-      blocked={Boolean(approval)}
+      blocked={Boolean(approval) || state.terminalOpen}
       files={files}
       onNeedFiles={() => send({ cmd: "files_list" })}
       model={state.model}
@@ -1163,6 +1189,14 @@ export default function App() {
           <span className="topbar-spacer" data-tauri-drag-region />
           <GpuStatus status={router} model={state.model} />
           <button
+            className="icon-btn"
+            onClick={openInTerminal}
+            disabled={!state.sessionPath || state.terminalOpen}
+            title={t("Otwórz sesję w terminalu")}
+          >
+            <SquareTerminal size={16} />
+          </button>
+          <button
             className={`icon-btn ${changesOpen ? "on" : ""}`}
             onClick={() => setChangesOpen((o) => !o)}
             title="Zmiany w projekcie (Ctrl+Shift+D)"
@@ -1208,6 +1242,7 @@ export default function App() {
             <Logo size={60} className="hero-mark" />
             <h1>Co dalej, Majku?</h1>
             {dialog && <ExtensionDialog key={dialog.id} request={dialog} queued={state.dialogs.length - 1} onAnswer={answerDialog} />}
+            {state.terminalOpen && <TerminalBar onTakeback={() => send({ cmd: "terminal_takeback" })} />}
             {composer}
             {state.cwd && (
               <button className="hero-folder" onClick={() => void addProjectFolder(true)} title={t("Model pracuje na plikach w tym folderze")}>
@@ -1263,6 +1298,7 @@ export default function App() {
                 />
               )}
               {dialog && <ExtensionDialog key={dialog.id} request={dialog} queued={state.dialogs.length - 1} onAnswer={answerDialog} />}
+              {state.terminalOpen && <TerminalBar onTakeback={() => send({ cmd: "terminal_takeback" })} />}
               {approval && (
                 <ApprovalCard
                   approval={approval}
@@ -1382,6 +1418,17 @@ export default function App() {
         />
       )}
       {statsOpen && <StatsDialog request={request} onClose={() => setStatsOpen(false)} />}
+      {terminalConfirm && (
+        <TerminalOpenDialog
+          fork={Boolean(settings?.gui.terminalFork)}
+          onOpen={(dont) => {
+            if (dont) markTerminalWarnHidden();
+            setTerminalConfirm(false);
+            void send({ cmd: "terminal_open" });
+          }}
+          onCancel={() => setTerminalConfirm(false)}
+        />
+      )}
       <Toasts toasts={toasts} onClose={(id) => setToasts((ts) => ts.filter((x) => x.id !== id))} />
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
     </div>

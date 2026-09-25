@@ -85,6 +85,8 @@ export interface State {
   perf: LivePerf | null;
   settledCount: number;
   error: string | null;
+  /** The active session was handed to a real pi terminal: the composer must not write to it. */
+  terminalOpen: boolean;
 }
 
 export type Action =
@@ -128,6 +130,7 @@ export const initialState: State = {
   perf: null,
   settledCount: 0,
   error: null,
+  terminalOpen: false,
 };
 
 type Assistant = Extract<Msg, { role: "assistant" }>;
@@ -378,6 +381,8 @@ export function reducer(state: State, action: Action): State {
           };
         case "mode":
           return { ...state, mode: e.mode };
+        case "terminal_state":
+          return { ...state, terminalOpen: e.open };
         case "approval_request":
           return {
             ...state,

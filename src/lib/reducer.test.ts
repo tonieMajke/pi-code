@@ -204,6 +204,13 @@ describe("reducer", () => {
     expect(s.messages.at(-1)).toEqual({ role: "user", text: "i to", images: [img] });
   });
 
+  it("terminal_state open/close toggles terminalOpen", () => {
+    let s = reducer(initialState, ev({ kind: "terminal_state", open: true }));
+    expect(s.terminalOpen).toBe(true);
+    s = reducer(s, ev({ kind: "terminal_state", open: false, error: "terminal died" }));
+    expect(s.terminalOpen).toBe(false);
+  });
+
   it("clear empties messages and error", () => {
     let s = reducer(initialState, { type: "user", text: "x" });
     s = reducer(s, { type: "error", error: "boom" });

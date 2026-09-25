@@ -39,7 +39,7 @@ export function defaultToolPolicy(name: string): ToolPolicy {
   return "deferred";
 }
 
-type Section = Exclude<keyof GuiConfig, "tools" | "onboarded">;
+type Section = Exclude<keyof GuiConfig, "tools" | "onboarded" | "terminal" | "terminalFork">;
 
 /** GUI-owned config next to pi's settings.json (pi drops unknown keys from its own file). */
 export class GuiConfigStore {
@@ -65,6 +65,8 @@ export class GuiConfigStore {
       turnLimit: { ...DEFAULT_CONFIG.turnLimit, ...raw.turnLimit },
       extensions: { disabled: Array.isArray(raw.extensions?.disabled) ? raw.extensions.disabled.filter((n) => typeof n === "string") : [] },
       onboarded: raw.onboarded === true,
+      terminal: raw.terminal,
+      terminalFork: raw.terminalFork === true,
     };
   }
 
@@ -87,6 +89,17 @@ export class GuiConfigStore {
 
   update<K extends Section>(section: K, patch: Partial<GuiConfig[K]>): void {
     this.config = { ...this.config, [section]: { ...this.config[section], ...patch } };
+    this.save();
+  }
+
+  /** The terminal command template; undefined = the default (konsole). */
+  setTerminal(terminal: string | undefined): void {
+    this.config = { ...this.config, terminal };
+    this.save();
+  }
+
+  setTerminalFork(fork: boolean): void {
+    this.config = { ...this.config, terminalFork: fork };
     this.save();
   }
 

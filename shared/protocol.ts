@@ -122,6 +122,10 @@ export type ClientCommand =
   | { id: number; cmd: "voice_stop" }
   /** Stop and throw the recording away (also aborts a transcription in flight). */
   | { id: number; cmd: "voice_cancel" }
+  /** The active session to a real `pi` in a terminal (/settings, /login…); the GUI stops writing to it until it comes back. */
+  | { id: number; cmd: "terminal_open" }
+  /** Kill the terminal now and bring the session back. */
+  | { id: number; cmd: "terminal_takeback" }
   | { id: number; cmd: "dispose" };
 
 export type { Lang } from "./i18n.js";
@@ -344,6 +348,13 @@ export type GuiConfig = {
   };
   /** The first-run welcome was completed or skipped. */
   onboarded: boolean;
+  /**
+   * Command template that opens the session in a real terminal ({cwd}, {session} placeholders);
+   * absent = `konsole --separate --workdir {cwd} -e pi --session {session}`.
+   */
+  terminal?: string;
+  /** The terminal opens a copy of the session (--fork) instead of taking it over; default false. */
+  terminalFork?: boolean;
 };
 
 /**
@@ -431,6 +442,9 @@ export type SettingsPatch = {
   turnLimit?: Partial<GuiConfig["turnLimit"]>;
   /** Switch one pi extension on or off; sessions reload it when idle. */
   extension?: { name: string; enabled: boolean };
+  /** Terminal command template (see GuiConfig.terminal); null = reset to the default. */
+  terminal?: string | null;
+  terminalFork?: boolean;
   /** Auto-compact threshold for the current model; 0 = pi's default. */
   compactAt?: number;
 };
@@ -658,7 +672,9 @@ export type PiEvent =
   /** A session was released from memory (stopped, evicted, deleted). */
   | { kind: "session_closed"; session: string; path: string }
   /** Microphone loudness while dictating, 0..1, ~25 times a second; live = the input has given any signal yet. */
-  | { kind: "voice"; level: number; live: boolean };
+  | { kind: "voice"; level: number; live: boolean }
+  /** The active session was handed to a real pi terminal (open) or is back in the GUI (closed; error = the terminal died or the session did not come back). */
+  | { kind: "terminal_state"; open: boolean; sessionPath?: string; error?: string };
 
 export type SidecarOut =
   | { id: number; cmd?: CommandName; ok: true; result?: unknown }

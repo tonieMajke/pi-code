@@ -8,6 +8,7 @@ import { ProvidersPanel } from "./Providers";
 import { VoiceSection } from "./VoiceSection";
 import type { PiRequest } from "../lib/transport";
 import { lang, LANGS, t, type Lang } from "../../shared/i18n";
+import { TERMINAL_PRESETS, terminalChoiceFor, terminalTemplateFor, type TerminalChoice } from "../../shared/terminal";
 import { ACCENTS, BACKGROUNDS } from "../lib/appearance";
 
 const SECTIONS = [
@@ -346,6 +347,30 @@ export function SettingsDialog({
                   </Row>
                   <Row label="Zamykanie chowa do zasobnika" desc="Przycisk zamknięcia chowa okno do zasobnika systemowego, a pi pracuje dalej. Zakończ aplikację z menu ikony w zasobniku.">
                     <Toggle value={prefs.closeToTray} onChange={(v) => onPrefs({ ...prefs, closeToTray: v })} />
+                  </Row>
+                  <h3>{t("Sesja w terminalu")}</h3>
+                  <Row label={t("Terminal")} desc={t("W tym programie sesja otwiera się w prawdziwym pi (TUI: /settings, /login i inne komendy).")}>
+                    <select
+                      className="s-input"
+                      value={terminalChoiceFor(s.gui.terminal)}
+                      onChange={(e) => onPatch({ terminal: terminalTemplateFor(e.target.value as TerminalChoice, s.gui.terminal ?? "") })}
+                    >
+                      <option value="konsole">Konsole</option>
+                      <option value="kitty">kitty</option>
+                      <option value="alacritty">Alacritty</option>
+                      <option value="custom">{t("Własne polecenie")}</option>
+                    </select>
+                  </Row>
+                  {terminalChoiceFor(s.gui.terminal) === "custom" && (
+                    <Row label={t("Własne polecenie")} desc={t("Szablon: {cwd} to folder projektu, {session} to plik sesji.")}>
+                      <TextField value={s.gui.terminal ?? ""} placeholder={TERMINAL_PRESETS.konsole} onCommit={(v) => onPatch({ terminal: v ? v : null })} />
+                    </Row>
+                  )}
+                  <Row
+                    label={t("Otwieraj kopię sesji")}
+                    desc={t("Terminal dostaje kopię sesji (--fork): ta tutaj zostaje w GUI i działa dalej, a kopia po zamknięciu terminala pojawia się na liście sesji.")}
+                  >
+                    <Toggle value={s.gui.terminalFork ?? false} onChange={(v) => onPatch({ terminalFork: v })} />
                   </Row>
                 </>
               )}
