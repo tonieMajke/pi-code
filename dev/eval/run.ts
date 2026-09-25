@@ -133,6 +133,8 @@ function prepare(task: string, spec: Task): string {
     execFileSync("git", ["apply", join(TASKS, task, spec.repo.patch)], { cwd: dir });
     for (const f of spec.repo.remove ?? []) rmSync(join(dir, f), { force: true });
     rmSync(join(dir, "dev/eval"), { recursive: true, force: true }); // no answers lying around
+    // the live-model e2e would wait minutes on a bridge port (and on the model) mid-task
+    rmSync(join(dir, "dev/e2e-smoke.test.ts"), { force: true });
     symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
   } else cpSync(join(TASKS, task, "files"), dir, { recursive: true });
   const git = (...a: string[]) => execFileSync("git", a, { cwd: dir, stdio: "ignore" });
