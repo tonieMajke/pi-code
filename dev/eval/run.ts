@@ -17,7 +17,7 @@
  * Profiles only change a temporary pi-gui.json (PI_GUI_CONFIG) — the user's config is untouched.
  */
 import { spawn, execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -144,6 +144,20 @@ function prepare(task: string, spec: Task): string {
   return dir;
 }
 
+/**
+ * The bash tool runs each command in its own process group, so killing the sidecar's group
+ * leaves e.g. a hung `vitest run` behind. Whatever still works inside the task dir goes too.
+ */
+function killLeftovers(dir: string, keep?: number): void {
+  for (const pid of readdirSync("/proc").filter((p) => /^\d+$/.test(p) && Number(p) !== keep)) {
+    try {
+      if (readlinkSync(`/proc/${pid}/cwd`).startsWith(dir)) process.kill(Number(pid), "SIGKILL");
+    } catch {
+      /* gone, or not ours */
+    }
+  }
+}
+
 /** npx → tsx → node: killing only npx orphans the sidecar, so kill the whole group. */
 function killTree(pid: number | undefined): void {
   if (!pid) return;
@@ -266,6 +280,7 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
     r.seconds = Math.round((Date.now() - t0) / 1000);
     child.stdin.end();
     killTree(child.pid);
+    killLeftovers(cwd, foreign?.pid); // the foreign process must still be there for the check
   }
   flush();
   mkdirSync(join(cwd, ".eval"), { recursive: true });
@@ -289,6 +304,7 @@ async function runTask(task: string, spec: Task, cfgFile: string, runDir: string
     r.checkOutput = `${e.stdout ?? ""}${e.stderr ?? ""}`.slice(-600);
   }
   if (foreign?.pid) killTree(foreign.pid);
+  killLeftovers(cwd);
   if (spec.visual && existsSync(join(cwd, spec.visual))) {
     r.dir = cwd;
     try {
