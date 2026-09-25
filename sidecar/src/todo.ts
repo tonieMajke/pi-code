@@ -1,7 +1,7 @@
 /**
  * The plan a small model keeps losing: a todo list it writes with the `todo` tool,
- * recited at the very end of the context on every call (the "recitation" trick) so it
- * stays in the freshest part of attention however long the task gets — and checked
+ * recited near the end of the context (the "recitation" trick, pinned so the cached prefix
+ * survives — see PlanRecital) so it stays in fresh attention however long the task gets — and checked
  * before the model may finish.
  */
 
@@ -11,7 +11,7 @@ export type TodoItem = { text: string; status: TodoStatus };
 export const TODO_DESCRIPTION =
   "Keep a short plan for a multi-step task (3+ steps). Send the WHOLE list every time — it replaces the old one. " +
   "Mark exactly one item in_progress while you work on it, done when it is finished and checked, skipped (with the reason in the text) if it turned out unnecessary. " +
-  "The current list is shown to you at the end of the context on every turn.";
+  "The current list is shown to you near the end of the context whenever it changes.";
 
 const MARK: Record<TodoStatus, string> = { pending: "[ ]", in_progress: "[>]", done: "[x]", skipped: "[-]" };
 
@@ -65,17 +65,47 @@ export class TodoList {
   }
 }
 
-type Msg = { role?: string; content?: unknown };
+type Msg = { role?: string; content?: unknown; toolCallId?: string; timestamp?: number };
+
+/** pi hands the `context` hook a structured clone every call, so messages are matched by key, not identity. */
+const keyOf = (m: Msg): string | null => m.toolCallId ?? (m.timestamp !== undefined ? `${m.role}@${m.timestamp}` : null);
 
 /**
- * Put the plan after the newest message without disturbing the cached prefix: it is
- * appended as a text part of the last tool result (or user message) of this request only.
+ * Put the plan after the newest message without disturbing the cached prefix. A recitation
+ * is pinned to the tool result (or user message) that was newest when the plan changed — or
+ * when the last copy is `every` messages old — and stays on that message in every later
+ * request, so the prompt only ever grows at its end. Nothing is stored in the session.
+ *
+ * The old way re-attached a fresh copy to the newest message on every call: each request
+ * then differed from the previous one just before its end, and hybrid models (Qwen3.5/3.8,
+ * no partial KV truncation) fell back to a checkpoint up to 100k tokens earlier — measured
+ * 30–60 s of prompt processing per step mid-run.
  */
-export function reciteTodo<T>(messages: T[], text: string | null): T[] {
-  if (!text || !messages.length) return messages;
-  const last = messages[messages.length - 1] as Msg;
-  if (last.role !== "toolResult" && last.role !== "user") return messages;
-  const content = typeof last.content === "string" ? [{ type: "text", text: last.content }] : Array.isArray(last.content) ? last.content : [];
-  const copy = { ...last, content: [...content, { type: "text", text: `\n\n${text}` }] } as T;
-  return [...messages.slice(0, -1), copy];
+export class PlanRecital {
+  private pins = new Map<string, string>();
+  private last: { text: string; at: number } | null = null;
+
+  constructor(private every = 12) {}
+
+  apply<T>(messages: T[], text: string | null): T[] {
+    const newest = messages[messages.length - 1] as Msg | undefined;
+    const key = newest && (newest.role === "toolResult" || newest.role === "user") ? keyOf(newest) : null;
+    const due = !this.last || this.last.text !== text || messages.length - this.last.at >= this.every;
+    if (text && key && due && !this.pins.has(key)) {
+      this.pins.set(key, text);
+      this.last = { text, at: messages.length };
+    }
+    if (!this.pins.size) return messages;
+    let changed = false;
+    const out = messages.map((m) => {
+      const k = keyOf(m as Msg);
+      const pinned = k ? this.pins.get(k) : undefined;
+      if (pinned === undefined) return m;
+      changed = true;
+      const c = (m as Msg).content;
+      const content = typeof c === "string" ? [{ type: "text", text: c }] : Array.isArray(c) ? c : [];
+      return { ...m, content: [...content, { type: "text", text: `\n\n${pinned}` }] } as T;
+    });
+    return changed ? out : messages;
+  }
 }

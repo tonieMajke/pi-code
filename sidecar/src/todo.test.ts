@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reciteTodo, TodoList } from "./todo.js";
+import { PlanRecital, TodoList } from "./todo.js";
 
 describe("TodoList", () => {
   it("keeps one item in progress and recites only while something is open", () => {
@@ -14,16 +14,30 @@ describe("TodoList", () => {
   });
 });
 
-describe("reciteTodo", () => {
-  it("appends the plan to the last tool result or user message, for this request only", () => {
-    const msgs = [
-      { role: "user", content: "task" },
-      { role: "toolResult", content: [{ type: "text", text: "ok" }] },
-    ];
-    const out = reciteTodo(msgs, "[plan]");
-    expect(out[1]).toEqual({ role: "toolResult", content: [{ type: "text", text: "ok" }, { type: "text", text: "\n\n[plan]" }] });
-    expect(msgs[1].content).toHaveLength(1);
-    expect(reciteTodo([{ role: "assistant", content: [] }], "[plan]")).toEqual([{ role: "assistant", content: [] }]);
-    expect(reciteTodo(msgs, null)).toBe(msgs);
+describe("PlanRecital", () => {
+  const user = { role: "user", content: "task", timestamp: 1 };
+  const tool = (id: string) => ({ role: "toolResult", toolCallId: id, content: [{ type: "text", text: id }] });
+  const asst = (t: number) => ({ role: "assistant", content: [], timestamp: t });
+  const texts = (m: { content?: unknown }) => (m.content as { text: string }[]).map((b) => b.text);
+
+  it("pins the plan where it changed and keeps it there, so each request only grows at the end", () => {
+    const r = new PlanRecital();
+    const first = r.apply([user, asst(2), tool("a")], "[plan v1]");
+    expect(texts(first[2])).toEqual(["a", "\n\n[plan v1]"]);
+    const second = r.apply([user, asst(2), tool("a"), asst(3), tool("b")], "[plan v1]");
+    expect(second.slice(0, 3)).toEqual(first); // same prefix
+    expect(texts(second[4])).toEqual(["b"]); // unchanged plan is not repeated
+    const third = r.apply([user, asst(2), tool("a"), asst(3), tool("b"), asst(4), tool("c")], "[plan v2]");
+    expect(third.slice(0, 5)).toEqual(second);
+    expect(texts(third[6])).toEqual(["c", "\n\n[plan v2]"]);
+  });
+
+  it("repeats an unchanged plan once it is far behind, and never pins to assistant messages", () => {
+    const r = new PlanRecital(4);
+    r.apply([user, tool("a")], "[p]");
+    const msgs = [user, tool("a"), asst(2), tool("b"), asst(3), tool("c")];
+    expect(texts(r.apply(msgs, "[p]")[5])).toEqual(["c", "\n\n[p]"]);
+    expect(new PlanRecital().apply([user, asst(2)], "[p]")).toEqual([user, asst(2)]);
+    expect(new PlanRecital().apply([user, tool("a")], null)).toEqual([user, tool("a")]);
   });
 });

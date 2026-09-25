@@ -95,7 +95,7 @@ describe("critic prompt", () => {
 
 describe("elideOldImages", () => {
   const img = { type: "image", data: "x", mimeType: "image/png" };
-  it("keeps only the newest screenshots of the current run", () => {
+  it("keeps only the newest screenshots of the current run (batch of 1)", () => {
     const msgs = [
       { role: "toolResult", content: [img] }, // earlier run — untouched here
       { role: "user", content: "go" },
@@ -103,7 +103,7 @@ describe("elideOldImages", () => {
       { role: "toolResult", content: [img] },
       { role: "toolResult", content: [img] },
     ];
-    const out = elideOldImages(msgs, 2);
+    const out = elideOldImages(msgs, 2, 1);
     expect(out[0]).toBe(msgs[0]);
     expect(out[2].content).toEqual([{ type: "text", text: "a" }, { type: "text", text: expect.stringMatching(/older screenshot/) }]);
     expect(out[3]).toBe(msgs[3]);

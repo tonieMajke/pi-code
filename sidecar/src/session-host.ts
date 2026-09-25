@@ -34,7 +34,7 @@ import { ExtensionDialogs } from "./extension-ui.js";
 import { decide, foreignKill, PLAN_PROMPT, startedByApp } from "./permissions.js";
 import { repairEdit } from "./editfix.js";
 import { ProgressWatch } from "./progress.js";
-import { reciteTodo, TODO_DESCRIPTION, TodoList, type TodoItem } from "./todo.js";
+import { PlanRecital, TODO_DESCRIPTION, TodoList, type TodoItem } from "./todo.js";
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, finishIntent } from "./constitution.js";
 import type { GuiConfigStore } from "./config.js";
 import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
@@ -359,6 +359,7 @@ export class SessionHost {
     const taste = new TasteGuard(() => this.cwd);
     const progress = new ProgressWatch(() => this.cwd);
     const todo = new TodoList();
+    const recital = new PlanRecital();
     /** The plan was written or updated in this run (a stale plan from an old task is not enforced). */
     let todoTouched = false;
     let todoNudges = 0;
@@ -696,10 +697,10 @@ export class SessionHost {
           : event.messages.filter((m) => (m as { customType?: string }).customType !== "pi-gui-plan-mode");
       const c = cfg().context;
       if (c.elideOldToolOutput) messages = elideOldToolOutput(messages, c.elideAboveChars);
-      // Screenshots are heavy: within a run only the newest few stay as pictures.
+      // Screenshots are heavy: within a run older ones become notes, a batch at a time.
       if (tasteOn()) messages = elideOldImages(messages, 3);
-      // The plan goes last, where a small model's attention is: every call, not stored.
-      messages = reciteTodo(messages, todo.recitation());
+      // The plan goes near the end, where a small model's attention is: pinned, not stored.
+      messages = recital.apply(messages, todo.recitation());
       return messages === event.messages ? undefined : { messages };
     });
   };
