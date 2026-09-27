@@ -504,6 +504,13 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .diff-sign { display: inline-block; width: 22px; text-align: center; opacity: 0.7; user-select: none; }
 .diff-add { background: var(--add-bg); color: var(--add-fg); }
 .diff-del { background: var(--del-bg); color: var(--del-fg); }
+.diff-eq { color: var(--muted); }
+.diff-gap { color: var(--faint); font-style: italic; padding-left: 22px !important; font-size: 0.95em; }
+/* Word marks: the changed words carry the colour, the rest of the line is quieter. */
+.diff-del:has(mark), .diff-add:has(mark) { color: var(--text-2); }
+.diff mark { background: none; border-radius: 3px; padding: 0 1px; }
+.diff-del mark { color: var(--del-fg); background: color-mix(in srgb, var(--err) 32%, transparent); }
+.diff-add mark { color: var(--add-fg); background: color-mix(in srgb, var(--ok) 32%, transparent); }
 
 .term { }
 .term-cmd {

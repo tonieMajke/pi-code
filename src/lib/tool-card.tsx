@@ -27,6 +27,8 @@ import { dataUrl } from "./images";
 import { useImage, useSeen } from "./image-store";
 import { formatDuration } from "./format";
 import { Lightbox } from "../components/Lightbox";
+import { countChanges, diffEdit, type DiffLine } from "./diff";
+import { plural } from "../../shared/i18n";
 
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   read: FileText,
@@ -100,7 +102,10 @@ export function changeStats(tool: ToolItem): { add: number; del: number } | null
     const edits = editsOf(tool);
     if (edits.length === 0) return null;
     return edits.reduce(
-      (acc, e) => ({ add: acc.add + lines(e.newText).length, del: acc.del + lines(e.oldText).length }),
+      (acc, e) => {
+        const c = countChanges(diffEdit(e));
+        return { add: acc.add + c.add, del: acc.del + c.del };
+      },
       { add: 0, del: 0 },
     );
   }
@@ -240,6 +245,31 @@ function ToolShot({ img, onZoom }: { img: Attachment; onZoom: () => void }) {
   );
 }
 
+/** A real diff: context lines, −/+ pairs with the changed words marked, long unchanged runs folded. */
+function DiffView({ lines: dl }: { lines: DiffLine[] }) {
+  return (
+    <pre className="diff">
+      {dl.map((l, j) => {
+        if (l.type === "gap") {
+          return (
+            <div className="diff-gap" key={j}>
+              ⋯ {plural(l.count, ["{n} niezmieniona linia", "{n} niezmienione linie", "{n} niezmienionych linii"], ["{n} unchanged line", "{n} unchanged lines"])}
+            </div>
+          );
+        }
+        const cls = l.type === "eq" ? "diff-eq" : l.type === "del" ? "diff-del" : "diff-add";
+        const sign = l.type === "eq" ? " " : l.type === "del" ? "−" : "+";
+        return (
+          <div className={cls} key={j}>
+            <span className="diff-sign">{sign}</span>
+            {l.type !== "eq" && l.segs ? l.segs.map((sg, k) => (sg.changed ? <mark key={k}>{sg.text}</mark> : <span key={k}>{sg.text}</span>)) : l.text}
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
+
 /** Expanded body of a tool call — also used as the preview on the approval card. */
 export function ToolPreview({ tool, cwd, preview = false }: { tool: ToolItem; cwd: string; preview?: boolean }) {
   const a = argsOf(tool);
@@ -264,20 +294,7 @@ export function ToolPreview({ tool, cwd, preview = false }: { tool: ToolItem; cw
       <div className="tool-body">
         <div className="tool-path">{relPath(String(a.path ?? ""), cwd)}</div>
         {edits.map((e, i) => (
-          <pre className="diff" key={i}>
-            {lines(e.oldText).map((l, j) => (
-              <div className="diff-del" key={`d${j}`}>
-                <span className="diff-sign">−</span>
-                {l}
-              </div>
-            ))}
-            {lines(e.newText).map((l, j) => (
-              <div className="diff-add" key={`a${j}`}>
-                <span className="diff-sign">+</span>
-                {l}
-              </div>
-            ))}
-          </pre>
+          <DiffView key={i} lines={diffEdit(e)} />
         ))}
         {tool.status === "error" && <pre className="tool-out err">{out}</pre>}
       </div>
