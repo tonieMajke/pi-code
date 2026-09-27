@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatTokens, groupSessions, relativeTime } from "./format";
+import { formatDuration, formatTokens, groupSessions, recentProjects, relativeTime } from "./format";
 import type { SessionSummary } from "../../shared/protocol";
 
 const sess = (modified: string): SessionSummary => ({
@@ -48,6 +48,24 @@ describe("format", () => {
       ["Wczoraj", 1],
       ["Ostatnie 7 dni", 1],
       ["Starsze", 1],
+    ]);
+  });
+});
+
+describe("recentProjects", () => {
+  const s = (cwd: string, modified: string, id = modified): SessionSummary => ({ path: `/s/${id}.jsonl`, id, cwd, modified, messageCount: 2, firstMessage: id });
+  it("newest projects first, each with its newest chat; /tmp and scratchpads left out", () => {
+    const got = recentProjects([
+      s("/home/u/a", "2026-09-20T10:00:00Z"),
+      s("/home/u/b", "2026-09-26T10:00:00Z"),
+      s("/home/u/a", "2026-09-27T09:00:00Z", "a-new"),
+      s("/tmp", "2026-09-27T12:00:00Z"),
+      s("/tmp/claude-1000/x/scratchpad", "2026-09-27T12:00:00Z"),
+      s("/home/u/c", "2026-09-01T10:00:00Z"),
+    ], 2);
+    expect(got.map((p) => [p.cwd, p.last.id, p.sessions])).toEqual([
+      ["/home/u/a", "a-new", 2],
+      ["/home/u/b", "2026-09-26T10:00:00Z", 1],
     ]);
   });
 });

@@ -5,6 +5,7 @@ import { imageStore } from "./lib/image-store";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { FindBar } from "./components/FindBar";
 import { StatsDialog } from "./components/StatsDialog";
+import { RecentProjects } from "./components/RecentProjects";
 import { LimitDialog } from "./components/LimitDialog";
 import { clearFind, findMatches, hitsOf, paintFind } from "./lib/find";
 import { WindowControls } from "./components/WindowControls";
@@ -1290,6 +1291,7 @@ export default function App() {
                 <span className="hf-change">{t("zmień folder")}</span>
               </button>
             )}
+            <RecentProjects sessions={state.sessions} current={state.cwd} onOpen={openSession} onNew={(cwd) => newSession(cwd)} />
             <div className="hero-hints">
               <kbd>/</kbd> komendy · <kbd>Ctrl N</kbd> nowa sesja · <kbd>Ctrl K</kbd> szukaj · <kbd>Ctrl B</kbd> panel
             </div>

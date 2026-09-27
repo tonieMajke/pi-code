@@ -65,3 +65,28 @@ export function sessionTitle(s: Pick<SessionSummary, "name" | "firstMessage" | "
   const raw = s.name || s.firstMessage || s.id.slice(0, 8);
   return raw.replace(/\s+/g, " ").trim();
 }
+
+export interface RecentProject {
+  cwd: string;
+  /** The project's newest session — the tile opens it. */
+  last: SessionSummary;
+  sessions: number;
+}
+
+/**
+ * Projects for the welcome screen, newest first, each with its latest chat. Throwaway folders
+ * (/tmp, scratchpads) are left out: they are test runs, not places to go back to.
+ */
+export function recentProjects(sessions: SessionSummary[], n = 4): RecentProject[] {
+  const by = new Map<string, RecentProject>();
+  for (const s of sessions) {
+    if (!s.cwd || s.cwd === "/tmp" || s.cwd.startsWith("/tmp/")) continue;
+    const p = by.get(s.cwd);
+    if (!p) by.set(s.cwd, { cwd: s.cwd, last: s, sessions: 1 });
+    else {
+      p.sessions++;
+      if (s.modified > p.last.modified) p.last = s;
+    }
+  }
+  return [...by.values()].sort((a, b) => b.last.modified.localeCompare(a.last.modified)).slice(0, n);
+}

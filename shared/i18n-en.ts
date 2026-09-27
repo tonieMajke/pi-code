@@ -305,4 +305,6 @@ export const EN: Record<string, string> = {
   "Generuje": "Generating",
   "krok {n}": "step {n}",
   "przerwij": "stop",
+  "Otwórz ostatnią sesję w {path}": "Open the latest chat in {path}",
+  "Nowa sesja w tym projekcie": "New chat in this project",
 };
