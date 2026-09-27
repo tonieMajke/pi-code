@@ -20,7 +20,7 @@ import { pushVoiceLevel } from "./lib/voice-meter";
 import { createWsTransport, type PiRequest, type PiTransport } from "./lib/transport";
 import { lang, plural, t } from "../shared/i18n";
 import { invoke } from "@tauri-apps/api/core";
-import { createTauriTransport, inTauri } from "./lib/tauri";
+import { createTauriTransport, inTauri, readStartupProblem, type StartupProblem } from "./lib/tauri";
 import { basename, formatDuration, formatTokens, sessionTitle } from "./lib/format";
 import { applyAppearance, cachedAppearance, downscaleImage } from "./lib/appearance";
 import type {
@@ -54,6 +54,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TerminalBar } from "./components/TerminalBar";
+import { StartupBanner } from "./components/StartupBanner";
 import { SettingsDialog, type AppPrefs, type SectionId } from "./components/Settings";
 import { TerminalOpenDialog } from "./components/TerminalOpenDialog";
 import { isTerminalWarnHidden, markTerminalWarnHidden } from "./lib/terminal-warn";
@@ -118,6 +119,8 @@ export default function App() {
     setSettingsOpen(true);
   }, []);
   const [settings, setSettings] = useState<PiSettings | null>(null);
+  /** The shell could not start the sidecar (no node, node too old): the banner stays until dismissed. */
+  const [startup, setStartup] = useState<StartupProblem | null>(null);
   const [compacting, setCompacting] = useState(false);
   const [prefs, setPrefs] = useState(readPrefs);
   const [appearance, setAppearance] = useState<Appearance>(cachedAppearance);
@@ -486,6 +489,9 @@ export default function App() {
         : t("Proces pi (sidecar) zakończył się ({why}) i nie da się go podnieść. Uruchom Pi Code ponownie.", { why: down.why });
       dispatch({ type: "info", text, level: "error" });
       toast(text, down.restarting ? "warning" : "error");
+      // A sidecar that will not come back usually means node is missing or too old: the shell
+      // recorded why, and that message names the fix (the toast line only carries the exit code).
+      void readStartupProblem().then((p) => p && setStartup(p));
     });
     return () => {
       off();
@@ -495,6 +501,13 @@ export default function App() {
       transportRef.current = null;
       imageStore.setFetcher(null);
     };
+  }, []);
+
+  // The shell starts the sidecar in `setup`, before this window listens to anything, so a start
+  // failure is not an event we can miss — we ask for it.
+  useEffect(() => {
+    if (!inTauri()) return;
+    void readStartupProblem().then((p) => p && setStartup(p));
   }, []);
 
   useEffect(() => applyAppearance(appearance), [appearance]);
@@ -1299,6 +1312,8 @@ export default function App() {
           </span>
           {inTauri() && <WindowControls />}
         </header>
+
+        {startup && <StartupBanner problem={startup} onDismiss={() => setStartup(null)} />}
 
         {state.error && (
           <div className="error-bar">

@@ -344,4 +344,8 @@ export const EN: Record<string, string> = {
   "katalog tymczasowy": "temporary folder",
   "test e2e": "e2e test",
   "krótki test modelu": "short model check",
+  "Zamknij": "Close",
+  "Brak Node.js (sprawdzono: {node}). Proces pi potrzebuje Node {required} lub nowszego. Zainstaluj Node, albo wskaż binarkę w zmiennej PI_CODE_NODE i uruchom Pi Code ponownie.": "Node.js not found (checked: {node}). The pi process needs Node {required} or newer. Install Node, or point PI_CODE_NODE at the binary and start Pi Code again.",
+  "Znaleziono Node {detected} ({node}), a proces pi potrzebuje Node {required} lub nowszego. Zaktualizuj Node, albo wskaż nowszą binarkę w zmiennej PI_CODE_NODE i uruchom Pi Code ponownie.": "Found Node {detected} at {node}, but the pi process needs Node {required} or newer. Update Node, or point PI_CODE_NODE at a newer binary and start Pi Code again.",
+  "Nie da się uruchomić procesu pi: {error}. Uruchom Pi Code ponownie.": "Cannot start the pi process: {error}. Start Pi Code again.",
 };

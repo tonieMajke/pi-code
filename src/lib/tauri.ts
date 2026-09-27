@@ -1,7 +1,33 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { SidecarOut } from "../../shared/protocol";
+import { t } from "../../shared/i18n";
 import { withId, type PiTransport, type SidecarDown } from "./transport";
+
+/**
+ * The Rust shell records why the sidecar never started (no node, node too old, spawn failed).
+ * It ships the facts, not the sentence, so this is where the text gets translated.
+ */
+export type StartupProblem =
+  | { kind: "node_missing"; node: string; required: string }
+  | { kind: "node_too_old"; node: string; detected: string; required: string }
+  | { kind: "spawn"; error: string };
+
+export function startupProblemText(p: StartupProblem): string {
+  switch (p.kind) {
+    case "node_missing":
+      return t("Brak Node.js (sprawdzono: {node}). Proces pi potrzebuje Node {required} lub nowszego. Zainstaluj Node, albo wskaż binarkę w zmiennej PI_CODE_NODE i uruchom Pi Code ponownie.", { node: p.node || "node", required: p.required });
+    case "node_too_old":
+      return t("Znaleziono Node {detected} ({node}), a proces pi potrzebuje Node {required} lub nowszego. Zaktualizuj Node, albo wskaż nowszą binarkę w zmiennej PI_CODE_NODE i uruchom Pi Code ponownie.", { node: p.node, detected: p.detected, required: p.required });
+    case "spawn":
+      return t("Nie da się uruchomić procesu pi: {error}. Uruchom Pi Code ponownie.", { error: p.error });
+  }
+}
+
+/** Ask the shell for a start failure; null when the sidecar came up (or we are not in Tauri). */
+export function readStartupProblem(): Promise<StartupProblem | null> {
+  return invoke<StartupProblem | null>("pi_startup_problem").catch(() => null);
+}
 
 /**
  * In-app transport: the Rust shell spawns the sidecar directly (stdio),

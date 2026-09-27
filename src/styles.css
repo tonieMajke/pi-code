@@ -344,6 +344,16 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 }
 .error-bar span { flex: 1; white-space: pre-wrap; }
 
+/* The sidecar never started: the same bar as .error-bar, but the text is a paragraph with a fix. */
+.startup-bar {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 0 auto 8px; max-width: 760px; width: calc(100% - 48px);
+  padding: 8px 6px 8px 14px; border-radius: 10px;
+  background: var(--del-bg); color: var(--del-fg); font-size: 13px; line-height: 1.5;
+}
+.startup-bar > svg { flex: none; margin-top: 3px; }
+.startup-bar span { flex: 1; }
+
 /* Empty state: composer centered like Claude desktop */
 .hero {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
