@@ -35,7 +35,6 @@ impl Sidecar {
 
 #[tauri::command]
 fn pi_send(state: State<'_, Sidecar>, line: String) -> Result<(), String> {
-    eprintln!("[sidecar] pi_send: {}", line.chars().take(120).collect::<String>());
     let mut stdin = state.stdin.lock().map_err(|e| e.to_string())?;
     let stdin = stdin.as_mut().ok_or("sidecar is not running")?;
     writeln!(stdin, "{}", line)
