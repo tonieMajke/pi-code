@@ -6,12 +6,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { FindBar } from "./components/FindBar";
 import { StatsDialog } from "./components/StatsDialog";
 import { RecentProjects } from "./components/RecentProjects";
+import { FilesPanel } from "./components/FilesPanel";
 import { LimitDialog } from "./components/LimitDialog";
 import { clearFind, findMatches, hitsOf, paintFind } from "./lib/find";
 import { WindowControls } from "./components/WindowControls";
 import { WindowFrame } from "./components/WindowFrame";
 import { Logo } from "./components/Logo";
-import { ArrowDown, FileDiff, FolderOpen, ImagePlus, PanelLeftOpen, SquareTerminal, X } from "lucide-react";
+import { ArrowDown, FileDiff, FolderOpen, FolderTree, ImagePlus, PanelLeftOpen, SquareTerminal, X } from "lucide-react";
 import { Welcome } from "./components/Welcome";
 import type { BackgroundBlock, ClientCommandInput, OnboardingState, SessionStatus } from "../shared/protocol";
 import { initialState, reducer, type InfoLevel, type LivePerf } from "./lib/reducer";
@@ -84,7 +85,23 @@ export default function App() {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [changesOpen, setChangesOpen] = useState(false);
+  const [changesOpen, setChangesOpenRaw] = useState(false);
+  /** Files panel (project tree); it shares the right-hand side with the changes panel. */
+  const [filesOpen, setFilesOpenRaw] = useState(false);
+  const setChangesOpen = useCallback((v: boolean | ((o: boolean) => boolean)) => {
+    setChangesOpenRaw((o) => {
+      const next = typeof v === "function" ? v(o) : v;
+      if (next) setFilesOpenRaw(false);
+      return next;
+    });
+  }, []);
+  const setFilesOpen = useCallback((v: boolean | ((o: boolean) => boolean)) => {
+    setFilesOpenRaw((o) => {
+      const next = typeof v === "function" ? v(o) : v;
+      if (next) setChangesOpenRaw(false);
+      return next;
+    });
+  }, []);
   const [changes, setChanges] = useState<GitChanges | null>(null);
   const [changesLoading, setChangesLoading] = useState(false);
   const [files, setFiles] = useState<string[] | null>(null);
@@ -528,8 +545,28 @@ export default function App() {
     send({ cmd: "git_changes" });
   }, [send]);
   useEffect(() => {
-    if (changesOpen) refreshChanges();
-  }, [changesOpen, toolEnds, state.settledCount, state.cwd, refreshChanges]);
+    if (changesOpen || filesOpen) refreshChanges();
+  }, [changesOpen, filesOpen, toolEnds, state.settledCount, state.cwd, refreshChanges]);
+  // The tree follows the project: new files after a run, another project after a switch.
+  useEffect(() => {
+    if (filesOpen) send({ cmd: "files_list" });
+  }, [filesOpen, state.settledCount, state.cwd, send]);
+  /** "@path " into the message at the caret (Files panel click). */
+  const insertMention = useCallback((path: string) => {
+    const el = inputRef.current;
+    const token = `@${path} `;
+    setInput((v) => {
+      const at = el ? el.selectionStart : v.length;
+      const before = v.slice(0, at);
+      const pad = before && !/\s$/.test(before) ? " " : "";
+      requestAnimationFrame(() => {
+        el?.focus();
+        const caret = at + pad.length + token.length;
+        el?.setSelectionRange(caret, caret);
+      });
+      return `${before}${pad}${token}${v.slice(at)}`;
+    });
+  }, []);
 
   // @-mention file list belongs to the session's project.
   useEffect(() => setFiles(null), [state.cwd]);
@@ -860,6 +897,9 @@ export default function App() {
       } else if (mod && e.shiftKey && e.key.toLowerCase() === "d") {
         e.preventDefault();
         setChangesOpen((o) => !o);
+      } else if (mod && e.shiftKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        setFilesOpen((o) => !o);
       } else if (e.key === "Tab" && e.shiftKey && !mod) {
         e.preventDefault();
         setMode(nextMode(state.mode));
@@ -1060,6 +1100,7 @@ export default function App() {
 
   const commands: Command[] = [
     { id: "new", group: "Akcje", label: "Nowa sesja", hint: <kbd>Ctrl N</kbd>, run: () => newSession() },
+    { id: "files", group: "Akcje", label: filesOpen ? t("Ukryj pliki projektu") : t("Pokaż pliki projektu"), hint: <kbd>Ctrl Shift E</kbd>, run: () => setFilesOpen((o) => !o) },
     { id: "changes", group: "Akcje", label: changesOpen ? "Ukryj panel zmian" : "Pokaż panel zmian", hint: <kbd>Ctrl Shift D</kbd>, run: () => setChangesOpen((o) => !o) },
     { id: "sidebar", group: "Akcje", label: sidebarOpen ? "Zwiń panel sesji" : "Pokaż panel sesji", hint: <kbd>Ctrl B</kbd>, run: toggleSidebar },
     { id: "settings", group: "Akcje", label: "Ustawienia", hint: <kbd>Ctrl ,</kbd>, keywords: "settings konfiguracja", run: () => setSettingsOpen(true) },
@@ -1236,6 +1277,9 @@ export default function App() {
           >
             <SquareTerminal size={16} />
           </button>
+          <button className={`icon-btn ${filesOpen ? "on" : ""}`} onClick={() => setFilesOpen((o) => !o)} title={t("Pliki projektu (Ctrl+Shift+E)")}>
+            <FolderTree size={16} />
+          </button>
           <button
             className={`icon-btn ${changesOpen ? "on" : ""}`}
             onClick={() => setChangesOpen((o) => !o)}
@@ -1354,6 +1398,20 @@ export default function App() {
           </>
         )}
       </main>
+      {filesOpen && (
+        <FilesPanel
+          files={files}
+          changes={changes}
+          cwd={state.cwd}
+          onRefresh={() => {
+            setFiles(null);
+            send({ cmd: "files_list" });
+            refreshChanges();
+          }}
+          onInsert={insertMention}
+          onClose={() => setFilesOpen(false)}
+        />
+      )}
       {changesOpen && (
         <ChangesPanel
           changes={changes}

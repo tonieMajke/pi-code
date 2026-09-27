@@ -1566,3 +1566,26 @@ button.turn-stats:hover, button.turn-stats.on { background: var(--hover); color:
 .tl-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
 .tl-total { color: var(--faint); margin-left: auto; }
+
+/* ── Files panel (project tree) ─────────── */
+.files-panel { width: 320px; }
+.files-count { font-size: 12px; color: var(--faint); }
+.ft-search { display: flex; align-items: center; gap: 6px; margin: 8px 8px 2px; padding: 0 8px; height: 30px; border: 1px solid var(--border); border-radius: 8px; color: var(--faint); background: var(--bg); }
+.ft-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--text); font: inherit; font-size: 12.5px; }
+.ft-body { padding: 4px 6px 12px; }
+.ft-row {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 26px;
+  border: 0; background: none; border-radius: 6px; color: var(--text-2); font-size: 12.5px; text-align: left; padding-right: 8px;
+}
+.ft-row:hover { background: var(--hover); color: var(--text); }
+.ft-icon { flex: none; color: var(--faint); }
+.ft-chev { flex: none; color: var(--faint); transition: transform 0.12s; }
+.ft-dirrow.open .ft-chev { transform: rotate(90deg); }
+.ft-file { padding-left: 26px; }
+.ft-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ft-dir { min-width: 0; margin-left: auto; color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.ft-mark { flex: none; width: 6px; height: 6px; border-radius: 50%; margin-left: auto; }
+.ft-dir + .ft-mark { margin-left: 6px; }
+.ft-mark.mod { background: var(--warn); }
+.ft-mark.new { background: var(--ok); }
+.ft-empty { color: var(--faint); font-size: 12.5px; padding: 10px; }
