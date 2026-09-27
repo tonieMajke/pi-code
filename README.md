@@ -28,13 +28,16 @@ as well as hosted providers.
 
 ## Requirements
 
-- Linux x86_64 with WebKitGTK (standard on most desktops)
-- **Node.js 22 or newer on `PATH`**. The AppImage does not bundle Node.
-  Point `PI_CODE_NODE` at another binary if needed.
-- A model set up for pi (`~/.pi/agent/`). Run `pi` once in a terminal and use `/login`,
-  or add an OpenAI-compatible server in Pi Code's settings.
-- Optional: the `pi` CLI (for "open in terminal"), `nvidia-smi` (GPU status),
-  `pw-record` / `parecord` / `arecord` (dictation)
+- Linux x86_64 with WebKitGTK (standard on most desktops). The AppImage is built on Ubuntu 22.04,
+  so it needs glibc 2.35 or newer.
+- **Node.js: nothing to install for the AppImage from Releases**, it carries its own Node for the
+  pi process. Pi Code looks for Node in this order: `$PI_CODE_NODE` (when set, the only one tried),
+  the bundled one, then `node` on `PATH`. Each must be **22.19 or newer**. If none works, the window
+  says which binaries it tried and what to change, instead of closing.
+- A model: a server on your machine (llama.cpp, vLLM, LM Studio, Ollama) or a hosted provider.
+  See [Connect a model](#connect-a-model).
+- Optional: the `pi` CLI (for "open in terminal" and sign-ins that need a browser),
+  `nvidia-smi` (GPU status), `pw-record` / `parecord` / `arecord` (dictation)
 
 ## Install
 
@@ -45,18 +48,58 @@ chmod +x "Pi Code_"*.AppImage
 ./"Pi Code_"*.AppImage
 ```
 
+To run the pi process on a Node of your choice:
+
+```bash
+PI_CODE_NODE=/opt/node-22/bin/node ./"Pi Code_"*.AppImage
+```
+
+## Connect a model
+
+The first start opens a short wizard; it can be skipped and done later in
+**Settings → Model providers**. Until a model is picked, the message box says so and Enter
+opens that page.
+
+- **A server on your machine** (llama.cpp's `llama-server`, vLLM, LM Studio, Ollama, or anything
+  OpenAI-compatible): **Own server** → a name and the URL, e.g. `http://localhost:8080/v1`
+  (Ollama: `http://localhost:11434/v1`) → **Test connection** → tick the models → **Add server**.
+  It is written to `~/.pi/agent/models.json`, the same file the `pi` CLI uses.
+  With llama-server on `localhost:8080` Pi Code also shows speed, prompt progress and GPU state.
+- **A hosted provider with an API key** (OpenRouter, Anthropic, OpenAI…): **API key**, pick the
+  provider, paste the key. It goes to `~/.pi/agent/auth.json`.
+- **Account sign-ins** (Claude Pro/Max, ChatGPT, GitHub Copilot) need a browser: run `pi` in a
+  terminal and type `/login`. Pi Code picks them up the next time the list opens.
+
 ## Build from source
 
-You need Node 22+, pnpm, and a Rust toolchain with the
+You need Node 22.19+, pnpm, and a Rust toolchain with the
 [Tauri 2 prerequisites for Linux](https://tauri.app/start/prerequisites/).
 
 ```bash
 pnpm install
-pnpm test          # unit, component and e2e tests
+pnpm test          # unit, component and e2e tests (the e2e test talks to your default model)
 pnpm dev           # browser dev mode: vite + a WebSocket bridge to the sidecar
 pnpm desktop       # debug build of the desktop window
 pnpm appimage      # release AppImage → src-tauri/target/release/bundle/appimage/
 ```
+
+`pnpm appimage` does not bundle Node: the result runs the pi process on the system `node`. The
+release build adds one:
+
+```bash
+dev/fetch-node.sh  # official Node 22 build, checksum-verified, into vendor/node/
+pnpm sidecar-rt
+NO_STRIP=1 pnpm exec tauri build --config src-tauri/tauri.node.conf.json
+```
+
+`NO_STRIP=1` matters: stripping breaks the bundled WebKit and the AppImage stops with
+"The WebKit binary … is missing".
+
+### Releases
+
+Pushing a tag `v*` that matches the version in `src-tauri/tauri.conf.json` runs
+`.github/workflows/release.yml`: tests (without e2e), the AppImage on Ubuntu 22.04 with Node bundled,
+and a **draft pre-release** with the AppImage attached. Publishing is done by hand on GitHub.
 
 ### How it is put together
 

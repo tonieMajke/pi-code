@@ -1,0 +1,74 @@
+# A pushed tag v* builds the Linux AppImage and attaches it to a draft pre-release.
+# Publishing stays a human step: check the draft, then press "Publish release" on GitHub.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    # The oldest supported Ubuntu on purpose: an AppImage runs on glibc >= the one it was built
+    # with. Built on 24.04 (glibc 2.39) it would not start on 22.04 (glibc 2.35).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches the app version
+        run: |
+          app="$(node -p 'require("./src-tauri/tauri.conf.json").version')"
+          if [ "v$app" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, but src-tauri/tauri.conf.json says $app"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.26.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: System packages for Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf file
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck and tests (no e2e, it needs a live model)
+        run: |
+          pnpm typecheck
+          pnpm exec vitest run --exclude dev/e2e-smoke.test.ts
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      # Node goes into the AppImage (resources/node), so Pi Code runs where Node is missing or old.
+      - run: dev/fetch-node.sh
+
+      - run: pnpm sidecar-rt
+
+      # NO_STRIP: linuxdeploy's strip breaks the bundled WebKit ("The WebKit binary ... is missing").
+      - name: Build the AppImage
+        env:
+          NO_STRIP: "1"
+        run: pnpm exec tauri build --config src-tauri/tauri.node.conf.json
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: true
+          files: src-tauri/target/release/bundle/appimage/*.AppImage

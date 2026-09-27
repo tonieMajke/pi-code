@@ -12,3 +12,7 @@ HANDOFF*.md
 NEXT_PROMPT.md
 PLAN.md
 plan-*.md
+.pi/
+
+# Node bundled into the AppImage by dev/fetch-node.sh (CI)
+vendor/
