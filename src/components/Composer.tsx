@@ -7,7 +7,7 @@ import type { PiRequest } from "../lib/transport";
 import { insertDictation } from "../lib/voice-meter";
 import { Menu, type MenuItem } from "./Menu";
 import { t } from "../../shared/i18n";
-import { basename, formatTokens } from "../lib/format";
+import { basename, formatTokens, shortModelName } from "../lib/format";
 import type { Outgoing } from "../lib/reducer";
 import { MODES, modeInfo } from "../lib/modes";
 import { dataUrl, imageFiles } from "../lib/images";
@@ -648,7 +648,14 @@ export function Composer({
             trigger={
               <span className="chip model-chip" title={`${provider}/${model}${thinkingText ? ` · myślenie: ${thinkingText}` : ""}`}>
                 <Cpu size={13} />
-                <span className="chip-label">{model || t("wybierz model")}</span>
+                {model && shortModelName(model) !== model ? (
+                  <span className="chip-label">
+                    <span className="model-full">{model}</span>
+                    <span className="model-short">{shortModelName(model)}</span>
+                  </span>
+                ) : (
+                  <span className="chip-label">{model || t("wybierz model")}</span>
+                )}
                 {thinkingText && (
                   <span className="model-thinking">
                     <Brain size={12} />

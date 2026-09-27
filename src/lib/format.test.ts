@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatTokens, groupSessions, recentProjects, relativeTime } from "./format";
+import { formatDuration, formatTokens, groupSessions, recentProjects, relativeTime, shortModelName } from "./format";
 import type { SessionSummary } from "../../shared/protocol";
 
 const sess = (modified: string): SessionSummary => ({
@@ -68,4 +68,19 @@ describe("recentProjects", () => {
       ["/home/u/b", "2026-09-26T10:00:00Z", 1],
     ]);
   });
+});
+
+describe("shortModelName", () => {
+  it.each([
+    ["Swift-Qwen3.8-27B-Q8_0-2GPU", "Swift Q8 · 2GPU"],
+    ["Swift-Qwen3.8-27B-Q8_0-2GPU-safe", "Swift Q8 · 2GPU"],
+    ["Swift1.5-Qwen3.8-27B-Q6_K-2GPU", "Swift1.5 Q6_K · 2GPU"],
+    ["Swift-1.5-Qwen3.8-Flash-Next-GSQRCO-IQ2_XS-2GPU", "Swift 1.5 Flash IQ2_XS · 2GPU"],
+    ["Qwen3.8-Flash-Next-256k-2GPU-GSQRCO", "Qwen3.8 Flash · 2GPU"],
+    ["Qwen-3.8-27B-Uncensored.Q4_K_M", "Qwen 3.8 Q4_K_M"],
+    ["Tiel-Coder-35B-A3B-MTP-UD-Q6_K_XL", "Tiel Coder Q6_K_XL"],
+    ["unsloth/Qwen3.8-Flash-Next-GGUF:Q4_K_XL", "Qwen3.8 Flash Q4_K_XL"],
+    ["claude-sonnet-5", "claude-sonnet-5"],
+    ["Qwen3.8-Flash-Next-128k", "Qwen3.8-Flash-Next-128k"],
+  ])("%s → %s", (id, short) => expect(shortModelName(id)).toBe(short));
 });

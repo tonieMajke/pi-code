@@ -90,3 +90,28 @@ export function recentProjects(sessions: SessionSummary[], n = 4): RecentProject
   }
   return [...by.values()].sort((a, b) => b.last.modified.localeCompare(a.last.modified)).slice(0, n);
 }
+
+const QUANT = /(?<![A-Za-z0-9])(I?Q\d(?:_[A-Z0-9]+)*|NVFP4|MXFP4|FP8|BF16|F16|AWQ|GPTQ)(?![A-Za-z0-9])/;
+const VARIANT = /^(Flash|Coder|Instruct|Thinking|Mini|Nano|Lite|Pro|Max)$/i;
+
+/**
+ * The model chip on a narrow window: "Swift-Qwen3.8-27B-Q8_0-2GPU" → "Swift Q8 · 2GPU". Name (with
+ * its version), one variant word, quantisation, GPU count. A name without quantisation or GPU
+ * (API models: "claude-sonnet-5") stays as it is.
+ */
+export function shortModelName(id: string): string {
+  let s = id.replace(/^[^/]*\//, "").replace(/:/g, "-");
+  const q = QUANT.exec(s);
+  const quant = q ? q[1].replace(/_0$/, "") : "";
+  if (q) s = s.replace(q[0], "");
+  const g = /(\d+)x?GPU/i.exec(s);
+  const gpu = g ? `${g[1]}GPU` : "";
+  if (g) s = s.replace(g[0], "");
+  if (!quant && !gpu) return id;
+  const tokens = s.split(/[-_ .]+/).filter(Boolean);
+  // The version belongs to the name, glued ("Swift1.5") or not ("Swift-1.5"); the split above cut it apart.
+  const m = /^([A-Za-z]+(?:\d+(?:\.\d+)*)?)(?:[-_ ](\d+(?:\.\d+)*))?(?=[-_ .]|$)/.exec(id.replace(/^[^/]*\//, ""));
+  const head = m ? [m[1], m[2]].filter(Boolean).join(" ") : tokens[0];
+  const variant = tokens.find((t) => VARIANT.test(t));
+  return [head, variant, quant].filter(Boolean).join(" ") + (gpu ? ` · ${gpu}` : "");
+}

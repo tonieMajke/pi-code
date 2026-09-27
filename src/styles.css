@@ -938,8 +938,13 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .composer-bar .menu-trigger { min-width: 0; overflow: hidden; display: flex; }
 .composer-bar .chip { min-width: 0; }
 /* Order: branch → context % and thinking → mode and project names (icons stay, tooltips keep the text). */
+.model-short { display: none; }
+.model-full, .model-short { overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 760px) {
   .composer-bar .project-branch { display: none; }
+  /* "Swift Q8 · 2GPU" instead of an ellipsized "Swift-Qwen3.8-2…"; the full id stays in the tooltip. */
+  .composer-bar .model-full { display: none; }
+  .composer-bar .model-short { display: inline; }
 }
 @container (max-width: 640px) {
   .ctx > span, .composer-bar .model-thinking { display: none; }
