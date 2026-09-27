@@ -1,15 +1,13 @@
 import { Cpu } from "lucide-react";
 import type { RouterStatus } from "../../shared/protocol";
 import { Menu } from "./Menu";
+import { t } from "../../shared/i18n";
 
 const gb = (mib: number) => (mib / 1024).toFixed(1).replace(".", ",");
 
-const STATUS_PL: Record<string, string> = {
-  loaded: "załadowany",
-  loading: "ładuje się",
-  sleeping: "uśpiony",
-  unloaded: "",
-};
+/** Router model status in words, in the language the interface has right now. */
+const statusText = (s: string): string =>
+  s === "loaded" ? t("załadowany") : s === "loading" ? t("ładuje się") : s === "sleeping" ? t("uśpiony") : s === "unloaded" ? "" : s;
 
 /** Topbar pill: VRAM across GPUs; popover lists GPUs and router models. */
 export function GpuStatus({ status, model }: { status: RouterStatus | null; model: string }) {
@@ -22,9 +20,9 @@ export function GpuStatus({ status, model }: { status: RouterStatus | null; mode
     <Menu
       className="gpu-menu"
       placement="down"
-      title="GPU i router llama.cpp"
+      title={t("GPU i router llama.cpp")}
       trigger={
-        <span className={`gpu-pill ${util > 50 ? "hot" : ""}`} title="VRAM (wszystkie GPU)">
+        <span className={`gpu-pill ${util > 50 ? "hot" : ""}`} title={t("VRAM (wszystkie GPU)")}>
           <Cpu size={13} />
           {total > 0 ? `${gb(used)} / ${gb(total)} GB` : "router"}
           {util > 0 && <span className="gpu-util">{util}%</span>}
@@ -50,16 +48,16 @@ export function GpuStatus({ status, model }: { status: RouterStatus | null; mode
           ))}
           {status.models.length > 0 && (
             <>
-              <div className="menu-title">Modele w routerze</div>
+              <div className="menu-title">{t("Modele w routerze")}</div>
               {(active.length ? active : status.models.slice(0, 0)).map((m) => (
                 <div className={`gpu-model ${m.id === model ? "current" : ""}`} key={m.id}>
                   <span className={`gpu-dot s-${m.status}`} />
                   <span className="gpu-model-id">{m.id}</span>
-                  <span className="dim">{STATUS_PL[m.status] ?? m.status}</span>
+                  <span className="dim">{statusText(m.status)}</span>
                 </div>
               ))}
-              {active.length === 0 && <div className="s-empty">żaden model nie jest załadowany</div>}
-              <div className="gpu-foot dim">{status.models.length - active.length} modeli niezaładowanych</div>
+              {active.length === 0 && <div className="s-empty">{t("żaden model nie jest załadowany")}</div>}
+              <div className="gpu-foot dim">{t("{n} modeli niezaładowanych", { n: status.models.length - active.length })}</div>
             </>
           )}
         </div>

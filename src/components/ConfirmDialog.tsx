@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { t } from "../../shared/i18n";
 
 /** Small yes/no modal; Enter confirms, Esc or a click outside cancels. */
 export function ConfirmDialog({
@@ -36,7 +37,7 @@ export function ConfirmDialog({
         {children && <div className="confirm-body">{children}</div>}
         <div className="confirm-actions">
           <button className="btn" onClick={onCancel}>
-            Anuluj
+            {t("Anuluj")}
           </button>
           <button ref={okRef} className={`btn primary ${danger ? "danger" : ""}`} onClick={onConfirm}>
             {confirmLabel}

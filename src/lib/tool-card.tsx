@@ -243,7 +243,7 @@ function ToolShot({ img, onZoom }: { img: Attachment; onZoom: () => void }) {
   const ref = useRef<HTMLButtonElement>(null);
   const full = useImage(img, useSeen(ref));
   return (
-    <button ref={ref} className="tool-shot" onClick={onZoom} title="Powiększ (to widział model)">
+    <button ref={ref} className="tool-shot" onClick={onZoom} title={t("Powiększ (to widział model)")}>
       {full ? <img src={dataUrl(full)} alt="" /> : <span className="tool-shot-wait" />}
     </button>
   );

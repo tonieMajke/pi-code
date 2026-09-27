@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Puzzle } from "lucide-react";
 import type { UiAnswer, UiRequest } from "../../shared/protocol";
+import { t } from "../../shared/i18n";
 
 /**
  * A question from a pi extension (ctx.ui.select / confirm / input / editor),
@@ -94,10 +95,10 @@ export function ExtensionDialog({
         {request.method === "confirm" ? (
           <>
             <button className="btn primary" onClick={() => onAnswer({ value: true })}>
-              Tak
+              {t("Tak")}
             </button>
             <button className="btn" onClick={() => onAnswer({ value: false })}>
-              Nie
+              {t("Nie")}
             </button>
           </>
         ) : request.method === "select" ? null : (
@@ -106,7 +107,7 @@ export function ExtensionDialog({
           </button>
         )}
         <button className="btn" onClick={cancel}>
-          Anuluj <kbd>Esc</kbd>
+          {t("Anuluj")} <kbd>Esc</kbd>
         </button>
       </div>
     </div>

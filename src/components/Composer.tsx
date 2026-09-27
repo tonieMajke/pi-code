@@ -683,7 +683,7 @@ export function Composer({
               thinking && (thinking.available.length > 0 || thinking.server) ? (
                 <div className="model-thinking-pop">
                   <div className="model-thinking-head">
-                    <Brain size={13} /> Myślenie
+                    <Brain size={13} /> {t("Myślenie")}
                   </div>
                   {thinking.available.length > 0 ? (
                     <div className="seg">
@@ -809,7 +809,7 @@ function ContextMenu({
         <div className="ctx-pop">
           <div className="ctx-head">
             <span>
-              <b>{Math.round(pct)}%</b> kontekstu zajęte
+              <b>{Math.round(pct)}%</b> {t("kontekstu zajęte")}
             </span>
             <span className="ctx-total">
               ~{formatTokens(used)} / {formatTokens(usage.contextWindow)}

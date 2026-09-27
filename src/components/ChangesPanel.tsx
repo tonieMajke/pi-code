@@ -3,18 +3,22 @@ import { ChevronRight, GitCommitHorizontal, Minus, Plus, RefreshCw, Sparkles, Un
 import type { FileChange, GitChanges } from "../../shared/protocol";
 import { plural, t } from "../../shared/i18n";
 
-const STATUS_LABEL: Record<string, string> = {
-  "??": "nowy",
-  A: "dodany",
-  M: "zmieniony",
-  D: "usunięty",
-  R: "przeniesiony",
-};
-
+/** git's status letter in words, in the language the interface has right now. */
 function statusLabel(code: string): string {
-  if (code === "??") return STATUS_LABEL["??"];
+  if (code === "??") return t("nowy");
   const c = code.trim()[0] ?? "M";
-  return STATUS_LABEL[c] ?? code.trim();
+  switch (c) {
+    case "A":
+      return t("dodany");
+    case "M":
+      return t("zmieniony");
+    case "D":
+      return t("usunięty");
+    case "R":
+      return t("przeniesiony");
+    default:
+      return code.trim();
+  }
 }
 
 /** Right-hand panel: every uncommitted change in the session's repo, with inline diffs. */
@@ -67,7 +71,7 @@ export function ChangesPanel({
   return (
     <aside className="changes">
       <div className="changes-head">
-        <span className="changes-title">Zmiany</span>
+        <span className="changes-title">{t("Zmiany")}</span>
         {files.length > 0 && (
           <span className="tool-stats">
             <span className="add">+{add}</span>
@@ -75,17 +79,17 @@ export function ChangesPanel({
           </span>
         )}
         <span className="topbar-spacer" />
-        <button className="icon-btn" onClick={onRefresh} title="Odśwież">
+        <button className="icon-btn" onClick={onRefresh} title={t("Odśwież")}>
           <RefreshCw size={14} className={loading ? "spin" : ""} />
         </button>
-        <button className="icon-btn" onClick={onClose} title="Zamknij (Ctrl+Shift+D)">
+        <button className="icon-btn" onClick={onClose} title={t("Zamknij (Ctrl+Shift+D)")}>
           <X size={15} />
         </button>
       </div>
       <div className="changes-body">
-        {!changes && <div className="s-empty">wczytywanie…</div>}
-        {changes && !changes.repo && <div className="s-empty">Katalog sesji nie jest repozytorium git.</div>}
-        {changes?.repo && files.length === 0 && <div className="s-empty">Brak niezatwierdzonych zmian.</div>}
+        {!changes && <div className="s-empty">{t("wczytywanie…")}</div>}
+        {changes && !changes.repo && <div className="s-empty">{t("Katalog sesji nie jest repozytorium git.")}</div>}
+        {changes?.repo && files.length === 0 && <div className="s-empty">{t("Brak niezatwierdzonych zmian.")}</div>}
         {staged.length > 0 && (
           <FileSection
             title={t("Do commitu")}
@@ -179,7 +183,7 @@ function ChangedFile({ file, onRevert, action }: { file: FileChange; onRevert: (
         {file.status !== "??" && (
           <button
             className={`icon-btn chg-revert ${confirm ? "confirm" : ""}`}
-            title={confirm ? "Kliknij ponownie, aby cofnąć zmiany w pliku" : "Cofnij zmiany w pliku (git restore)"}
+            title={confirm ? t("Kliknij ponownie, aby cofnąć zmiany w pliku") : t("Cofnij zmiany w pliku (git restore)")}
             onClick={() => {
               if (confirm) onRevert(file.path);
               setConfirm((c) => !c);
@@ -198,7 +202,7 @@ function ChangedFile({ file, onRevert, action }: { file: FileChange; onRevert: (
 
 function Patch({ patch }: { patch: string }) {
   const lines = patch.split("\n").filter((l) => !/^(diff --git|index |--- |\+\+\+ |new file mode|deleted file mode)/.test(l));
-  if (lines.length === 0) return <div className="s-empty">(plik binarny albo brak różnic tekstowych)</div>;
+  if (lines.length === 0) return <div className="s-empty">{t("(plik binarny albo brak różnic tekstowych)")}</div>;
   return (
     <pre className="diff chg-diff">
       {lines.map((l, i) => (

@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { t } from "../../shared/i18n";
 
 export type Toast = { id: number; text: string; level: "info" | "warning" | "error" };
 
@@ -7,10 +8,10 @@ export function Toasts({ toasts, onClose }: { toasts: Toast[]; onClose: (id: num
   if (!toasts.length) return null;
   return (
     <div className="toasts" role="status">
-      {toasts.map((t) => (
-        <div key={t.id} className={`toast toast-${t.level}`}>
-          <span className="toast-text">{t.text}</span>
-          <button className="icon-btn" onClick={() => onClose(t.id)} title="Zamknij">
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`toast toast-${toast.level}`}>
+          <span className="toast-text">{toast.text}</span>
+          <button className="icon-btn" onClick={() => onClose(toast.id)} title={t("Zamknij")}>
             <X size={13} />
           </button>
         </div>

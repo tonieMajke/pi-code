@@ -281,7 +281,7 @@ export function Sidebar({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-          placeholder="Szukaj sesji"
+          placeholder={t("Szukaj sesji")}
         />
       </label>
 
@@ -476,7 +476,7 @@ function GroupNameInput({ initial, onDone }: { initial: string; onDone: (name: s
       ref={ref}
       className="s-group-input"
       value={value}
-      aria-label="Nazwa grupy"
+      aria-label={t("Nazwa grupy")}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") finish(value);

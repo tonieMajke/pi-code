@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
+import { t } from "../../shared/i18n";
 
 export type Command = {
   id: string;
@@ -39,13 +40,13 @@ export function CommandPalette({ commands, onClose }: { commands: Command[]; onC
   let lastGroup = "";
   return (
     <div className="pal-backdrop" onMouseDown={onClose}>
-      <div className="pal" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-label="Paleta komend">
+      <div className="pal" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-label={t("Paleta komend")}>
         <label className="pal-search">
           <Search size={15} />
           <input
             autoFocus
             value={q}
-            placeholder="Sesja, model, tryb albo akcja…"
+            placeholder={t("Sesja, model, tryb albo akcja…")}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") {
@@ -67,7 +68,7 @@ export function CommandPalette({ commands, onClose }: { commands: Command[]; onC
           <kbd>Esc</kbd>
         </label>
         <div className="pal-list" ref={listRef}>
-          {results.length === 0 && <div className="s-empty">nic nie pasuje</div>}
+          {results.length === 0 && <div className="s-empty">{t("nic nie pasuje")}</div>}
           {results.map((c, i) => {
             const header = c.group !== lastGroup ? c.group : null;
             lastGroup = c.group;
