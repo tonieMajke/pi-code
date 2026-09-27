@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientCommand } from "../../shared/protocol";
-import { CLOSE_SIDECAR_EXIT, createWsTransport, downFromClose, withId } from "./transport";
+import { CLOSE_BRIDGE_BUSY, CLOSE_SIDECAR_EXIT, createWsTransport, downFromClose, withId } from "./transport";
 
 describe("withId", () => {
   it("builds a valid command for every variant", () => {
@@ -120,6 +120,30 @@ describe("createWsTransport", () => {
     await vi.advanceTimersByTimeAsync(500);
     FakeWebSocket.instances[2].drop(); // reconnect attempt that fails: not a second "down"
     expect(downs).toHaveLength(1);
+    t.close();
+  });
+});
+
+describe("createWsTransport after close()", () => {
+  it("a reconnect that was pending does not bring a closed transport back", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.useFakeTimers();
+    const t = createWsTransport("ws://127.0.0.1:9876");
+    FakeWebSocket.instances[0].fireOpen();
+    FakeWebSocket.instances[0].drop(); // reconnect timer armed
+    t.close(); // e.g. a hot reload unmounts the app
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("being refused because another window holds the bridge is not a dead sidecar", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const t = createWsTransport("ws://127.0.0.1:9876");
+    const downs: unknown[] = [];
+    t.onDown((d) => downs.push(d));
+    FakeWebSocket.instances[0].fireOpen();
+    FakeWebSocket.instances[0].drop(CLOSE_BRIDGE_BUSY, "bridge in use by another window");
+    expect(downs).toEqual([]);
     t.close();
   });
 });

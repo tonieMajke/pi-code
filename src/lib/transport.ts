@@ -20,6 +20,8 @@ export interface SidecarDown {
 
 /** WS close code the dev bridge uses when its sidecar exited (reason: JSON SidecarDown). */
 export const CLOSE_SIDECAR_EXIT = 4002;
+/** …and when another window already holds it. */
+export const CLOSE_BRIDGE_BUSY = 4001;
 
 export function downFromClose(code: number, reason: string): SidecarDown {
   if (code === CLOSE_SIDECAR_EXIT) {
@@ -196,6 +198,9 @@ export function createWsTransport(url: string): PiTransport {
   let wasOpen = false;
 
   function connect(): void {
+    // close() while a reconnect was pending: that timer must not bring the transport back (after
+    // a hot reload the zombie kept knocking on the bridge, refused every second).
+    if (intentional) return;
     ws = new WebSocket(url);
     ws.onopen = () => {
       attempt = 0;
@@ -213,7 +218,8 @@ export function createWsTransport(url: string): PiTransport {
     };
     ws.onclose = (e) => {
       if (intentional) return;
-      if (wasOpen) {
+      // 4001: the bridge serves another window — nothing died.
+      if (wasOpen && e.code !== CLOSE_BRIDGE_BUSY) {
         wasOpen = false;
         const down = downFromClose(e.code, e.reason);
         downListeners.forEach((l) => l(down));
