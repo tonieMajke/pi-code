@@ -18,34 +18,295 @@ function isReadOnlyTool(toolName: string, input: Record<string, unknown>): boole
 
 const DESTRUCTIVE = [
   /\b(rm|rmdir|mv|cp|mkdir|touch|chmod|chown|chgrp|ln|tee|truncate|dd|shred|kill|pkill|killall|reboot|shutdown|sudo|su)\b/i,
-  />/, // any redirect left after the harmless ones are stripped writes a file
   /\b(npm|pnpm|yarn|bun)\s+(add|remove|install|uninstall|update|ci|link|publish)\b/i,
   /\bpip3?\s+(install|uninstall)\b/i,
   /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|switch|restore|clean|stash|cherry-pick|revert|tag|init|clone)\b/i,
   /\bsystemctl\s+(start|stop|restart|enable|disable)\b/i,
   /\bsed\s+(-[a-z]*i|--in-place)/i,
-  /\s-(delete|exec|execdir|ok|fprint)\b/, // find side effects
+  /\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b/, // find side effects
 ];
 
 const SAFE_START = [
-  /^(cat|head|tail|less|more|grep|rg|fd|find|ls|eza|tree|pwd|echo|printf|wc|sort|uniq|diff|file|stat|du|df|which|whereis|type|env|printenv|uname|whoami|id|date|uptime|ps|free|jq|awk|bat|basename|dirname|realpath|nvidia-smi|od|xxd|hexdump|cut|tr|nl|column|md5sum|sha256sum|cmp)\b/,
-  /^sed\s+-n\b/,
-  /^git\s+(status|log|diff|show|branch|remote|blame|ls-files|ls-tree|rev-parse|describe)\b/,
-  /^(npm|pnpm|yarn)\s+(list|ls|view|info|why|outdated|audit)\b/,
-  /^(node|python3?|cargo|rustc|go|pnpm|npm)\s+(--version|-V)\b/,
+  /^(cat|head|tail|less|more|grep|rg|fd|find|ls|eza|tree|pwd|echo|printf|wc|sort|uniq|diff|file|stat|du|df|which|whereis|type|env|printenv|uname|whoami|id|date|uptime|ps|free|jq|awk|bat|basename|dirname|realpath|nvidia-smi|od|xxd|hexdump|cut|tr|nl|column|md5sum|sha256sum|cmp)(?=\s|$)/,
+  /^sed\s+-n(?=\s|$)/,
+  /^git\s+(status|log|diff|show|branch|remote|blame|ls-files|ls-tree|rev-parse|describe)(?=\s|$)/,
+  /^(npm|pnpm|yarn)\s+(list|ls|view|info|why|outdated|audit)(?=\s|$)/,
+  /^(node|python3?|cargo|rustc|go|pnpm|npm)\s+(--version|-V)$/,
 ];
+
+/** Leading `VAR=value` that only changes formatting. LD_PRELOAD=, GIT_EXTERNAL_DIFF=, PAGER=… run code. */
+const SAFE_VAR = /^(LANG|LANGUAGE|LC_[A-Z]+|TZ|COLUMNS|LINES|NO_COLOR|FORCE_COLOR|CLICOLOR(_FORCE)?|TERM)=/;
+
+export interface Segment {
+  /** Words with quotes and escapes removed, redirections taken out. */
+  words: string[];
+  /** Output goes to a file (`>`, `>>`, `&>`, `<>`), /dev/null and fd duplication excepted. */
+  writes: boolean;
+}
+
+/**
+ * Split a bash command the way the shell would, far enough to judge it: segments at unquoted
+ * `;` `&` `|` `&&` `||` and newlines, words unquoted. null = something we will not reason about
+ * (command or process substitution, subshells, unbalanced quotes). Errs towards more segments:
+ * `#` comments are not recognised, so their text is judged as commands too.
+ */
+export function parseCommand(s: string): Segment[] | null {
+  const segs: Segment[] = [];
+  let words: string[] = [];
+  let word: string | null = null;
+  let writes = false;
+  let dropNext = false; // the next word is a redirection target, not an argument
+  const endWord = () => {
+    if (word === null) return;
+    if (dropNext) dropNext = false;
+    else words.push(word);
+    word = null;
+  };
+  const endSeg = () => {
+    endWord();
+    if (words.length || writes) segs.push({ words, writes });
+    words = [];
+    writes = false;
+    dropNext = false;
+  };
+  /** `2>`: the digits before a redirection are its fd, not a word. */
+  const takeFd = () => {
+    if (word !== null && /^\d*$/.test(word)) word = null;
+    else endWord();
+  };
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "\\") {
+      if (s[i + 1] !== "\n") word = (word ?? "") + (s[i + 1] ?? "");
+      i++;
+    } else if (c === "'") {
+      const end = s.indexOf("'", i + 1);
+      if (end < 0) return null;
+      word = (word ?? "") + s.slice(i + 1, end);
+      i = end;
+    } else if (c === "$" && s[i + 1] === "'") {
+      // $'…' — backslash escapes, including \'
+      let j = i + 2;
+      let v = "";
+      for (; j < s.length && s[j] !== "'"; j++) {
+        if (s[j] === "\\") j++;
+        v += s[j] ?? "";
+      }
+      if (j >= s.length) return null;
+      word = (word ?? "") + v;
+      i = j;
+    } else if (c === "`" || (c === "$" && s[i + 1] === "(") || c === "(" || c === ")") {
+      return null;
+    } else if (c === '"') {
+      let j = i + 1;
+      let v = "";
+      for (; j < s.length && s[j] !== '"'; j++) {
+        if (s[j] === "`" || (s[j] === "$" && s[j + 1] === "(")) return null;
+        if (s[j] === "\\" && '$`"\\\n'.includes(s[j + 1] ?? "")) {
+          j++;
+          if (s[j] === "\n") continue;
+        }
+        v += s[j];
+      }
+      if (j >= s.length) return null;
+      word = (word ?? "") + v;
+      i = j;
+    } else if (c === " " || c === "\t") {
+      endWord();
+    } else if (c === ">" || (c === "&" && s[i + 1] === ">")) {
+      if (c === "&") i++;
+      takeFd();
+      let j = i + 1;
+      if (s[j] === ">" || s[j] === "|") j++;
+      if (s[j] === "(") return null; // >(…)
+      const dup = /^&(\d+|-)/.exec(s.slice(j)); // 2>&1, >&-
+      const devNull = /^\s*\/dev\/null(?=[\s;&|]|$)/.exec(s.slice(j));
+      if (dup) i = j + dup[0].length - 1;
+      else if (devNull) i = j + devNull[0].length - 1;
+      else {
+        writes = true;
+        i = j - 1;
+      }
+    } else if (c === "<") {
+      if (s[i + 1] === "(") return null; // <(…)
+      takeFd();
+      if (s[i + 1] === ">") writes = true; // <> opens for writing
+      while (s[i + 1] === "<" || s[i + 1] === ">" || s[i + 1] === "&") i++;
+      dropNext = true;
+    } else if (c === ";" || c === "&" || c === "|" || c === "\n") {
+      endSeg();
+    } else {
+      word = (word ?? "") + c;
+    }
+  }
+  endSeg();
+  return segs;
+}
+
+/** `-o`, `-no` — a short-option cluster containing one of `letters`. */
+const shortOpt = (args: string[], letters: RegExp) => args.some((a) => /^-[^-]/.test(a) && letters.test(a.slice(1)));
+/** `--output`, `--out=x` — GNU getopt and git accept unambiguous abbreviations. */
+const longOpt = (args: string[], ...names: string[]) =>
+  args.some((a) => {
+    if (!a.startsWith("--") || a === "--") return false;
+    const n = a.slice(2).split("=")[0];
+    return names.some((full) => full.startsWith(n));
+  });
+/** Operands, skipping options and the values of `valued` options given as a separate word. */
+function operands(args: string[], valued: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--") return [...out, ...args.slice(i + 1)];
+    if (valued.includes(args[i])) i++;
+    else if (!args[i].startsWith("-") || args[i] === "-") out.push(args[i]);
+  }
+  return out;
+}
+
+/** sed script without `w`/`W` (write), `e` (execute) or the `w`/`e` flags of `s`. */
+function sedScriptSafe(s: string): boolean {
+  let i = 0;
+  const skipParts = (n: number): boolean => {
+    const d = s[i++];
+    if (!d || d === "\\" || d === "\n") return false;
+    for (let k = 0; k < n; k++) {
+      while (i < s.length && s[i] !== d) i += s[i] === "\\" ? 2 : 1;
+      if (i >= s.length) return false;
+      i++;
+    }
+    return true;
+  };
+  const skipTo = (end: RegExp) => {
+    while (i < s.length && !end.test(s[i])) i++;
+  };
+  while (i < s.length) {
+    const c = s[i];
+    if (/[\s;!,$0-9~+{}=pPlqQnNdDgGhHxzF]/.test(c)) i++;
+    else if (c === "/") {
+      if (!skipParts(1)) return false;
+      while (/[IM]/.test(s[i] ?? "")) i++;
+    } else if (c === "\\") {
+      i++;
+      if (!skipParts(1)) return false;
+    } else if (c === "s") {
+      i++;
+      if (!skipParts(2)) return false;
+      while (i < s.length && /[gpiImM0-9]/.test(s[i])) i++; // `e` and `w` stop here and fail below
+    } else if (c === "y") {
+      i++;
+      if (!skipParts(2)) return false;
+    } else if (c === ":" || c === "b" || c === "t" || c === "T") skipTo(/[;\n]/); // label
+    else if (c === "a" || c === "i" || c === "c" || c === "r" || c === "R") skipTo(/\n/); // text, or a file to print
+    else return false;
+  }
+  return true;
+}
+
+function sedSafe(args: string[]): boolean {
+  const scripts: string[] = [];
+  let first: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    let m: RegExpExecArray | null;
+    if (a === "-e" || a === "--expression") scripts.push(args[++i] ?? "");
+    else if (a.startsWith("--expression=")) scripts.push(a.slice(13));
+    else if (a === "-l" || a === "--line-length") i++;
+    else if (/^--(quiet|silent|regexp-extended|separate|null-data|unbuffered|posix|debug|sandbox|line-length=\d+)$/.test(a)) continue;
+    else if ((m = /^-[nErszu]*(e)(.*)$/.exec(a))) scripts.push(m[2] || (args[++i] ?? ""));
+    else if (/^-[nErszu]+$/.test(a)) continue;
+    else if (a.startsWith("-") && a !== "-") return false; // -i, -f script, --in-place, unknown
+    else first ??= a;
+  }
+  if (!scripts.length && first !== null) scripts.push(first);
+  return scripts.length > 0 && scripts.every(sedScriptSafe);
+}
+
+/** awk with only -F/-v and a program that does not run commands or write files. */
+function awkSafe(args: string[]): boolean {
+  let program: string | null = null;
+  for (let i = 0; i < args.length && program === null; i++) {
+    const a = args[i];
+    if (a === "-F" || a === "-v" || a === "--field-separator" || a === "--assign") i++;
+    else if (/^-[Fv]./.test(a) || /^--(field-separator|assign)=/.test(a) || a === "--") continue;
+    else if (a.startsWith("-")) return false; // -f file, -i inplace, -o/-p/-d write files, -l loads code
+    else program = a;
+  }
+  if (program === null) return false;
+  return !/\bsystem\b|@|\bprintf?\b[^;{}\n]*[>|]|\|\s*getline/.test(program);
+}
+
+const GIT_BRANCH_LIST = new Set([
+  "list", "all", "remotes", "verbose", "show-current", "merged", "no-merged", "contains", "no-contains",
+  "sort", "format", "points-at", "column", "no-column", "color", "no-color", "ignore-case", "abbrev", "no-abbrev", "omit-empty",
+]);
+const GIT_BRANCH_VALUED = ["--merged", "--no-merged", "--contains", "--no-contains", "--points-at", "--sort", "--format"];
+
+function gitSafe(args: string[]): boolean {
+  if (longOpt(args, "output")) return false; // git diff/log/show --output=<file>
+  const [sub, ...rest] = args;
+  if (sub === "branch") {
+    // Listing only: -m/-d/-c/-f/-u or a bare name create, rename, delete or retarget branches.
+    let listing = false;
+    for (const a of rest) {
+      if (a.startsWith("--")) {
+        const n = a.slice(2).split("=")[0];
+        if (!GIT_BRANCH_LIST.has(n)) return false;
+        if (n === "list") listing = true;
+      } else if (a.startsWith("-")) {
+        if (!/^-[avrli]+$/.test(a)) return false;
+        if (a.includes("l")) listing = true;
+      }
+    }
+    return listing || operands(rest, GIT_BRANCH_VALUED).length === 0;
+  }
+  if (sub === "remote") {
+    const r = rest.filter((a) => a !== "-v" && a !== "--verbose");
+    return r.length === 0 || r[0] === "show" || r[0] === "get-url";
+  }
+  return true;
+}
+
+const NVIDIA_SETTERS =
+  /^(-pm|-pl|-r|-ac|-rac|-lgc|-rgc|-lmc|-rmc|-c|-e|-am|-caa|-mig|-cc|--(persistence-mode|power-limit|gpu-reset|applications-clocks|reset-applications-clocks|lock-gpu-clocks|reset-gpu-clocks|lock-memory-clocks|reset-memory-clocks|compute-mode|ecc-config|accounting-mode|clear-accounted-apps|multi-instance-gpu|auto-boost-default|auto-boost-permission|cuda-clocks))(=|$)/;
+
+/** Options that make an otherwise read-only program write files or run other programs. */
+const ARG_CHECKS: Record<string, (args: string[]) => boolean> = {
+  env: (a) => a.length === 0, // `env` lists the environment; `env CMD` runs CMD
+  sort: (a) => !shortOpt(a, /o/) && !longOpt(a, "output", "compress-program"),
+  uniq: (a) => operands(a, ["-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"]).length < 2, // uniq IN OUT
+  xxd: (a) => operands(a, ["-c", "-cols", "-g", "-groupsize", "-l", "-len", "-s", "-seek", "-o", "-offset", "-n", "-name", "-R"]).length < 2,
+  tree: (a) => !shortOpt(a, /[oR]/), // -o file; -R with -H writes 00Tree.html into every directory
+  date: (a) => !shortOpt(a, /s/) && !longOpt(a, "set"),
+  fd: (a) => !shortOpt(a, /[xX]/) && !longOpt(a, "exec", "exec-batch"),
+  rg: (a) => !longOpt(a, "pre"),
+  less: (a) => !shortOpt(a, /[oO]/) && !longOpt(a, "log-file", "LOG-FILE"),
+  bat: (a) => !longOpt(a, "pager") && a[0] !== "cache",
+  file: (a) => !shortOpt(a, /C/) && !longOpt(a, "compile"),
+  sed: sedSafe,
+  awk: awkSafe,
+  git: gitSafe,
+  "nvidia-smi": (a) => !a.some((x) => NVIDIA_SETTERS.test(x)) && (a.length === 0 || a[0].startsWith("-") || ["dmon", "pmon", "topo"].includes(a[0])),
+  npm: (a) => !a.includes("fix") && !longOpt(a, "fix"),
+  pnpm: (a) => !a.includes("fix") && !longOpt(a, "fix"),
+  yarn: (a) => !a.includes("fix") && !longOpt(a, "fix"),
+};
+
+function segmentReadOnly({ words, writes }: Segment): boolean {
+  if (writes) return false;
+  let k = 0;
+  for (; k < words.length && /^[A-Za-z_]\w*=/.test(words[k]); k++) if (!SAFE_VAR.test(words[k])) return false;
+  const argv = words.slice(k);
+  if (!argv.length) return false;
+  const line = argv.join(" ");
+  if (DESTRUCTIVE.some((p) => p.test(line)) || !SAFE_START.some((p) => p.test(line))) return false;
+  const check = ARG_CHECKS[argv[0]];
+  return !check || check(argv.slice(1));
+}
 
 /** A bash command is read-only when every segment of every pipe/chain is. */
 export function isReadOnlyCommand(command: string): boolean {
-  if (/[`]|\$\(/.test(command)) return false; // command substitution can run anything
-  const segments = command.split(/\|\||&&|;|\||\n/).map((s) => s.trim()).filter(Boolean);
-  if (segments.length === 0) return false;
-  return segments.every((seg) => {
-    const cmd = seg
-      .replace(/^(\w+=\S*\s+)+/, "") // leading VAR=value
-      .replace(/\d?>&\d|\d?>\s*\/dev\/null/g, ""); // 2>&1, 2>/dev/null, >/dev/null
-    return !DESTRUCTIVE.some((p) => p.test(cmd)) && SAFE_START.some((p) => p.test(cmd));
-  });
+  const segs = parseCommand(command);
+  return !!segs && segs.length > 0 && segs.every(segmentReadOnly);
 }
 
 export type Verdict = { kind: "allow" } | { kind: "ask" } | { kind: "block"; reason: string };
