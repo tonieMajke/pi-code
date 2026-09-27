@@ -1324,7 +1324,7 @@ export default function App() {
         {empty ? (
           <div className="hero">
             <Logo size={60} className="hero-mark" />
-            <h1>Co dalej, Majku?</h1>
+            <h1>{t("Co dalej?")}</h1>
             {dialog && <ExtensionDialog key={dialog.id} request={dialog} queued={state.dialogs.length - 1} onAnswer={answerDialog} />}
             {state.terminalOpen && <TerminalBar onTakeback={() => send({ cmd: "terminal_takeback" })} />}
             {composer}

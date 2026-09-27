@@ -2,6 +2,7 @@
   "name": "pi-gui",
   "version": "0.0.4",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "sidecar": "tsx sidecar/src/main.ts",

@@ -6,3 +6,9 @@ src-tauri/target/
 dev/eval/results/
 sidecar/dist/
 sidecar-rt/node_modules/
+
+# working notes (kept locally, not published)
+HANDOFF*.md
+NEXT_PROMPT.md
+PLAN.md
+plan-*.md

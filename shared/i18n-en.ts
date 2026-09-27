@@ -1,6 +1,7 @@
 // English for every Polish source string (key = the exact Polish text passed to t()).
 // i18n.test.ts fails when a literal t("…") in the code has no entry here.
 export const EN: Record<string, string> = {
+  "Co dalej?": "What's next?",
   "Pamięć": "Memory",
   "model pracuje — spróbuj po zakończeniu": "the model is working — try again when it finishes",
   "pamięć jest wyłączona": "memory is turned off",
