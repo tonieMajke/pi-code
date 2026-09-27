@@ -10,13 +10,34 @@ use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 /// Sidecar handle: stdin is shared with commands, stdout is read on a
 /// dedicated thread (kept alive there to avoid EOF on drop).
 pub struct Sidecar {
-    stdin: Mutex< std::process::ChildStdin>,
+    stdin: Mutex<Option<std::process::ChildStdin>>,
+    child: Mutex<Option<std::process::Child>>,
+}
+
+impl Sidecar {
+    /// App exit: close stdin (the sidecar leaves on EOF), give it a moment, then kill its whole
+    /// process group — in dev that is pnpm → tsx → node, plus MCP servers and tool processes.
+    fn stop(&self) {
+        drop(self.stdin.lock().ok().and_then(|mut s| s.take()));
+        let Some(mut child) = self.child.lock().ok().and_then(|mut c| c.take()) else { return };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+        while std::time::Instant::now() < deadline {
+            if let Ok(Some(_)) = child.try_wait() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let _ = Command::new("kill").args(["-KILL", "--", &format!("-{}", child.id())]).status();
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 #[tauri::command]
 fn pi_send(state: State<'_, Sidecar>, line: String) -> Result<(), String> {
     eprintln!("[sidecar] pi_send: {}", line.chars().take(120).collect::<String>());
     let mut stdin = state.stdin.lock().map_err(|e| e.to_string())?;
+    let stdin = stdin.as_mut().ok_or("sidecar is not running")?;
     writeln!(stdin, "{}", line)
         .map_err(|e| e.to_string())
 }
@@ -155,7 +176,11 @@ pub fn run() {
                 eprintln!("[tray] unavailable: {e}");
                 app.state::<CloseToTray>().0.store(false, Ordering::Relaxed);
             }
-            let mut child = sidecar_command(app)
+            let mut cmd = sidecar_command(app);
+            // Own process group, so exit can take down everything the sidecar started.
+            #[cfg(unix)]
+            std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+            let mut child = cmd
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
@@ -168,7 +193,8 @@ pub fn run() {
             log_sidecar_started(app);
 
             app.manage(Sidecar {
-                stdin: Mutex::new(stdin),
+                stdin: Mutex::new(Some(stdin)),
+                child: Mutex::new(Some(child)),
             });
 
             // stdout lines -> "pi:out" events (JSONL, one event per line)
@@ -189,6 +215,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![pi_send, set_close_to_tray])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Tray "Zakończ", the last window closing, app.exit(): never leave the sidecar behind.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Sidecar>().stop();
+            }
+        });
 }

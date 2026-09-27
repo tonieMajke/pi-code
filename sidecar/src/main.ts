@@ -478,5 +478,9 @@ rl.on("line", (line) => {
 rl.on("close", () => {
   dictation.dispose();
   gateway.dispose();
-  // No process.exit(): let pending stdout writes flush and the process end naturally.
+  // The app is gone. Extensions and MCP servers keep the event loop alive, so leave on our
+  // own once stdout has flushed (capped, in case nobody reads it any more).
+  const exit = () => process.exit(0);
+  setTimeout(exit, 1000);
+  process.stdout.write("", exit);
 });
