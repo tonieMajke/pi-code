@@ -321,3 +321,21 @@ describe("sidecar gone", () => {
   });
 });
 
+
+describe("switching sessions", () => {
+  it("the opened session's project shows at once; the old context count is gone until the new one arrives", () => {
+    let s: State = { ...initialState, connected: true, cwd: "/home/u/pi-gui", branch: "master", sessionPath: "/s/a.jsonl" };
+    s = reducer(s, ev({ kind: "usage", usage: { contextTokens: 10, contextWindow: 100, inputTokens: 1, outputTokens: 1 } }));
+    expect(s.usage).not.toBeNull();
+    s = reducer(s, ev({ kind: "history", sessionPath: "/s/b.jsonl", cwd: "/home/u/Dokumenty/PI/otchlan", items: [] }));
+    expect(s.cwd).toBe("/home/u/Dokumenty/PI/otchlan");
+    expect(s.branch).toBe("");
+    expect(s.usage).toBeNull();
+  });
+
+  it("same project: the branch stays", () => {
+    let s: State = { ...initialState, cwd: "/p", branch: "main" };
+    s = reducer(s, ev({ kind: "history", sessionPath: "/s/b.jsonl", cwd: "/p", items: [] }));
+    expect(s.branch).toBe("main");
+  });
+});

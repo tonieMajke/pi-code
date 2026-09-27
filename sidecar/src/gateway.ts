@@ -208,6 +208,7 @@ export class PiGateway {
     // and where every session in memory stands.
     if (this.active) {
       await this.active.emitInit();
+      this.active.emitUsage(); // a reloaded page starts with no context count
       for (const h of this.hosts.values()) onEvent(h.statusEvent(), h.id);
       return;
     }
@@ -357,9 +358,9 @@ export class PiGateway {
     const messages = sessionManager.buildSessionContext().messages;
     this.shown = { sessionId: sessionManager.getSessionId(), messages };
     const items = historyOf(sessionManager.getSessionId(), messages, statsEntries(sessionManager));
-    this.out({ kind: "history", sessionPath: sessionManager.getSessionFile() ?? path, items });
     // Tools must run in the session's own project, not wherever the GUI started.
     const cwd = sessionManager.getCwd() || this.cwd;
+    this.out({ kind: "history", sessionPath: sessionManager.getSessionFile() ?? path, cwd, items });
     await this.startSession(cwd, sessionManager, prev);
   }
 
@@ -368,7 +369,7 @@ export class PiGateway {
     this.show(host);
     this.shown = { sessionId: host.id, messages: host.historyMessages() };
     this.out(
-      { kind: "history", sessionPath: host.path, items: host.historyItems(), busy: host.busy, since: host.busySince ?? undefined },
+      { kind: "history", sessionPath: host.path, cwd: host.cwd, items: host.historyItems(), busy: host.busy, since: host.busySince ?? undefined },
       host.id,
     );
     void host.emitInit().then(() => {

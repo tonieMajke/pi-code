@@ -627,7 +627,21 @@ export function Composer({
               Handoff?
             </button>
           )}
-          {pct !== null && <ContextMenu usage={usage!} pct={pct} busy={busy} onCommand={onCommand} />}
+          {pct !== null ? (
+            <ContextMenu usage={usage!} pct={pct} busy={busy} onCommand={onCommand} />
+          ) : (
+            // No numbers for this session yet (just opened); a session without a count shows nothing.
+            connected &&
+            usage === null && (
+              <span className="ctx ctx-loading" title={t("Liczę kontekst sesji…")}>
+                <svg viewBox="0 0 20 20" width="16" height="16">
+                  <circle cx="10" cy="10" r="8" className="ctx-bg" />
+                  <circle cx="10" cy="10" r="8" className="ctx-fg" strokeDasharray="12 50.27" />
+                </svg>
+                <span>…</span>
+              </span>
+            )
+          )}
           <Menu
             className="chip-menu model-menu"
             title="Model"

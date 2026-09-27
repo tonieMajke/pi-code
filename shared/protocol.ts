@@ -637,6 +637,8 @@ export type PiEvent =
   | {
       kind: "history";
       sessionPath: string;
+      /** The session's project: the chip switches with the transcript, not ~0.5 s later with init_done. */
+      cwd?: string;
       items: HistoryItem[];
       /** A background session brought back mid-run: the last turn is still open. */
       busy?: boolean;

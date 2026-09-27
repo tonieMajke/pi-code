@@ -307,6 +307,10 @@ export function reducer(state: State, action: Action): State {
             busy: e.busy ?? false,
             busySince: e.busy ? (e.since ?? action.at ?? null) : null,
             sessionPath: e.sessionPath,
+            // Project and context belong to the session being opened: the old ones must not linger
+            // until init_done/usage arrive (seen: the previous chat's folder and 0% for ~3 s).
+            ...(e.cwd !== undefined && e.cwd !== state.cwd ? { cwd: e.cwd, branch: "" } : {}),
+            usage: null,
             error: null,
             pending: [],
             approvals: [],
@@ -322,7 +326,7 @@ export function reducer(state: State, action: Action): State {
             // one's run — maybe still going on in the background — is not this view's any more.
             ...(e.sessionPath !== state.sessionPath || !e.sessionPath
               ? e.sessionId !== state.sessionId
-                ? { busy: false, busySince: null, perf: null, approvals: [], dialogs: [], pending: [] }
+                ? { busy: false, busySince: null, perf: null, approvals: [], dialogs: [], pending: [], usage: null }
                 : {}
               : {}),
             model: e.model,

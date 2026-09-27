@@ -820,3 +820,14 @@ describe("SessionHost: a message sent while the run is still starting", () => {
     await first;
   });
 });
+
+describe("PiGateway re-init", () => {
+  it("a reloaded page gets init_done and the context count again", async () => {
+    const { gw, internal, add } = gateway();
+    add(fakeSession());
+    const got: PiEvent[] = [];
+    await gw.init((e) => got.push(e));
+    expect(got.map((e) => e.kind)).toEqual(expect.arrayContaining(["init_done", "usage"]));
+    expect(internal.active).not.toBeNull();
+  });
+});
