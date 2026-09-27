@@ -1550,3 +1550,19 @@ button.welcome-folder:hover { background: var(--hover); border-color: var(--bord
 .recent-meta { font-size: 11.5px; color: var(--faint); }
 .recent-new { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity 0.12s; }
 .recent-tile:hover .recent-new, .recent-new:focus-visible { opacity: 1; }
+
+/* ── Turn timeline (click the stats under a turn) ── */
+button.turn-stats { border: 0; background: none; padding: 2px 6px; border-radius: 6px; font: inherit; cursor: pointer; }
+button.turn-stats:hover, button.turn-stats.on { background: var(--hover); color: var(--text-2); }
+.timeline { margin: 6px 0 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 12px; }
+.tl-lanes { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; margin-bottom: 8px; }
+.tl-name { color: var(--faint); font-size: 11.5px; }
+.tl-lane { position: relative; height: 12px; border-radius: 4px; background: var(--hover); overflow: hidden; }
+.tl-span { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.tl-prompt { background: var(--m-plan); }
+.tl-gen { background: var(--accent); }
+.tl-tool { background: var(--ok); }
+.tl-wait { background: repeating-linear-gradient(135deg, var(--faint) 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 1px var(--faint); }
+.tl-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tl-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+.tl-total { color: var(--faint); margin-left: auto; }

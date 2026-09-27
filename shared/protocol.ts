@@ -556,6 +556,9 @@ export type Perf =
       genTokens: number;
       genPerSec: number;
       genMs: number;
+      /** ms timestamps (sidecar clock): request sent, last token — for the turn timeline. */
+      sentAt?: number;
+      at?: number;
     };
 
 /** Timings of one finished llama.cpp request (what the turn footer shows). */

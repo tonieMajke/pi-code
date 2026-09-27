@@ -10,7 +10,8 @@ import { ToolCard } from "../lib/tool-card";
 import { formatDuration, formatTokens } from "../lib/format";
 import { dataUrl } from "../lib/images";
 import { groupSteps, summarizeSteps, toBlocks, type Block } from "../lib/steps";
-import { plural } from "../../shared/i18n";
+import { plural, t } from "../../shared/i18n";
+import { turnTimeline, type Span, type SpanKind } from "../lib/timeline";
 import { Lightbox } from "./Lightbox";
 
 const REMARK = [remarkGfm, remarkBreaks];
@@ -155,6 +156,7 @@ function AssistantTurn({
   awaiting: Set<string>;
   onExecutePlan?: () => void;
 }) {
+  const [showTimeline, setShowTimeline] = useState(false);
   const blocks = groupSteps(toBlocks(parts), open, (i) => hiddenReply(parts, i));
   const text = parts
     .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
@@ -214,9 +216,10 @@ function AssistantTurn({
         <div className="msg-actions">
           {text && <CopyButton text={text} />}
           {checkpoint && <RestoreButton checkpoint={checkpoint} onRestore={onRestore} />}
-          {stats && stats.length > 0 && <TurnStats stats={stats} />}
+          {stats && stats.length > 0 && <TurnStats stats={stats} onClick={() => setShowTimeline(!showTimeline)} open={showTimeline} />}
         </div>
       )}
+      {!open && showTimeline && <TurnTimeline parts={parts} stats={stats} />}
     </div>
   );
 }
@@ -339,7 +342,7 @@ function Thinking({
 }
 
 /** "↑ 20,6 tys. · PP 2 766 t/s · ↓ 167 · 105 t/s" — summed over the turn's requests. */
-function TurnStats({ stats }: { stats: RequestStats[] }) {
+function TurnStats({ stats, onClick, open }: { stats: RequestStats[]; onClick: () => void; open: boolean }) {
   const sum = (f: (s: RequestStats) => number) => stats.reduce((a, s) => a + f(s), 0);
   const promptTokens = sum((s) => s.promptTokens);
   const promptMs = sum((s) => s.promptMs);
@@ -356,13 +359,62 @@ function TurnStats({ stats }: { stats: RequestStats[] }) {
     )
     .join("\n");
   return (
-    <span className="turn-stats" title={`${stats.length} zapytań do modelu\n${detail}`}>
+    <button className={`turn-stats ${open ? "on" : ""}`} onClick={onClick} aria-expanded={open} title={`${stats.length} zapytań do modelu — kliknij: oś czasu tury\n${detail}`}>
       <span>↑ {formatTokens(promptTokens)}</span>
       {cache > 0 && <span className="dim">cache {formatTokens(cache)}</span>}
       {/* tiny cached prompts are all overhead — their "speed" is noise */}
       {pp > 0 && promptTokens >= 512 && <span>PP {Math.round(pp)} t/s</span>}
       <span>↓ {formatTokens(genTokens)}</span>
       {tg > 0 && <span>{tg.toFixed(1).replace(".", ",")} t/s</span>}
-    </span>
+    </button>
+  );
+}
+
+const SPAN_NAMES: Record<SpanKind, string> = {
+  prompt: "przetwarzanie promptu",
+  gen: "generowanie",
+  tool: "narzędzia",
+  wait: "czekanie na zgodę",
+};
+
+/** Where the turn's time went, on two lanes: the model and the tools. */
+function TurnTimeline({ parts, stats }: { parts: Part[]; stats?: RequestStats[] }) {
+  const tl = turnTimeline(parts, stats);
+  if (!tl) return null;
+  const span = Math.max(1, tl.end - tl.start);
+  const lane = (spans: Span[]) => (
+    <div className="tl-lane">
+      {spans.map((s, i) => (
+        <span
+          key={i}
+          className={`tl-span tl-${s.kind}`}
+          style={{ left: `${((s.start - tl.start) / span) * 100}%`, width: `max(2px, ${((s.end - s.start) / span) * 100}%)` }}
+          title={`${t(SPAN_NAMES[s.kind])} · ${s.label} · ${formatDuration(s.end - s.start)}`}
+        />
+      ))}
+    </div>
+  );
+  const kinds = (Object.keys(SPAN_NAMES) as SpanKind[]).filter((k) => tl.totals[k] > 0);
+  return (
+    <div className="timeline">
+      {tl.end > tl.start && (
+        <div className="tl-lanes">
+          <span className="tl-name">{t("model")}</span>
+          {lane(tl.model)}
+          {tl.tools.length > 0 && <span className="tl-name">{t("narzędzia")}</span>}
+          {tl.tools.length > 0 && lane(tl.tools)}
+        </div>
+      )}
+      <div className="tl-legend">
+        {kinds.map((k) => (
+          <span key={k}>
+            <i className={`tl-dot tl-${k}`} />
+            {t(SPAN_NAMES[k])} {formatDuration(tl.totals[k])}
+          </span>
+        ))}
+        {tl.end > tl.start && <span className="tl-total">{t("cała tura")} {formatDuration(tl.end - tl.start)}</span>}
+        {!(tl.end > tl.start) && <span className="tl-total">{t("bez osi czasu — tura sprzed tej wersji")}</span>}
+      </div>
+    </div>
   );
 }

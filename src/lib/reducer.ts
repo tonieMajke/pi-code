@@ -29,6 +29,8 @@ export interface ToolItem {
   /** ms timestamps; absent for tools restored from history. */
   start?: number;
   end?: number;
+  /** Parked on the permission prompt: [asked, answered]. */
+  wait?: [number, number?];
 }
 
 export type Part =
@@ -411,9 +413,15 @@ export function reducer(state: State, action: Action): State {
           return {
             ...state,
             approvals: [...state.approvals, { toolCallId: e.toolCallId, toolName: e.toolName, args: e.args }],
+            messages: at === undefined ? state.messages : mapTool(state.messages, e.toolCallId, (t) => ({ ...t, wait: [at] })),
           };
         case "approval_done":
-          return { ...state, approvals: state.approvals.filter((a) => a.toolCallId !== e.toolCallId) };
+          return {
+            ...state,
+            approvals: state.approvals.filter((a) => a.toolCallId !== e.toolCallId),
+            messages:
+              at === undefined ? state.messages : mapTool(state.messages, e.toolCallId, (t) => (t.wait ? { ...t, wait: [t.wait[0], at] } : t)),
+          };
         case "ui_request":
           return { ...state, dialogs: [...state.dialogs, e.request] };
         case "ui_done":

@@ -157,6 +157,8 @@ async function consume(stream: ReadableStream<Uint8Array>, req: { ctx: RequestCo
         genTokens,
         genPerSec: genMs > 0 ? (genTokens / genMs) * 1000 : 0,
         genMs,
+        sentAt: req.sentAt,
+        at: Date.now(),
       };
       emit(done, true);
       try {
@@ -229,6 +231,8 @@ async function consumeTimed(stream: ReadableStream<Uint8Array>, req: { ctx: Requ
         genTokens,
         genPerSec: genMs > 0 && chunks > 1 ? ((chunks - 1) / genMs) * 1000 : 0,
         genMs,
+        sentAt: req.sentAt,
+        at: Date.now(),
       };
       listener?.(done, req.ctx);
       try {

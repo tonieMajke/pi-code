@@ -307,4 +307,11 @@ export const EN: Record<string, string> = {
   "przerwij": "stop",
   "Otwórz ostatnią sesję w {path}": "Open the latest chat in {path}",
   "Nowa sesja w tym projekcie": "New chat in this project",
+  "model": "model",
+  "narzędzia": "tools",
+  "cała tura": "whole turn",
+  "bez osi czasu — tura sprzed tej wersji": "no timeline — a turn from before this version",
+  "przetwarzanie promptu": "prompt processing",
+  "generowanie": "generation",
+  "czekanie na zgodę": "waiting for approval",
 };
