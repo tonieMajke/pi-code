@@ -7,29 +7,43 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
-/// Sidecar handle: stdin is shared with commands, stdout is read on a
-/// dedicated thread (kept alive there to avoid EOF on drop).
+/// Sidecar handle: stdin is shared with commands, stdout is read on a dedicated thread.
+/// When the sidecar dies on its own, that thread tells the UI (`pi:down`), starts a new one
+/// and says so (`pi:up`) — the UI then boots again and reopens its session.
 pub struct Sidecar {
     stdin: Mutex<Option<std::process::ChildStdin>>,
     child: Mutex<Option<std::process::Child>>,
+    /// The app is quitting: a closed stdout is expected, not a crash.
+    exiting: AtomicBool,
+    /// Recent automatic restarts, to give up on a sidecar that dies right away.
+    restarts: Mutex<Vec<std::time::Instant>>,
+}
+
+/// Wait up to `ms` for the process to end, then kill its whole process group — in dev that is
+/// pnpm → tsx → node, plus MCP servers and tool processes it started.
+fn reap(mut child: std::process::Child, ms: u64) -> Option<std::process::ExitStatus> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+    let mut status = None;
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(s)) = child.try_wait() {
+            status = Some(s);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let _ = Command::new("kill").args(["-KILL", "--", &format!("-{}", child.id())]).status();
+    let _ = child.kill();
+    status.or_else(|| child.wait().ok())
 }
 
 impl Sidecar {
-    /// App exit: close stdin (the sidecar leaves on EOF), give it a moment, then kill its whole
-    /// process group — in dev that is pnpm → tsx → node, plus MCP servers and tool processes.
+    /// App exit: close stdin (the sidecar leaves on EOF), give it a moment, then kill the group.
     fn stop(&self) {
+        self.exiting.store(true, Ordering::SeqCst);
         drop(self.stdin.lock().ok().and_then(|mut s| s.take()));
-        let Some(mut child) = self.child.lock().ok().and_then(|mut c| c.take()) else { return };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
-        while std::time::Instant::now() < deadline {
-            if let Ok(Some(_)) = child.try_wait() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+        if let Some(child) = self.child.lock().ok().and_then(|mut c| c.take()) {
+            reap(child, 1500);
         }
-        let _ = Command::new("kill").args(["-KILL", "--", &format!("-{}", child.id())]).status();
-        let _ = child.kill();
-        let _ = child.wait();
     }
 }
 
@@ -130,7 +144,7 @@ fn clean_sidecar_env(cmd: &mut Command) {
 
 /// Dev: `pnpm sidecar` (tsx) from the project root. Release (AppImage): the esbuild bundle
 /// from the app resources, run by `$PI_CODE_NODE` or the system `node`.
-fn sidecar_command(app: &tauri::App) -> Command {
+fn sidecar_command(app: &AppHandle) -> Command {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     if cfg!(debug_assertions) {
         let mut cmd = Command::new("pnpm");
@@ -152,8 +166,67 @@ fn sidecar_command(app: &tauri::App) -> Command {
     cmd
 }
 
-fn log_sidecar_started(_app: &tauri::App) {
-    eprintln!("[sidecar] spawned, cwd={:?}", std::env::current_dir().ok());
+/// Start a sidecar, hand its stdin/child to the state and pump its stdout into "pi:out".
+fn start_sidecar(app: &AppHandle) -> std::io::Result<()> {
+    let mut cmd = sidecar_command(app);
+    // Own process group, so exit can take down everything the sidecar started.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()?;
+    let stdin = child.stdin.take().expect("sidecar stdin");
+    let stdout = child.stdout.take().expect("sidecar stdout");
+    eprintln!("[sidecar] spawned, pid={}", child.id());
+    let state = app.state::<Sidecar>();
+    *state.stdin.lock().unwrap() = Some(stdin);
+    *state.child.lock().unwrap() = Some(child);
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if handle.emit("pi:out", line).is_err() {
+                return;
+            }
+        }
+        sidecar_died(&handle);
+    });
+    Ok(())
+}
+
+fn sidecar_died(app: &AppHandle) {
+    let state = app.state::<Sidecar>();
+    if state.exiting.load(Ordering::SeqCst) {
+        return;
+    }
+    drop(state.stdin.lock().ok().and_then(|mut s| s.take()));
+    let status = state.child.lock().ok().and_then(|mut c| c.take()).and_then(|c| reap(c, 1000));
+    let why = match status.and_then(|s| s.code()) {
+        Some(code) => format!("kod wyjścia {code}"),
+        None => "zabity sygnałem".to_string(),
+    };
+    eprintln!("[sidecar] died: {why}");
+    let now = std::time::Instant::now();
+    let give_up = {
+        let mut r = state.restarts.lock().unwrap();
+        r.retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(60));
+        r.push(now);
+        r.len() > 3
+    };
+    let _ = app.emit("pi:down", serde_json::json!({ "why": why, "restarting": !give_up }));
+    if give_up {
+        return;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    match start_sidecar(app) {
+        Ok(()) => {
+            let _ = app.emit("pi:up", ());
+        }
+        Err(e) => {
+            let _ = app.emit("pi:down", serde_json::json!({ "why": format!("nie da się uruchomić: {e}"), "restarting": false }));
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -175,41 +248,13 @@ pub fn run() {
                 eprintln!("[tray] unavailable: {e}");
                 app.state::<CloseToTray>().0.store(false, Ordering::Relaxed);
             }
-            let mut cmd = sidecar_command(app);
-            // Own process group, so exit can take down everything the sidecar started.
-            #[cfg(unix)]
-            std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
-            let mut child = cmd
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
-                .spawn()
-                .expect("failed to spawn sidecar");
-
-            let stdin = child.stdin.take().expect("sidecar stdin");
-            let stdout = child.stdout.take().expect("sidecar stdout");
-
-            log_sidecar_started(app);
-
             app.manage(Sidecar {
-                stdin: Mutex::new(Some(stdin)),
-                child: Mutex::new(Some(child)),
+                stdin: Mutex::new(None),
+                child: Mutex::new(None),
+                exiting: AtomicBool::new(false),
+                restarts: Mutex::new(Vec::new()),
             });
-
-            // stdout lines -> "pi:out" events (JSONL, one event per line)
-            let handle: AppHandle = app.handle().clone();
-            std::thread::spawn(move || {
-                let reader = BufReader::new(stdout);
-                for line in reader.lines().flatten() {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    if handle.emit("pi:out", line).is_err() {
-                        break;
-                    }
-                }
-                eprintln!("[sidecar] stdout EOF");
-            });
+            start_sidecar(app.handle()).expect("failed to spawn sidecar");
 
             Ok(())
         })

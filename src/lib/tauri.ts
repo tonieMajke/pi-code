@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { SidecarOut } from "../../shared/protocol";
-import { withId, type PiTransport } from "./transport";
+import { withId, type PiTransport, type SidecarDown } from "./transport";
 
 /**
  * In-app transport: the Rust shell spawns the sidecar directly (stdio),
@@ -12,6 +12,8 @@ export function createTauriTransport(): PiTransport {
   let unlisten: (() => void) | null = null;
   const listeners = new Set<(m: SidecarOut) => void>();
   const openListeners = new Set<() => void>();
+  const downListeners = new Set<(d: SidecarDown) => void>();
+  const offs: Promise<() => void>[] = [];
 
   void listen<string>("pi:out", (event) => {
     let msg: SidecarOut;
@@ -27,10 +29,14 @@ export function createTauriTransport(): PiTransport {
       openListeners.forEach((l) => l());
     })
     .catch(() => undefined);
+  // The Rust shell restarts a sidecar that died: pi:down now, pi:up once the new one runs.
+  offs.push(listen<SidecarDown>("pi:down", (e) => downListeners.forEach((l) => l(e.payload))));
+  offs.push(listen("pi:up", () => openListeners.forEach((l) => l())));
 
   return {
     send(cmd) {
-      void invoke("pi_send", { line: JSON.stringify(withId(cmd, nextId++)) }).catch(() => undefined);
+      // A failed write means the sidecar is gone; pi:down reports it.
+      void invoke("pi_send", { line: JSON.stringify(withId(cmd, nextId++)) }).catch((e) => console.warn("pi_send:", e));
     },
     onMessage(cb) {
       listeners.add(cb);
@@ -45,9 +51,16 @@ export function createTauriTransport(): PiTransport {
         openListeners.delete(cb);
       };
     },
+    onDown(cb) {
+      downListeners.add(cb);
+      return () => {
+        downListeners.delete(cb);
+      };
+    },
     close() {
       unlisten?.();
       unlisten = null;
+      offs.forEach((p) => void p.then((off) => off()).catch(() => undefined));
     },
   };
 }

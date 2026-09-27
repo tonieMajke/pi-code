@@ -8,7 +8,29 @@ export interface PiTransport {
   onMessage(cb: (msg: SidecarOut) => void): () => void;
   /** Fired on every (re)connect — safe point to send the boot sequence. */
   onOpen(cb: () => void): () => void;
+  /** The sidecar died or the link to it broke; `restarting` = a new one is on its way (onOpen follows). */
+  onDown(cb: (down: SidecarDown) => void): () => void;
   close(): void;
+}
+
+export interface SidecarDown {
+  why: string;
+  restarting: boolean;
+}
+
+/** WS close code the dev bridge uses when its sidecar exited (reason: JSON SidecarDown). */
+export const CLOSE_SIDECAR_EXIT = 4002;
+
+export function downFromClose(code: number, reason: string): SidecarDown {
+  if (code === CLOSE_SIDECAR_EXIT) {
+    try {
+      const d = JSON.parse(reason) as Partial<SidecarDown>;
+      return { why: String(d.why ?? ""), restarting: d.restarting !== false };
+    } catch {
+      return { why: reason, restarting: true };
+    }
+  }
+  return { why: "połączenie z mostkiem zerwane", restarting: true };
 }
 
 // Explicit per-variant construction: spreading a union does not preserve
@@ -170,11 +192,14 @@ export function createWsTransport(url: string): PiTransport {
   let attempt = 0;
   const listeners = new Set<(m: SidecarOut) => void>();
   const openListeners = new Set<() => void>();
+  const downListeners = new Set<(d: SidecarDown) => void>();
+  let wasOpen = false;
 
   function connect(): void {
     ws = new WebSocket(url);
     ws.onopen = () => {
       attempt = 0;
+      wasOpen = true;
       openListeners.forEach((l) => l());
     };
     ws.onmessage = (e) => {
@@ -186,8 +211,13 @@ export function createWsTransport(url: string): PiTransport {
       }
       listeners.forEach((l) => l(msg));
     };
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       if (intentional) return;
+      if (wasOpen) {
+        wasOpen = false;
+        const down = downFromClose(e.code, e.reason);
+        downListeners.forEach((l) => l(down));
+      }
       const delay = Math.min(4000, 500 * 2 ** attempt++);
       setTimeout(connect, delay);
     };
@@ -210,6 +240,12 @@ export function createWsTransport(url: string): PiTransport {
       openListeners.add(cb);
       return () => {
         openListeners.delete(cb);
+      };
+    },
+    onDown(cb) {
+      downListeners.add(cb);
+      return () => {
+        downListeners.delete(cb);
       };
     },
     close() {

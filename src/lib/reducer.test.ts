@@ -301,3 +301,23 @@ describe("background sessions", () => {
     expect(s.busy).toBe(false);
   });
 });
+
+describe("sidecar gone", () => {
+  it("ends the run: no busy, approvals, dialogs or spinning tools left behind", () => {
+    let s = reducer({ ...initialState, connected: true }, { type: "user", text: "a", at: 100 });
+    s = reducer(s, ev({ kind: "tool_start", toolCallId: "t1", toolName: "bash", args: {} }, 110));
+    s = reducer(s, { type: "user", text: "steer", at: 200 });
+    s = reducer(s, ev({ kind: "approval_request", toolCallId: "t1", toolName: "bash", args: {} }));
+    expect(s.approvals).toHaveLength(1);
+    s = reducer(s, { type: "connected", ok: false });
+    expect(s.connected).toBe(false);
+    expect(s.busy).toBe(false);
+    expect(s.busySince).toBeNull();
+    expect(s.approvals).toEqual([]);
+    expect(s.pending).toEqual([]);
+    expect(s.messages.filter((m) => m.role === "user").map((m) => (m.role === "user" ? m.text : ""))).toEqual(["a", "steer"]);
+    const running = s.messages.flatMap((m) => (m.role === "assistant" ? tools(m.parts) : [])).filter((x) => x.status === "running");
+    expect(running).toEqual([]);
+  });
+});
+

@@ -293,4 +293,9 @@ export const EN: Record<string, string> = {
   "w tej chwili równa cisza — wyciszone wejście albo odszumianie (np. EasyEffects) wycina ciszę; powiedz coś i odśwież": "pure silence right now — a muted input, or noise suppression (e.g. EasyEffects) cutting silence; say something and refresh",
   "cisza": "silent",
   "Nagrywa {bin} (16 kHz mono, do 12 min). Klucze API leżą w pi-gui-voice-keys.json (tylko dla Ciebie), nie w pi-gui.json.": "Recorded by {bin} (16 kHz mono, up to 12 min). API keys live in pi-gui-voice-keys.json (readable only by you), not in pi-gui.json.",
+  "pi działa ponownie. Przerwana odpowiedź nie została dokończona — napisz „dalej”, żeby wznowić.": "pi is running again. The interrupted reply was not finished — write “continue” to resume.",
+  "pi przestał działać": "pi stopped running",
+  "Proces pi (sidecar) zakończył się ({why}) — uruchamiam go ponownie…": "The pi process (sidecar) ended ({why}) — starting it again…",
+  "Proces pi (sidecar) zakończył się ({why}) i nie da się go podnieść. Uruchom Pi Code ponownie.": "The pi process (sidecar) ended ({why}) and will not come back. Restart Pi Code.",
+  "pi działa ponownie.": "pi is running again.",
 };

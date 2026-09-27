@@ -9,27 +9,40 @@ import { WebSocketServer } from "ws";
 const PORT = process.env.PORT ? Number(process.env.PORT) : 9877;
 const CWD = process.env.CWD;
 
-const sidecar = spawn("pnpm", ["sidecar"], {
-  cwd: new URL("..", import.meta.url).pathname,
-  env: { ...process.env, ...(CWD ? { PI_GUI_CWD: CWD } : {}) },
-  stdio: ["pipe", "pipe", "inherit"],
-});
+let sidecar;
+/** Recent automatic restarts: a sidecar that dies right away is not restarted forever. */
+const restarts = [];
 
-let buf = "";
-sidecar.stdout.on("data", (chunk) => {
-  buf += chunk.toString();
-  let idx;
-  while ((idx = buf.indexOf("\n")) !== -1) {
-    const line = buf.slice(0, idx);
-    buf = buf.slice(idx + 1);
-    if (line.trim()) accepted.forEach((c) => c.readyState === 1 && c.send(line));
-  }
-});
-
-sidecar.on("exit", (code) => {
-  console.error(`sidecar exited: ${code}`);
-  process.exit(code ?? 0);
-});
+function startSidecar() {
+  sidecar = spawn("pnpm", ["sidecar"], {
+    cwd: new URL("..", import.meta.url).pathname,
+    env: { ...process.env, ...(CWD ? { PI_GUI_CWD: CWD } : {}) },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  let buf = "";
+  sidecar.stdout.on("data", (chunk) => {
+    buf += chunk.toString();
+    let idx;
+    while ((idx = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, idx);
+      buf = buf.slice(idx + 1);
+      if (line.trim()) accepted.forEach((c) => c.readyState === 1 && c.send(line));
+    }
+  });
+  // Like the Tauri shell: a dead sidecar is restarted and the windows are told (close code 4002,
+  // they reconnect and boot again). Three deaths in a minute and the bridge gives up.
+  sidecar.on("exit", (code, signal) => {
+    const why = code !== null ? `kod wyjścia ${code}` : `sygnał ${signal}`;
+    console.error(`sidecar exited: ${why}`);
+    const now = Date.now();
+    while (restarts.length && now - restarts[0] > 60000) restarts.shift();
+    restarts.push(now);
+    const giveUp = restarts.length > 3;
+    for (const ws of wss.clients) ws.close(4002, JSON.stringify({ why, restarting: !giveUp }).slice(0, 120));
+    if (giveUp) process.exit(code ?? 1);
+    setTimeout(startSidecar, 500);
+  });
+}
 
 /**
  * One window per bridge. A second client (a headless browser a model started, another tab) would
@@ -43,7 +56,7 @@ const accepted = new Set();
 const wss = new WebSocketServer({ host: "127.0.0.1", port: PORT });
 wss.on("connection", (ws) => {
   const held = [];
-  const forward = (line) => line.trim() && sidecar.stdin.write(`${line}\n`);
+  const forward = (line) => line.trim() && sidecar.stdin.writable && sidecar.stdin.write(`${line}\n`);
   const admit = () => {
     accepted.add(ws);
     held.splice(0).forEach(forward);
@@ -60,4 +73,5 @@ wss.on("connection", (ws) => {
   }, 1000);
 });
 
+startSidecar();
 console.error(`ws bridge on ws://127.0.0.1:${PORT}`);

@@ -262,8 +262,22 @@ export function reducer(state: State, action: Action): State {
       return { ...state, models: action.models };
     case "history":
       return { ...state, messages: historyMessages(action.items) };
-    case "connected":
-      return { ...state, connected: action.ok };
+    case "connected": {
+      if (action.ok) return { ...state, connected: true };
+      // The sidecar is gone: nothing is running any more and nothing will answer.
+      const at = Date.now();
+      const flushed = flushPending(state, state.pending.length, at);
+      return {
+        ...flushed,
+        connected: false,
+        busy: false,
+        busySince: null,
+        perf: null,
+        approvals: [],
+        dialogs: [],
+        messages: flushed.messages.map((m) => (m.role === "assistant" ? settleTurn(m, at) : m)),
+      };
+    }
     case "clear":
       return { ...state, messages: [], error: null, pending: [], approvals: [], dialogs: [], perf: null, stuck: null };
     case "restored":

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientCommand } from "../../shared/protocol";
-import { createWsTransport, withId } from "./transport";
+import { CLOSE_SIDECAR_EXIT, createWsTransport, downFromClose, withId } from "./transport";
 
 describe("withId", () => {
   it("builds a valid command for every variant", () => {
@@ -34,7 +34,7 @@ class FakeWebSocket {
   readyState = FakeWebSocket.OPEN;
   onopen: (() => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((e: { code: number; reason: string }) => void) | null = null;
   sent: string[] = [];
 
   constructor(url: string) {
@@ -47,12 +47,12 @@ class FakeWebSocket {
   }
   close() {
     this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.({ code: 1000, reason: "" });
   }
   /** Simulate the server dropping the connection. */
-  drop() {
+  drop(code = 1006, reason = "") {
     this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.({ code, reason });
   }
   /** Simulate the socket finishing its handshake. */
   fireOpen() {
@@ -103,5 +103,31 @@ describe("createWsTransport", () => {
     FakeWebSocket.instances[1].fireOpen();
     expect(opens).toBe(2);
     t.close();
+  });
+
+  it("reports a dead sidecar once per connection, with the bridge's reason", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.useFakeTimers();
+    const t = createWsTransport("ws://127.0.0.1:9876");
+    const downs: unknown[] = [];
+    t.onDown((d) => downs.push(d));
+    FakeWebSocket.instances[0].drop(); // never opened: the bridge is just not up yet
+    expect(downs).toEqual([]);
+    await vi.advanceTimersByTimeAsync(500);
+    FakeWebSocket.instances[1].fireOpen();
+    FakeWebSocket.instances[1].drop(CLOSE_SIDECAR_EXIT, JSON.stringify({ why: "kod wyjścia 1", restarting: true }));
+    expect(downs).toEqual([{ why: "kod wyjścia 1", restarting: true }]);
+    await vi.advanceTimersByTimeAsync(500);
+    FakeWebSocket.instances[2].drop(); // reconnect attempt that fails: not a second "down"
+    expect(downs).toHaveLength(1);
+    t.close();
+  });
+});
+
+describe("downFromClose", () => {
+  it("reads the bridge's reason, anything else is a broken link", () => {
+    expect(downFromClose(CLOSE_SIDECAR_EXIT, JSON.stringify({ why: "sygnał SIGKILL", restarting: false }))).toEqual({ why: "sygnał SIGKILL", restarting: false });
+    expect(downFromClose(CLOSE_SIDECAR_EXIT, "garbage")).toEqual({ why: "garbage", restarting: true });
+    expect(downFromClose(1006, "")).toEqual({ why: "połączenie z mostkiem zerwane", restarting: true });
   });
 });

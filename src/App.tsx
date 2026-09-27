@@ -140,6 +140,14 @@ export default function App() {
   const [limitAsk, setLimitAsk] = useState<{ block: BackgroundBlock; retry: ClientCommandInput } | null>(null);
   const sessionIdRef = useRef("");
   sessionIdRef.current = state.sessionId;
+  const sessionPathRef = useRef("");
+  sessionPathRef.current = state.sessionPath;
+  const sessionsRef = useRef(state.sessions);
+  sessionsRef.current = state.sessions;
+  /** The sidecar died: session to reopen once a new one is up ("" = none; null = not down), and whether a run was cut. */
+  const reopenRef = useRef<{ path: string; cut: boolean } | null>(null);
+  const busyRef = useRef(false);
+  busyRef.current = state.busy;
   const lastOpenRef = useRef("");
   /**
    * Session being left: its events already in the pipe when the switch started would land in
@@ -426,14 +434,45 @@ export default function App() {
       tp.send({ cmd: "appearance_get" });
       tp.send({ cmd: "init", lang: lang() });
       tp.send({ cmd: "commands_list" });
+      // After a sidecar restart: back to the session that was on screen (commands run in order,
+      // so the history below is already the reopened session's).
+      const reopen = reopenRef.current;
+      reopenRef.current = null;
+      if (reopen) {
+        if (reopen.path) {
+          lastOpenRef.current = reopen.path;
+          tp.send({ cmd: "session_open", path: reopen.path });
+        }
+        afterHistoryRef.current = [
+          reopen.cut
+            ? { role: "info", text: t("pi działa ponownie. Przerwana odpowiedź nie została dokończona — napisz „dalej”, żeby wznowić."), level: "warning" }
+            : { role: "info", text: t("pi działa ponownie."), level: "info" },
+        ];
+      }
       tp.send({ cmd: "history" });
       tp.send({ cmd: "sessions_list" });
       tp.send({ cmd: "models_list" });
       tp.send({ cmd: "sidebar_get" });
     });
+    const offDown = tp.onDown((down) => {
+      // Saved sessions only: an unsaved one has no file to reopen.
+      const path = sessionPathRef.current;
+      reopenRef.current = { path: path && sessionsRef.current.some((x) => x.path === path) ? path : "", cut: busyRef.current };
+      for (const queue of requestsRef.current.values()) queue.splice(0).forEach((r) => r.reject(new Error(t("pi przestał działać"))));
+      openingRef.current = false;
+      queuedOpenRef.current = null;
+      setSwitching(false);
+      dispatch({ type: "connected", ok: false });
+      const text = down.restarting
+        ? t("Proces pi (sidecar) zakończył się ({why}) — uruchamiam go ponownie…", { why: down.why })
+        : t("Proces pi (sidecar) zakończył się ({why}) i nie da się go podnieść. Uruchom Pi Code ponownie.", { why: down.why });
+      dispatch({ type: "info", text, level: "error" });
+      toast(text, down.restarting ? "warning" : "error");
+    });
     return () => {
       off();
       offOpen();
+      offDown();
       tp.close();
       transportRef.current = null;
       imageStore.setFetcher(null);
