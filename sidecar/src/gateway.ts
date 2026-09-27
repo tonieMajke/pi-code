@@ -723,6 +723,7 @@ export class PiGateway {
       name: m.name ?? m.id,
       contextWindow: m.contextWindow ?? 0,
       vision: m.input?.includes("image") ?? false,
+      local: isLocalBaseUrl(m.baseUrl),
     }));
   }
 

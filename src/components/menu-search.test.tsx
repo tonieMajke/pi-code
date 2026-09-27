@@ -36,21 +36,24 @@ const labels = () => [...document.querySelectorAll(".menu-item .menu-label")].ma
 const groups = () => [...document.querySelectorAll(".menu-group")].map((e) => e.textContent);
 
 describe("model menu: groups and search", () => {
-  it("keeps a provider's models together, in the order providers first appear", () => {
+  it("keeps a provider's models together, local providers first", () => {
     expect(groupByProvider(models).map((m) => m.id)).toEqual([
       "Swift1.5-Qwen3.8-27B-Q6_K-2GPU",
       "Flash-Next-Q4_K_XL",
+      "Swift-Flash-Next-NVFP4",
       "anthropic/claude-sonnet-5",
       "qwen/qwen3-coder",
-      "Swift-Flash-Next-NVFP4",
     ]);
+    // A custom endpoint on this machine counts as local by its address (the sidecar's flag).
+    const custom = [{ provider: "openrouter" }, { provider: "my-box", local: true }, { provider: "anthropic" }];
+    expect(groupByProvider(custom).map((m) => m.provider)).toEqual(["my-box", "openrouter", "anthropic"]);
     expect(providerLabel("llama-server")).toBe("llama.cpp");
     expect(providerLabel("my-box")).toBe("my-box");
   });
 
   it("shows one header per provider", () => {
     open();
-    expect(groups()).toEqual(["llama.cpp", "OpenRouter", "FreeToken"]);
+    expect(groups()).toEqual(["llama.cpp", "FreeToken", "OpenRouter"]);
   });
 
   it("filters by every word, in the model name or the provider", () => {

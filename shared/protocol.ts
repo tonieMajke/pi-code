@@ -527,6 +527,8 @@ export type ModelSummary = {
   contextWindow: number;
   /** Accepts images (the visual critic can look instead of reading an outline). */
   vision?: boolean;
+  /** Served from this machine or the private network (llama.cpp, FreeToken, vLLM…). */
+  local?: boolean;
 };
 
 export type ToolResultSummary = {
