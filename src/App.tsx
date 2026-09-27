@@ -325,7 +325,7 @@ export default function App() {
         if (msg.cmd === "session_handoff") {
           dispatch({ type: "event", event: { kind: "settled" }, at: Date.now() });
           if (/przerwany/.test(msg.error ?? "")) {
-            dispatch({ type: "info", text: "Handoff przerwany — zostajesz w tej sesji.", level: "warning" });
+            dispatch({ type: "info", text: t("Handoff przerwany — zostajesz w tej sesji."), level: "warning" });
             return;
           }
         }
@@ -359,7 +359,7 @@ export default function App() {
           setLayoutState((l) => moveToGroup(l, path, null));
           if (active) resetViewRef.current();
           tp.send({ cmd: "sessions_list" });
-          toast("Czat przeniesiony do kosza systemowego.");
+          toast(t("Czat przeniesiony do kosza systemowego."));
           return;
         }
         case "history_image": {
@@ -372,14 +372,14 @@ export default function App() {
           return;
         case "reload":
           setPiCommands(msg.result as SlashCommandInfo[]);
-          dispatch({ type: "info", text: "Przeładowano rozszerzenia, skille, szablony i pliki kontekstu." });
+          dispatch({ type: "info", text: t("Przeładowano rozszerzenia, skille, szablony i pliki kontekstu.") });
           return;
         case "fork_points":
           setForkPoints(msg.result as ForkPoint[]);
           return;
         case "session_fork":
           setInput((msg.result as { text: string }).text);
-          afterHistoryRef.current = [{ role: "info", text: "Nowa sesja od wybranej wiadomości — wiadomość czeka w polu do poprawienia.", level: "info" }];
+          afterHistoryRef.current = [{ role: "info", text: t("Nowa sesja od wybranej wiadomości — wiadomość czeka w polu do poprawienia."), level: "info" }];
           tp.send({ cmd: "history" });
           tp.send({ cmd: "sessions_list" });
           requestAnimationFrame(() => inputRef.current?.focus());
@@ -389,17 +389,17 @@ export default function App() {
           dispatch({ type: "event", event: { kind: "settled" }, at: Date.now() });
           resetView();
           setInput(prompt);
-          const origin = from ? `sesji „${from}”` : "poprzedniej sesji";
-          afterHistoryRef.current = [
-            { role: "info", text: `Handoff z ${origin}: model napisał prompt dla tej nowej sesji — czeka w polu wiadomości. Popraw go i wyślij Enterem.`, level: "info" },
-          ];
+          const text = from
+            ? t("Handoff z sesji „{from}”: model napisał prompt dla tej nowej sesji — czeka w polu wiadomości. Popraw go i wyślij Enterem.", { from })
+            : t("Handoff z poprzedniej sesji: model napisał prompt dla tej nowej sesji — czeka w polu wiadomości. Popraw go i wyślij Enterem.");
+          afterHistoryRef.current = [{ role: "info", text, level: "info" }];
           tp.send({ cmd: "history" });
           tp.send({ cmd: "sessions_list" });
           requestAnimationFrame(() => inputRef.current?.focus());
           return;
         }
         case "session_clone":
-          afterHistoryRef.current = [{ role: "info", text: "To jest kopia sesji — oryginał został bez zmian.", level: "info" }];
+          afterHistoryRef.current = [{ role: "info", text: t("To jest kopia sesji — oryginał został bez zmian."), level: "info" }];
           tp.send({ cmd: "history" });
           tp.send({ cmd: "sessions_list" });
           return;
@@ -407,7 +407,7 @@ export default function App() {
           dispatch({ type: "info", text: formatStats(msg.result as SessionStats) });
           return;
         case "export_html":
-          dispatch({ type: "info", text: `Zapisano sesję jako HTML:\n\n\`${(msg.result as { path: string }).path}\`` });
+          dispatch({ type: "info", text: `${t("Zapisano sesję jako HTML:")}\n\n\`${(msg.result as { path: string }).path}\`` });
           return;
         case "models_list":
           dispatch({ type: "models", models: msg.result as ModelSummary[] });
@@ -549,7 +549,7 @@ export default function App() {
         .then((dataUrl) => send({ cmd: "appearance_image", dataUrl }))
         .catch((err) => {
           setImageBusy(false);
-          dispatch({ type: "error", error: `obraz tła: ${err instanceof Error ? err.message : String(err)}` });
+          dispatch({ type: "error", error: `${t("obraz tła")}: ${err instanceof Error ? err.message : String(err)}` });
         });
     },
     [send],
@@ -614,12 +614,12 @@ export default function App() {
       last?.role === "assistant"
         ? last.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join(" ")
         : "";
-    send({ cmd: "notify", title: "pi skończył", body: text.replace(/\s+/g, " ").slice(0, 140) || "Gotowe." });
+    send({ cmd: "notify", title: t("pi skończył"), body: text.replace(/\s+/g, " ").slice(0, 140) || t("Gotowe.") });
   }, [state.settledCount, state.messages, send]);
   const approvalCount = state.approvals.length;
   useEffect(() => {
     if (approvalCount > 0 && !document.hasFocus() && prefsRef.current.notifications) {
-      send({ cmd: "notify", title: "pi czeka na zgodę", body: `${state.approvals[0].toolName}: ${JSON.stringify(state.approvals[0].args).slice(0, 120)}` });
+      send({ cmd: "notify", title: t("pi czeka na zgodę"), body: `${state.approvals[0].toolName}: ${JSON.stringify(state.approvals[0].args).slice(0, 120)}` });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- notify once per new request
   }, [approvalCount]);
@@ -966,11 +966,11 @@ export default function App() {
     const echo = (text = `/${name}${args ? ` ${args}` : ""}`) => dispatch({ type: "command", text });
     const info = (text: string, level: InfoLevel = "info") => dispatch({ type: "info", text, level });
     if (!entry) {
-      info(`Nie ma komendy \`/${name}\`. Wpisz \`/\`, żeby zobaczyć listę.`, "warning");
+      info(t("Nie ma komendy `/{name}`. Wpisz `/`, żeby zobaczyć listę.", { name }), "warning");
       return;
     }
     if (entry.kind !== "gui" && entry.kind !== "terminal" && state.busy) {
-      toast("Model pracuje — komendy pi uruchomisz, gdy skończy (Esc przerywa).", "warning");
+      toast(t("Model pracuje — komendy pi uruchomisz, gdy skończy (Esc przerywa)."), "warning");
       return;
     }
     done();
@@ -1013,7 +1013,7 @@ export default function App() {
       case "name":
         if (!args) {
           setInput("/name ");
-          info("Podaj nazwę: `/name Nowa nazwa`.", "warning");
+          info(t("Podaj nazwę: `/name Nowa nazwa`."), "warning");
           return;
         }
         send({ cmd: "session_rename", name: args });
@@ -1026,7 +1026,7 @@ export default function App() {
           state.models.find((x) => x.id.toLowerCase().includes(q));
         if (!args || !m) {
           setInput("/model ");
-          if (args) info(`Nie znam modelu „${args}”.`, "warning");
+          if (args) info(t("Nie znam modelu „{name}”.", { name: args }), "warning");
           return;
         }
         send({ cmd: "model_set", provider: m.provider, modelId: m.id });
@@ -1039,7 +1039,7 @@ export default function App() {
           return;
         }
         send({ cmd: "settings_set", patch: { thinkingLevel: args } });
-        toast(`Myślenie: ${args}`);
+        toast(`${t("Myślenie")}: ${args}`);
         return;
       case "mode": {
         const q = args.toLowerCase();
@@ -1066,12 +1066,12 @@ export default function App() {
       case "handoff":
         if (state.busy) {
           setInput(`/handoff${args ? ` ${args}` : ""}`);
-          toast("Model pracuje — handoff zrobisz, gdy skończy.", "warning");
+          toast(t("Model pracuje — handoff zrobisz, gdy skończy."), "warning");
           return;
         }
         // Busy until the reply: the old transcript stays up while the model writes; Esc cancels.
         dispatch({ type: "command", text: `/handoff${args ? ` ${args}` : ""}`, run: true, at: Date.now() });
-        dispatch({ type: "info", text: "Model pisze handoff do nowej sesji…" });
+        dispatch({ type: "info", text: t("Model pisze handoff do nowej sesji…") });
         send({ cmd: "session_handoff", goal: args || undefined });
         return;
       case "session":
@@ -1086,10 +1086,10 @@ export default function App() {
         const last = [...state.messages].reverse().find((m) => m.role === "assistant");
         const text = last?.role === "assistant" ? last.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("\n\n") : "";
         if (!text.trim()) {
-          toast("Nie ma jeszcze odpowiedzi do skopiowania.", "warning");
+          toast(t("Nie ma jeszcze odpowiedzi do skopiowania."), "warning");
           return;
         }
-        void copyText(text).then(() => toast("Skopiowano ostatnią odpowiedź."));
+        void copyText(text).then(() => toast(t("Skopiowano ostatnią odpowiedź.")));
         return;
       }
       case "reload":
@@ -1117,7 +1117,7 @@ export default function App() {
       case "mode":
         return MODES.map((m) => ({ key: m.id, label: m.label, hint: m.desc, active: m.id === state.mode }));
       case "fork":
-        return forkPoints?.map((f) => ({ key: f.entryId, label: f.text.replace(/\s+/g, " ").slice(0, 120) || "(pusta wiadomość)" })) ?? null;
+        return forkPoints?.map((f) => ({ key: f.entryId, label: f.text.replace(/\s+/g, " ").slice(0, 120) || t("(pusta wiadomość)") })) ?? null;
     }
   };
 
@@ -1136,30 +1136,30 @@ export default function App() {
   };
 
   const commands: Command[] = [
-    { id: "new", group: "Akcje", label: "Nowa sesja", hint: <kbd>Ctrl N</kbd>, run: () => newSession() },
-    { id: "files", group: "Akcje", label: filesOpen ? t("Ukryj pliki projektu") : t("Pokaż pliki projektu"), hint: <kbd>Ctrl Shift E</kbd>, run: () => setFilesOpen((o) => !o) },
-    { id: "changes", group: "Akcje", label: changesOpen ? "Ukryj panel zmian" : "Pokaż panel zmian", hint: <kbd>Ctrl Shift D</kbd>, run: () => setChangesOpen((o) => !o) },
-    { id: "sidebar", group: "Akcje", label: sidebarOpen ? "Zwiń panel sesji" : "Pokaż panel sesji", hint: <kbd>Ctrl B</kbd>, run: toggleSidebar },
-    { id: "settings", group: "Akcje", label: "Ustawienia", hint: <kbd>Ctrl ,</kbd>, keywords: "settings konfiguracja", run: () => setSettingsOpen(true) },
-    { id: "providers", group: "Akcje", label: t("Dostawcy modeli"), keywords: "providers api key openrouter vllm ollama klucz", run: () => openSettings("providers") },
-    { id: "memory", group: "Akcje", label: t("Pamięć"), keywords: "memory pamięć zapamiętane agents.md", run: () => openSettings("memory") },
-    { id: "welcome", group: "Akcje", label: t("Ekran powitalny"), keywords: "welcome onboarding powitanie start", run: () => void showWelcome() },
-    { id: "compact", group: "Akcje", label: "Kompaktuj kontekst", keywords: "compact", run: () => { setCompacting(true); send({ cmd: "compact" }); } },
-    { id: "stats", group: "Akcje", label: t("Statystyki modeli"), keywords: "stats statystyki prędkość t/s tokeny", run: () => setStatsOpen(true) },
-    { id: "find", group: "Akcje", label: t("Szukaj w rozmowie"), hint: <kbd>Ctrl F</kbd>, keywords: "find search znajdź", run: openFind },
+    { id: "new", group: t("Akcje"), label: t("Nowa sesja"), hint: <kbd>Ctrl N</kbd>, run: () => newSession() },
+    { id: "files", group: t("Akcje"), label: filesOpen ? t("Ukryj pliki projektu") : t("Pokaż pliki projektu"), hint: <kbd>Ctrl Shift E</kbd>, run: () => setFilesOpen((o) => !o) },
+    { id: "changes", group: t("Akcje"), label: changesOpen ? t("Ukryj panel zmian") : t("Pokaż panel zmian"), hint: <kbd>Ctrl Shift D</kbd>, run: () => setChangesOpen((o) => !o) },
+    { id: "sidebar", group: t("Akcje"), label: sidebarOpen ? t("Zwiń panel sesji") : t("Pokaż panel sesji"), hint: <kbd>Ctrl B</kbd>, run: toggleSidebar },
+    { id: "settings", group: t("Akcje"), label: t("Ustawienia"), hint: <kbd>Ctrl ,</kbd>, keywords: "settings konfiguracja", run: () => setSettingsOpen(true) },
+    { id: "providers", group: t("Akcje"), label: t("Dostawcy modeli"), keywords: "providers api key openrouter vllm ollama klucz", run: () => openSettings("providers") },
+    { id: "memory", group: t("Akcje"), label: t("Pamięć"), keywords: "memory pamięć zapamiętane agents.md", run: () => openSettings("memory") },
+    { id: "welcome", group: t("Akcje"), label: t("Ekran powitalny"), keywords: "welcome onboarding powitanie start", run: () => void showWelcome() },
+    { id: "compact", group: t("Akcje"), label: t("Kompaktuj kontekst"), keywords: "compact", run: () => { setCompacting(true); send({ cmd: "compact" }); } },
+    { id: "stats", group: t("Akcje"), label: t("Statystyki modeli"), keywords: "stats statystyki prędkość t/s tokeny", run: () => setStatsOpen(true) },
+    { id: "find", group: t("Akcje"), label: t("Szukaj w rozmowie"), hint: <kbd>Ctrl F</kbd>, keywords: "find search znajdź", run: openFind },
     ...(state.sessionPath && !state.terminalOpen
-      ? [{ id: "terminal", group: "Akcje", label: t("Otwórz sesję w terminalu"), keywords: "terminal pi tui", run: openInTerminal }]
+      ? [{ id: "terminal", group: t("Akcje"), label: t("Otwórz sesję w terminalu"), keywords: "terminal pi tui", run: openInTerminal }]
       : []),
     ...(state.terminalOpen
-      ? [{ id: "terminal-takeback", group: "Akcje", label: t("Przejmij sesję z powrotem z terminala"), keywords: "terminal pi przejmij", run: () => send({ cmd: "terminal_takeback" }) }]
+      ? [{ id: "terminal-takeback", group: t("Akcje"), label: t("Przejmij sesję z powrotem z terminala"), keywords: "terminal pi przejmij", run: () => send({ cmd: "terminal_takeback" }) }]
       : []),
-    { id: "handoff", group: "Akcje", label: "Handoff → nowa sesja", keywords: "handoff podsumowanie przekazanie", run: () => runSlash("handoff", "") },
-    ...(state.busy ? [{ id: "stop", group: "Akcje", label: "Przerwij model", hint: <kbd>Esc</kbd>, run: stop }] : []),
+    { id: "handoff", group: t("Akcje"), label: t("Handoff → nowa sesja"), keywords: "handoff podsumowanie przekazanie", run: () => runSlash("handoff", "") },
+    ...(state.busy ? [{ id: "stop", group: t("Akcje"), label: t("Przerwij model"), hint: <kbd>Esc</kbd>, run: stop }] : []),
     ...MODES.map((m) => ({
       id: `mode-${m.id}`,
-      group: "Tryb uprawnień",
+      group: t("Tryb uprawnień"),
       label: m.label,
-      hint: m.id === state.mode ? "aktywny" : m.desc,
+      hint: m.id === state.mode ? t("aktywny") : m.desc,
       keywords: "tryb mode",
       run: () => setMode(m.id),
     })),
@@ -1167,13 +1167,13 @@ export default function App() {
       id: `model-${m.provider}/${m.id}`,
       group: "Model",
       label: m.id,
-      hint: m.id === state.model ? "aktywny" : formatTokens(m.contextWindow),
+      hint: m.id === state.model ? t("aktywny") : formatTokens(m.contextWindow),
       keywords: "model",
       run: () => send({ cmd: "model_set", provider: m.provider, modelId: m.id }),
     })),
     ...state.sessions.slice(0, 200).map((s) => ({
       id: `session-${s.path}`,
-      group: "Sesje",
+      group: t("Sesje"),
       label: sessionTitle(s),
       hint: s.cwd.replace(/^\/home\/[^/]+/, "~"),
       keywords: s.cwd,
@@ -1187,7 +1187,7 @@ export default function App() {
     lastMsg.parts.some((p) => p.type === "text");
 
   const active = state.sessions.find((s) => s.path === state.sessionPath);
-  const title = state.sessionName || (active ? sessionTitle(active) : "") || firstUserText(state) || "Nowa sesja";
+  const title = state.sessionName || (active ? sessionTitle(active) : "") || firstUserText(state) || t("Nowa sesja");
 
   const composer = (
     <Composer
@@ -1261,7 +1261,7 @@ export default function App() {
       {dragging && (
         <div className="drop-overlay">
           <ImagePlus size={28} />
-          <span>Upuść obraz, żeby dołączyć go do wiadomości</span>
+          <span>{t("Upuść obraz, żeby dołączyć go do wiadomości")}</span>
         </div>
       )}
       {sidebarOpen && (
@@ -1293,7 +1293,7 @@ export default function App() {
       <main className="main">
         <header className="topbar" data-tauri-drag-region>
           {!sidebarOpen && (
-            <button className="icon-btn" onClick={toggleSidebar} title="Pokaż panel (Ctrl+B)">
+            <button className="icon-btn" onClick={toggleSidebar} title={t("Pokaż panel (Ctrl+B)")}>
               <PanelLeftOpen size={16} />
             </button>
           )}
@@ -1320,7 +1320,7 @@ export default function App() {
           <button
             className={`icon-btn ${changesOpen ? "on" : ""}`}
             onClick={() => setChangesOpen((o) => !o)}
-            title="Zmiany w projekcie (Ctrl+Shift+D)"
+            title={t("Zmiany w projekcie (Ctrl+Shift+D)")}
           >
             <FileDiff size={16} />
             {changes && changes.files.length > 0 && <span className="badge">{changes.files.length}</span>}
@@ -1332,7 +1332,7 @@ export default function App() {
           )}
           <span className={`conn ${state.connected ? "on" : ""}`} title={inTauri() ? "transport: tauri" : "transport: ws"}>
             <span className="conn-dot" />
-            {state.connected ? "pi" : "łączenie…"}
+            {state.connected ? "pi" : t("łączenie…")}
           </span>
           {inTauri() && <WindowControls />}
         </header>
@@ -1342,7 +1342,7 @@ export default function App() {
         {state.error && (
           <div className="error-bar">
             <span>{state.error}</span>
-            <button className="icon-btn" onClick={() => dispatch({ type: "error", error: null })} title="Zamknij">
+            <button className="icon-btn" onClick={() => dispatch({ type: "error", error: null })} title={t("Zamknij")}>
               <X size={14} />
             </button>
           </div>
@@ -1376,7 +1376,7 @@ export default function App() {
             )}
             <RecentProjects sessions={state.sessions} current={state.cwd} onOpen={openSession} onNew={(cwd) => newSession(cwd)} />
             <div className="hero-hints">
-              <kbd>/</kbd> komendy · <kbd>Ctrl N</kbd> nowa sesja · <kbd>Ctrl K</kbd> szukaj · <kbd>Ctrl B</kbd> panel
+              <kbd>/</kbd> {t("komendy")} · <kbd>Ctrl N</kbd> {t("nowa sesja")} · <kbd>Ctrl K</kbd> {t("szukaj")} · <kbd>Ctrl B</kbd> {t("panel")}
             </div>
           </div>
         ) : (
@@ -1404,7 +1404,7 @@ export default function App() {
             </div>
             <div className="dock">
               {!atBottom && (
-                <button className="to-bottom" onClick={scrollToBottom} title="Przewiń na dół">
+                <button className="to-bottom" onClick={scrollToBottom} title={t("Przewiń na dół")}>
                   <ArrowDown size={16} />
                 </button>
               )}
@@ -1413,7 +1413,7 @@ export default function App() {
                   stuck={state.stuck}
                   onEscalate={() => {
                     const model = state.stuck!.suggest;
-                    dispatch({ type: "user", text: `↗ Przekaż zadanie modelowi ${model.split("/").pop()} (poprzedni utknął)`, at: Date.now() });
+                    dispatch({ type: "user", text: t("↗ Przekaż zadanie modelowi {model} (poprzedni utknął)", { model: model.split("/").pop() ?? model }), at: Date.now() });
                     send({ cmd: "escalate", model, reason: state.stuck!.label });
                   }}
                   onSettings={() => setSettingsOpen(true)}
@@ -1474,8 +1474,8 @@ export default function App() {
       )}
       {deleting && (
         <ConfirmDialog
-          title="Usunąć czat?"
-          confirmLabel="Usuń"
+          title={t("Usunąć czat?")}
+          confirmLabel={t("Usuń")}
           danger
           onCancel={() => setDeleting(null)}
           onConfirm={() => {
@@ -1483,8 +1483,8 @@ export default function App() {
             setDeleting(null);
           }}
         >
-          „{sessionTitle(deleting)}” ({basename(deleting.cwd)}) trafi do kosza systemowego — da się go stamtąd przywrócić.
-          {deleting.path === state.sessionPath && state.busy && " Model w tym czacie zostanie zatrzymany."}
+          {t("„{title}” ({folder}) trafi do kosza systemowego — da się go stamtąd przywrócić.", { title: sessionTitle(deleting), folder: basename(deleting.cwd) })}
+          {deleting.path === state.sessionPath && state.busy && ` ${t("Model w tym czacie zostanie zatrzymany.")}`}
         </ConfirmDialog>
       )}
       {settingsOpen && (
@@ -1588,21 +1588,21 @@ function StuckCard({
   return (
     <div className="stuck-card">
       <div className="stuck-text">
-        <b>Model utknął.</b> {stuck.label}.{" "}
-        {stuck.suggest ? "Możesz przekazać zadanie mocniejszemu modelowi." : "Nie ustawiono modelu do eskalacji."}
+        <b>{t("Model utknął.")}</b> {stuck.label}.{" "}
+        {stuck.suggest ? t("Możesz przekazać zadanie mocniejszemu modelowi.") : t("Nie ustawiono modelu do eskalacji.")}
       </div>
       <div className="stuck-actions">
         {stuck.suggest ? (
           <button className="btn primary" onClick={onEscalate}>
-            Przekaż do {stuck.suggest.split("/").pop()}
+            {t("Przekaż do {model}", { model: stuck.suggest.split("/").pop() ?? stuck.suggest })}
           </button>
         ) : (
           <button className="btn" onClick={onSettings}>
-            Ustaw model do eskalacji
+            {t("Ustaw model do eskalacji")}
           </button>
         )}
         <button className="btn" onClick={onDismiss}>
-          Zamknij
+          {t("Zamknij")}
         </button>
       </div>
     </div>
@@ -1612,12 +1612,12 @@ function StuckCard({
 function formatStats(st: SessionStats): string {
   const tok = st.tokens;
   const lines = [
-    "**Sesja**",
-    `- wiadomości: ${st.userMessages} Twoich, ${st.assistantMessages} modelu, ${st.toolCalls} wywołań narzędzi`,
-    `- tokeny: ${formatTokens(tok.input)} wejście${tok.cacheRead ? ` (z cache ${formatTokens(tok.cacheRead)})` : ""}, ${formatTokens(tok.output)} wyjście, razem ${formatTokens(tok.total)}`,
+    `**${t("Sesja")}**`,
+    `- ${t("wiadomości: {user} Twoich, {assistant} modelu, {tools} wywołań narzędzi", { user: st.userMessages, assistant: st.assistantMessages, tools: st.toolCalls })}`,
+    `- ${t("tokeny: {input} wejście", { input: formatTokens(tok.input) })}${tok.cacheRead ? ` ${t("(z cache {cache})", { cache: formatTokens(tok.cacheRead) })}` : ""}, ${t("{output} wyjście, razem {total}", { output: formatTokens(tok.output), total: formatTokens(tok.total) })}`,
   ];
-  if (st.cost > 0) lines.push(`- koszt: $${st.cost.toFixed(4)}`);
-  if (st.sessionFile) lines.push(`- plik: \`${st.sessionFile.replace(/^\/home\/[^/]+/, "~")}\``);
+  if (st.cost > 0) lines.push(`- ${t("koszt")}: $${st.cost.toFixed(4)}`);
+  if (st.sessionFile) lines.push(`- ${t("plik")}: \`${st.sessionFile.replace(/^\/home\/[^/]+/, "~")}\``);
   return lines.join("\n");
 }
 
@@ -1684,7 +1684,7 @@ function SessionTitle({ title, onRename }: { title: string; onRename: (name: str
           setDraft(title);
           setEditing(true);
         }}
-        title="Kliknij, aby zmienić nazwę"
+        title={t("Kliknij, aby zmienić nazwę")}
       >
         {title}
       </button>

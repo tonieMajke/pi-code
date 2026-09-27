@@ -13,32 +13,79 @@ import { TERMINAL_PRESETS, terminalChoiceFor, terminalTemplateFor, type Terminal
 import { ACCENTS, BACKGROUNDS } from "../lib/appearance";
 
 const SECTIONS = [
-  { id: "model", label: "Model i myślenie", icon: Brain },
-  { id: "providers", label: "Dostawcy modeli", icon: Plug },
-  { id: "voice", label: "Dyktowanie", icon: Mic },
-  { id: "memory", label: "Pamięć", icon: BookMarked },
-  { id: "constitution", label: "Konstytucja", icon: Scale },
-  { id: "quality", label: "Recenzja i eskalacja", icon: ShieldCheck },
-  { id: "taste", label: "Gust", icon: Sparkles },
-  { id: "context", label: "Kontekst", icon: Layers },
-  { id: "tools", label: "Narzędzia", icon: Wrench },
-  { id: "behavior", label: "Zachowanie", icon: RotateCw },
-  { id: "shell", label: "Powłoka", icon: Terminal },
-  { id: "resources", label: "Rozszerzenia i skille", icon: Box },
-  { id: "look", label: "Wygląd", icon: Palette },
-  { id: "app", label: "Aplikacja", icon: Bell },
-  { id: "cleanup", label: "Sprzątanie", icon: Eraser },
+  { id: "model", icon: Brain },
+  { id: "providers", icon: Plug },
+  { id: "voice", icon: Mic },
+  { id: "memory", icon: BookMarked },
+  { id: "constitution", icon: Scale },
+  { id: "quality", icon: ShieldCheck },
+  { id: "taste", icon: Sparkles },
+  { id: "context", icon: Layers },
+  { id: "tools", icon: Wrench },
+  { id: "behavior", icon: RotateCw },
+  { id: "shell", icon: Terminal },
+  { id: "resources", icon: Box },
+  { id: "look", icon: Palette },
+  { id: "app", icon: Bell },
+  { id: "cleanup", icon: Eraser },
 ] as const;
 export type SectionId = (typeof SECTIONS)[number]["id"];
 
-const THINKING_LABELS: Record<string, string> = {
-  off: "wył.",
-  minimal: "minimalne",
-  low: "niskie",
-  medium: "średnie",
-  high: "wysokie",
-  xhigh: "b. wysokie",
-};
+/** Section names, in the language the interface has right now. */
+function sectionLabel(id: SectionId): string {
+  switch (id) {
+    case "model":
+      return t("Model i myślenie");
+    case "providers":
+      return t("Dostawcy modeli");
+    case "voice":
+      return t("Dyktowanie");
+    case "memory":
+      return t("Pamięć");
+    case "constitution":
+      return t("Konstytucja");
+    case "quality":
+      return t("Recenzja i eskalacja");
+    case "taste":
+      return t("Gust");
+    case "context":
+      return t("Kontekst");
+    case "tools":
+      return t("Narzędzia");
+    case "behavior":
+      return t("Zachowanie");
+    case "shell":
+      return t("Powłoka");
+    case "resources":
+      return t("Rozszerzenia i skille");
+    case "look":
+      return t("Wygląd");
+    case "app":
+      return t("Aplikacja");
+    case "cleanup":
+      return t("Sprzątanie");
+  }
+}
+
+/** pi's thinking levels in words; an unknown level shows as is. */
+function thinkingLabel(level: string): string {
+  switch (level) {
+    case "off":
+      return t("wył.");
+    case "minimal":
+      return t("minimalne");
+    case "low":
+      return t("niskie");
+    case "medium":
+      return t("średnie");
+    case "high":
+      return t("wysokie");
+    case "xhigh":
+      return t("b. wysokie");
+    default:
+      return level;
+  }
+}
 
 export type AppPrefs = { notifications: boolean; closeToTray: boolean };
 
@@ -104,13 +151,13 @@ export function SettingsDialog({
   const s = settings;
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="settings" role="dialog" aria-label="Ustawienia">
+      <div className="settings" role="dialog" aria-label={t("Ustawienia")}>
         <nav className="settings-nav">
-          <div className="settings-title">Ustawienia</div>
-          {SECTIONS.map(({ id, label, icon: Icon }) => (
+          <div className="settings-title">{t("Ustawienia")}</div>
+          {SECTIONS.map(({ id, icon: Icon }) => (
             <button key={id} className={`settings-tab ${section === id ? "on" : ""}`} onClick={() => setSection(id)}>
               <Icon size={15} />
-              <span>{label}</span>
+              <span>{sectionLabel(id)}</span>
             </button>
           ))}
           {s && (
@@ -121,7 +168,7 @@ export function SettingsDialog({
           )}
         </nav>
         <div className="settings-body">
-          <button className="icon-btn settings-close" onClick={onClose} title="Zamknij (Esc)">
+          <button className="icon-btn settings-close" onClick={onClose} title={t("Zamknij (Esc)")}>
             <X size={16} />
           </button>
           {section === "look" ? (
@@ -139,41 +186,41 @@ export function SettingsDialog({
           ) : section === "cleanup" ? (
             <CleanupSection request={request} onDeleted={onSessionsChanged} />
           ) : !s ? (
-            <div className="s-empty">wczytywanie ustawień pi…</div>
+            <div className="s-empty">{t("wczytywanie ustawień pi…")}</div>
           ) : (
             <>
               {section === "model" && (
                 <>
-                  <h2>Model i myślenie</h2>
+                  <h2>{t("Model i myślenie")}</h2>
                   <Row
-                    label="Poziom myślenia"
+                    label={t("Poziom myślenia")}
                     desc={
                       s.thinking.available.length
-                        ? "Dla tej sesji. Wyższy = dłuższe przemyślenia przed odpowiedzią."
-                        : "pi nie steruje myśleniem tego modelu (w definicji modelu brak reasoning). Model może myśleć sam z siebie."
+                        ? t("Dla tej sesji. Wyższy = dłuższe przemyślenia przed odpowiedzią.")
+                        : t("pi nie steruje myśleniem tego modelu (w definicji modelu brak reasoning). Model może myśleć sam z siebie.")
                     }
                   >
                     {s.thinking.available.length > 0 && (
                       <Segmented
                         value={s.thinking.level}
-                        options={s.thinking.available.map((l) => ({ value: l, label: THINKING_LABELS[l] ?? l }))}
+                        options={s.thinking.available.map((l) => ({ value: l, label: thinkingLabel(l) }))}
                         onChange={(v) => onPatch({ thinkingLevel: v })}
                       />
                     )}
                   </Row>
                   {s.thinking.available.length > 0 && (
-                    <Row label="Domyślny poziom" desc="Dla nowych sesji (zapisywany w ustawieniach pi).">
+                    <Row label={t("Domyślny poziom")} desc={t("Dla nowych sesji (zapisywany w ustawieniach pi).")}>
                       <Segmented
                         value={s.thinking.defaultLevel}
-                        options={s.thinking.available.map((l) => ({ value: l, label: THINKING_LABELS[l] ?? l }))}
+                        options={s.thinking.available.map((l) => ({ value: l, label: thinkingLabel(l) }))}
                         onChange={(v) => onPatch({ defaultThinkingLevel: v })}
                       />
                     </Row>
                   )}
-                  <Row label="Model domyślny" desc={<code>{s.defaultModel}</code>}>
+                  <Row label={t("Model domyślny")} desc={<code>{s.defaultModel}</code>}>
                     {`${provider}/${model}` !== s.defaultModel && model && (
                       <button className="btn" onClick={() => onPatch({ defaultModel: `${provider}/${model}` })}>
-                        Ustaw bieżący ({model})
+                        {t("Ustaw bieżący ({model})", { model })}
                       </button>
                     )}
                   </Row>
@@ -190,49 +237,49 @@ export function SettingsDialog({
 
               {section === "context" && (
                 <>
-                  <h2>Kontekst</h2>
-                  <Row label="Kompaktuj teraz" desc="Streszcza starszą część rozmowy, żeby zwolnić miejsce w kontekście.">
+                  <h2>{t("Kontekst")}</h2>
+                  <Row label={t("Kompaktuj teraz")} desc={t("Streszcza starszą część rozmowy, żeby zwolnić miejsce w kontekście.")}>
                     <button className="btn" disabled={busy || compacting} onClick={onCompact}>
-                      {compacting ? "Kompaktuję…" : "Kompaktuj"}
+                      {compacting ? t("Kompaktuję…") : t("Kompaktuj")}
                     </button>
                   </Row>
-                  <Row label="Automatyczne kompaktowanie" desc="Gdy kontekst się zapełnia, pi sam streszcza starsze wiadomości.">
+                  <Row label={t("Automatyczne kompaktowanie")} desc={t("Gdy kontekst się zapełnia, pi sam streszcza starsze wiadomości.")}>
                     <Toggle value={s.compaction.enabled} onChange={(v) => onPatch({ compactionEnabled: v })} />
                   </Row>
                   <Row
-                    label="Kompaktuj od (bieżący model)"
-                    desc={`Mniejsze modele gubią się w długim kontekście dużo wcześniej niż kończy się okno (${formatTokens(s.contextWindow)}). 0 = domyślnie pi. Teraz: ${formatTokens(s.compactAt)}.`}
+                    label={t("Kompaktuj od (bieżący model)")}
+                    desc={t("Mniejsze modele gubią się w długim kontekście dużo wcześniej niż kończy się okno ({window}). 0 = domyślnie pi. Teraz: {now}.", { window: formatTokens(s.contextWindow), now: formatTokens(s.compactAt) })}
                   >
                     <NumberField value={s.compactAt} min={0} max={s.contextWindow} step={10000} onCommit={(v) => onPatch({ compactAt: v })} />
                   </Row>
                   <Row
-                    label="Skracaj stare wyniki narzędzi"
-                    desc="Duże wyniki (logi, całe pliki) z wcześniejszych poleceń zamieniane na początek + notkę. Bieżące zadanie zawsze widzi wszystko; model może uruchomić narzędzie ponownie."
+                    label={t("Skracaj stare wyniki narzędzi")}
+                    desc={t("Duże wyniki (logi, całe pliki) z wcześniejszych poleceń zamieniane na początek + notkę. Bieżące zadanie zawsze widzi wszystko; model może uruchomić narzędzie ponownie.")}
                   >
                     <Toggle value={s.gui.context.elideOldToolOutput} onChange={(v) => onPatch({ context: { elideOldToolOutput: v } })} />
                   </Row>
                   {s.gui.context.elideOldToolOutput && (
-                    <Row label="Skracaj powyżej (znaków)" desc="Wyniki krótsze zostają w całości.">
+                    <Row label={t("Skracaj powyżej (znaków)")} desc={t("Wyniki krótsze zostają w całości.")}>
                       <NumberField value={s.gui.context.elideAboveChars} min={200} step={500} onCommit={(v) => onPatch({ context: { elideAboveChars: v } })} />
                     </Row>
                   )}
                   <Row
-                    label="Rezerwa tokenów"
-                    desc={`Kompaktuj, gdy do końca okna zostanie mniej niż tyle (${formatTokens(s.compaction.reserveTokens)}).`}
+                    label={t("Rezerwa tokenów")}
+                    desc={t("Kompaktuj, gdy do końca okna zostanie mniej niż tyle ({tokens}).", { tokens: formatTokens(s.compaction.reserveTokens) })}
                   >
                     <NumberField value={s.compaction.reserveTokens} min={1000} step={1000} onCommit={(v) => onPatch({ reserveTokens: v })} />
                   </Row>
                   <Row
-                    label="Zachowaj najnowsze"
-                    desc={`Tyle tokenów ostatniej rozmowy zostaje dosłownie, reszta idzie do streszczenia (${formatTokens(s.compaction.keepRecentTokens)}).`}
+                    label={t("Zachowaj najnowsze")}
+                    desc={t("Tyle tokenów ostatniej rozmowy zostaje dosłownie, reszta idzie do streszczenia ({tokens}).", { tokens: formatTokens(s.compaction.keepRecentTokens) })}
                   >
                     <NumberField value={s.compaction.keepRecentTokens} min={1000} step={1000} onCommit={(v) => onPatch({ keepRecentTokens: v })} />
                   </Row>
-                  <Row label="Pliki kontekstu" desc="AGENTS.md / CLAUDE.md wczytane do promptu systemowego tej sesji.">
+                  <Row label={t("Pliki kontekstu")} desc={t("AGENTS.md / CLAUDE.md wczytane do promptu systemowego tej sesji.")}>
                     <span />
                   </Row>
                   <ul className="settings-list">
-                    {s.contextFiles.length === 0 && <li className="dim">brak</li>}
+                    {s.contextFiles.length === 0 && <li className="dim">{t("brak")}</li>}
                     {s.contextFiles.map((f) => (
                       <li key={f}>
                         <code>{f.replace(/^\/home\/[^/]+/, "~")}</code>
@@ -246,26 +293,26 @@ export function SettingsDialog({
 
               {section === "behavior" && (
                 <>
-                  <h2>Zachowanie</h2>
-                  <Row label="Steering w trakcie pracy" desc="Wskazówki wysłane, gdy model pracuje: dostarczane wszystkie naraz albo po jednej na krok.">
+                  <h2>{t("Zachowanie")}</h2>
+                  <Row label={t("Steering w trakcie pracy")} desc={t("Wskazówki wysłane, gdy model pracuje: dostarczane wszystkie naraz albo po jednej na krok.")}>
                     <QueueSelect value={s.steeringMode} onChange={(v) => onPatch({ steeringMode: v })} />
                   </Row>
-                  <Row label="Wiadomości w kolejce" desc="Follow-upy czekające na koniec odpowiedzi.">
+                  <Row label={t("Wiadomości w kolejce")} desc={t("Follow-upy czekające na koniec odpowiedzi.")}>
                     <QueueSelect value={s.followUpMode} onChange={(v) => onPatch({ followUpMode: v })} />
                   </Row>
-                  <Row label="Ponawianie błędów" desc="Automatyczny retry, gdy dostawca modelu zwróci błąd przejściowy.">
+                  <Row label={t("Ponawianie błędów")} desc={t("Automatyczny retry, gdy dostawca modelu zwróci błąd przejściowy.")}>
                     <Toggle value={s.retry.enabled} onChange={(v) => onPatch({ retryEnabled: v })} />
                   </Row>
-                  <Row label="Maks. prób" desc="Ile razy ponowić jedno zapytanie.">
+                  <Row label={t("Maks. prób")} desc={t("Ile razy ponowić jedno zapytanie.")}>
                     <NumberField value={s.retry.maxRetries} min={0} max={20} onCommit={(v) => onPatch({ maxRetries: v })} />
                   </Row>
-                  <Row label="Opóźnienie bazowe (ms)" desc="Czas przed pierwszą ponowną próbą; kolejne rosną wykładniczo.">
+                  <Row label={t("Opóźnienie bazowe (ms)")} desc={t("Czas przed pierwszą ponowną próbą; kolejne rosną wykładniczo.")}>
                     <NumberField value={s.retry.baseDelayMs} min={100} step={500} onCommit={(v) => onPatch({ baseDelayMs: v })} />
                   </Row>
-                  <Row label="Zmniejszaj obrazy" desc="Duże załączniki są skalowane przed wysłaniem do modelu.">
+                  <Row label={t("Zmniejszaj obrazy")} desc={t("Duże załączniki są skalowane przed wysłaniem do modelu.")}>
                     <Toggle value={s.images.autoResize} onChange={(v) => onPatch({ imageAutoResize: v })} />
                   </Row>
-                  <Row label="Blokuj obrazy" desc="Nie wysyłaj obrazów do modelu wcale.">
+                  <Row label={t("Blokuj obrazy")} desc={t("Nie wysyłaj obrazów do modelu wcale.")}>
                     <Toggle value={s.images.blockImages} onChange={(v) => onPatch({ blockImages: v })} />
                   </Row>
                   <h3>{t("Długie ciche tury")}</h3>
@@ -299,12 +346,12 @@ export function SettingsDialog({
 
               {section === "shell" && (
                 <>
-                  <h2>Powłoka</h2>
-                  <p className="settings-note">Dotyczy narzędzia bash. Zmiany działają od następnej sesji.</p>
-                  <Row label="Ścieżka powłoki" desc="Pusto = domyślna (bash).">
+                  <h2>{t("Powłoka")}</h2>
+                  <p className="settings-note">{t("Dotyczy narzędzia bash. Zmiany działają od następnej sesji.")}</p>
+                  <Row label={t("Ścieżka powłoki")} desc={t("Pusto = domyślna (bash).")}>
                     <TextField value={s.shellPath} placeholder="/bin/bash" onCommit={(v) => onPatch({ shellPath: v })} />
                   </Row>
-                  <Row label="Prefiks komend" desc="Doklejany przed każdą komendą, np. aktywacja środowiska.">
+                  <Row label={t("Prefiks komend")} desc={t("Doklejany przed każdą komendą, np. aktywacja środowiska.")}>
                     <TextField
                       value={s.shellCommandPrefix}
                       placeholder="source .venv/bin/activate &&"
@@ -316,23 +363,23 @@ export function SettingsDialog({
 
               {section === "resources" && (
                 <>
-                  <h2>Rozszerzenia i skille</h2>
+                  <h2>{t("Rozszerzenia i skille")}</h2>
                   <p className="settings-note">
-                    Wczytane przez pi dla tej sesji. Instalacja i usuwanie: <code>pi install</code> w terminalu.
+                    {t("Wczytane przez pi dla tej sesji. Instalacja i usuwanie:")} <code>pi install</code> {t("w terminalu.")}
                   </p>
-                  <h3>Rozszerzenia ({s.extensions.length})</h3>
+                  <h3>{t("Rozszerzenia ({n})", { n: s.extensions.length })}</h3>
                   <ul className="settings-list">
-                    {s.extensions.length === 0 && <li className="dim">brak</li>}
+                    {s.extensions.length === 0 && <li className="dim">{t("brak")}</li>}
                     {s.extensions.map((e) => (
                       <li key={e.path || e.name} title={e.path}>
                         <span className={e.disabled ? "dim" : undefined}>{e.name}</span>
-                        {e.disabled ? <span className="dim">wyłączone w Pi Code</span> : e.source !== e.name && <span className="dim">{e.source}</span>}
+                        {e.disabled ? <span className="dim">{t("wyłączone w Pi Code")}</span> : e.source !== e.name && <span className="dim">{e.source}</span>}
                       </li>
                     ))}
                   </ul>
-                  <h3>Skille ({s.skills.length})</h3>
+                  <h3>{t("Skille ({n})", { n: s.skills.length })}</h3>
                   <ul className="settings-list">
-                    {s.skills.length === 0 && <li className="dim">brak</li>}
+                    {s.skills.length === 0 && <li className="dim">{t("brak")}</li>}
                     {s.skills.map((k) => (
                       <li key={k.name}>
                         <span>{k.name}</span>
@@ -345,14 +392,14 @@ export function SettingsDialog({
 
               {section === "app" && (
                 <>
-                  <h2>Aplikacja</h2>
+                  <h2>{t("Aplikacja")}</h2>
                   <Row label={t("Język")} desc={t("Język interfejsu. Po zmianie okno przeładuje się.")}>
                     <Segmented value={lang()} options={LANGS.map((l) => ({ value: l.id, label: l.label }))} onChange={(v) => onLang(v as Lang)} />
                   </Row>
-                  <Row label="Powiadomienia" desc="Systemowe powiadomienie, gdy pi skończy albo czeka na zgodę, a okno jest w tle.">
+                  <Row label={t("Powiadomienia")} desc={t("Systemowe powiadomienie, gdy pi skończy albo czeka na zgodę, a okno jest w tle.")}>
                     <Toggle value={prefs.notifications} onChange={(v) => onPrefs({ ...prefs, notifications: v })} />
                   </Row>
-                  <Row label="Zamykanie chowa do zasobnika" desc="Przycisk zamknięcia chowa okno do zasobnika systemowego, a pi pracuje dalej. Zakończ aplikację z menu ikony w zasobniku.">
+                  <Row label={t("Zamykanie chowa do zasobnika")} desc={t("Przycisk zamknięcia chowa okno do zasobnika systemowego, a pi pracuje dalej. Zakończ aplikację z menu ikony w zasobniku.")}>
                     <Toggle value={prefs.closeToTray} onChange={(v) => onPrefs({ ...prefs, closeToTray: v })} />
                   </Row>
                   <h3>{t("Sesja w terminalu")}</h3>
@@ -394,8 +441,8 @@ function QueueSelect({ value, onChange }: { value: QueueMode; onChange: (v: Queu
     <Segmented
       value={value}
       options={[
-        { value: "one-at-a-time", label: "po jednej" },
-        { value: "all", label: "wszystkie" },
+        { value: "one-at-a-time", label: t("po jednej") },
+        { value: "all", label: t("wszystkie") },
       ]}
       onChange={(v) => onChange(v as QueueMode)}
     />
@@ -417,26 +464,23 @@ function ConstitutionSection({
   const save = () => onPatch({ constitution: { text: draft.trim() === c.defaultText.trim() ? "" : draft } });
   return (
     <>
-      <h2>Konstytucja</h2>
+      <h2>{t("Konstytucja")}</h2>
       <p className="settings-note">
-        Stałe zasady pracy dla modelu: najpierw zrozum i przeczytaj, potem mały krok, potem sprawdzenie, poprawka,
-        znowu sprawdzenie. Szczególnie pomaga mniejszym modelom, które gubią wątek albo ogłaszają sukces bez
-        sprawdzenia.
+        {t("Stałe zasady pracy dla modelu: najpierw zrozum i przeczytaj, potem mały krok, potem sprawdzenie, poprawka, znowu sprawdzenie. Szczególnie pomaga mniejszym modelom, które gubią wątek albo ogłaszają sukces bez sprawdzenia.")}
       </p>
-      <Row label="Konstytucja włączona" desc="Zasady są dopisywane do promptu systemowego przy każdej wiadomości.">
+      <Row label={t("Konstytucja włączona")} desc={t("Zasady są dopisywane do promptu systemowego przy każdej wiadomości.")}>
         <Toggle value={c.enabled} onChange={(v) => onPatch({ constitution: { enabled: v } })} />
       </Row>
       <Row
-        label="Twarde strażniki"
+        label={t("Twarde strażniki")}
         desc={
           <>
-            Egzekwowane w kodzie, a nie tylko proszone:
+            {t("Egzekwowane w kodzie, a nie tylko proszone:")}
             <ul className="guard-list">
-              <li>blokada edycji albo nadpisania pliku, którego model w tej sesji nie przeczytał,</li>
-              <li>blokada powtórzenia tego samego wywołania, które już dwa razy padło,</li>
+              <li>{t("blokada edycji albo nadpisania pliku, którego model w tej sesji nie przeczytał,")}</li>
+              <li>{t("blokada powtórzenia tego samego wywołania, które już dwa razy padło,")}</li>
               <li>
-                model nie może skończyć pracy, jeśli zmienił kod i nic nie sprawdził (testy, typecheck, build,
-                uruchomienie) albo jeśli ostatnie sprawdzenie nie przeszło. Zostaje odesłany do pracy.
+                {t("model nie może skończyć pracy, jeśli zmienił kod i nic nie sprawdził (testy, typecheck, build, uruchomienie) albo jeśli ostatnie sprawdzenie nie przeszło. Zostaje odesłany do pracy.")}
               </li>
             </ul>
           </>
@@ -444,10 +488,10 @@ function ConstitutionSection({
       >
         <Toggle value={c.hard} onChange={(v) => onPatch({ constitution: { hard: v } })} />
       </Row>
-      <Row label="Maks. odesłań na zadanie" desc="Ile razy strażnik może zawrócić model w jednej odpowiedzi, zanim odpuści.">
+      <Row label={t("Maks. odesłań na zadanie")} desc={t("Ile razy strażnik może zawrócić model w jednej odpowiedzi, zanim odpuści.")}>
         <NumberField value={c.maxNudges} min={0} max={10} onCommit={(v) => onPatch({ constitution: { maxNudges: v } })} />
       </Row>
-      <h3>Treść {isDefault && !dirty && <span className="dim">(domyślna)</span>}</h3>
+      <h3>{t("Treść")} {isDefault && !dirty && <span className="dim">{t("(domyślna)")}</span>}</h3>
       <textarea
         className="constitution-text"
         value={draft}
@@ -459,71 +503,72 @@ function ConstitutionSection({
         <span className="spacer" />
         {!isDefault && (
           <button className="btn" onClick={() => onPatch({ constitution: { text: "" } })}>
-            Przywróć domyślną
+            {t("Przywróć domyślną")}
           </button>
         )}
         {dirty && (
           <button className="btn" onClick={() => setDraft(saved)}>
-            Anuluj
+            {t("Anuluj")}
           </button>
         )}
         <button className="btn primary" disabled={!dirty} onClick={save}>
-          Zapisz
+          {t("Zapisz")}
         </button>
       </div>
     </>
   );
 }
 
-const POLICY_OPTIONS = [
-  { value: "always", label: "zawsze" },
-  { value: "deferred", label: "na żądanie" },
-  { value: "off", label: "wył." },
+/** Tool policy choices, labelled at render time. */
+const policyOptions = () => [
+  { value: "always", label: t("zawsze") },
+  { value: "deferred", label: t("na żądanie") },
+  { value: "off", label: t("wył.") },
 ];
 
 function ToolsSection({ s, onPatch }: { s: PiSettings; onPatch: (p: SettingsPatch) => void }) {
-  const always = s.tools.filter((t) => t.policy === "always");
-  const deferred = s.tools.filter((t) => t.policy === "deferred");
-  const loaded = deferred.filter((t) => t.active);
-  const cost = (list: typeof s.tools) => list.reduce((a, t) => a + t.tokens, 0);
+  const always = s.tools.filter((tool) => tool.policy === "always");
+  const deferred = s.tools.filter((tool) => tool.policy === "deferred");
+  const loaded = deferred.filter((tool) => tool.active);
+  const cost = (list: typeof s.tools) => list.reduce((a, tool) => a + tool.tokens, 0);
   const order: Record<ToolPolicy, number> = { always: 0, deferred: 1, off: 2 };
   const sorted = [...s.tools].sort((a, b) => order[a.policy] - order[b.policy] || b.tokens - a.tokens);
   return (
     <>
-      <h2>Narzędzia</h2>
+      <h2>{t("Narzędzia")}</h2>
       <p className="settings-note">
-        <b>Zawsze</b>: pełny opis w każdym zapytaniu. <b>Na żądanie</b>: model widzi tylko nazwę i jedno zdanie, a gdy
-        narzędzie jest potrzebne, sam je ładuje (<code>enable_tools</code>) i ma je od następnego kroku. Mniej
-        narzędzi w kontekście to mniej pomyłek małego modelu. O zatwierdzaniu decyduje tryb uprawnień (Shift+Tab).
+        <b>{t("Zawsze")}</b>: {t("pełny opis w każdym zapytaniu.")} <b>{t("Na żądanie")}</b>:{" "}
+        {t("model widzi tylko nazwę i jedno zdanie, a gdy narzędzie jest potrzebne, sam je ładuje")} (<code>enable_tools</code>){" "}
+        {t("i ma je od następnego kroku. Mniej narzędzi w kontekście to mniej pomyłek małego modelu. O zatwierdzaniu decyduje tryb uprawnień (Shift+Tab).")}
       </p>
       <div className="tool-budget">
         <span>
-          W każdym zapytaniu: <b>~{formatTokens(cost(always) + cost(loaded))}</b> tok.
+          {t("W każdym zapytaniu:")} <b>~{formatTokens(cost(always) + cost(loaded))}</b> tok.
         </span>
         <span className="dim">
-          {deferred.length} na żądanie (~{formatTokens(cost(deferred))} tok. gdyby wszystkie były zawsze)
-          {loaded.length > 0 && ` · w tej sesji załadowane: ${loaded.map((t) => t.name).join(", ")}`}
+          {t("{n} na żądanie (~{tokens} tok. gdyby wszystkie były zawsze)", { n: deferred.length, tokens: formatTokens(cost(deferred)) })}
+          {loaded.length > 0 && ` · ${t("w tej sesji załadowane:")} ${loaded.map((tool) => tool.name).join(", ")}`}
         </span>
       </div>
-      {sorted.map((t) => (
+      {sorted.map((tool) => (
         <Row
-          key={t.name}
+          key={tool.name}
           label={
             <>
-              <code>{t.name}</code> <span className="dim tool-tokens">~{formatTokens(t.tokens)} tok.</span>
+              <code>{tool.name}</code> <span className="dim tool-tokens">~{formatTokens(tool.tokens)} tok.</span>
             </>
           }
           desc={
             <>
-              <span className="clamp">{t.description}</span>
-              <span className="dim"> · {t.source}</span>
+              <span className="clamp">{tool.description}</span>
+              <span className="dim"> · {tool.source}</span>
             </>
           }
         >
           <Segmented
-            value={t.policy}
-            options={POLICY_OPTIONS}
-            onChange={(v) => onPatch({ toolPolicy: { name: t.name, policy: v as ToolPolicy } })}
+            value={tool.policy}
+            options={policyOptions()}
+            onChange={(v) => onPatch({ toolPolicy: { name: tool.name, policy: v as ToolPolicy } })}
           />
         </Row>
       ))}
@@ -566,46 +611,46 @@ function QualitySection({
   const g = s.gui;
   return (
     <>
-      <h2>Recenzja i eskalacja</h2>
+      <h2>{t("Recenzja i eskalacja")}</h2>
       <Row
-        label="Niezależna recenzja zmian"
-        desc="Zanim model skończy, drugi przebieg widzi tylko zadanie i diff (bez rozumowania autora) i szuka błędów. Uwagi wracają do modelu do poprawy. Raz na odpowiedź."
+        label={t("Niezależna recenzja zmian")}
+        desc={t("Zanim model skończy, drugi przebieg widzi tylko zadanie i diff (bez rozumowania autora) i szuka błędów. Uwagi wracają do modelu do poprawy. Raz na odpowiedź.")}
       >
         <Toggle value={g.review.enabled} onChange={(v) => onPatch({ review: { enabled: v } })} />
       </Row>
       {g.review.enabled && (
         <Row
-          label="Model recenzenta"
-          desc="Inny model = świeże spojrzenie, ale router musi go załadować (VRAM, czas). Ten sam = szybko."
+          label={t("Model recenzenta")}
+          desc={t("Inny model = świeże spojrzenie, ale router musi go załadować (VRAM, czas). Ten sam = szybko.")}
         >
-          <ModelSelect value={g.review.model} models={models} empty="ten sam co sesja" onChange={(v) => onPatch({ review: { model: v } })} />
+          <ModelSelect value={g.review.model} models={models} empty={t("ten sam co sesja")} onChange={(v) => onPatch({ review: { model: v } })} />
         </Row>
       )}
       {g.review.enabled && (
         <Row
-          label="Recenzuj od"
-          desc="Mała zmiana, którą model już sprawdził testem, nie idzie do recenzji — to głównie koszt czasu. Liczone w zmienionych liniach."
+          label={t("Recenzuj od")}
+          desc={t("Mała zmiana, którą model już sprawdził testem, nie idzie do recenzji — to głównie koszt czasu. Liczone w zmienionych liniach.")}
         >
           <Segmented
             value={String(g.review.minLines ?? 40)}
             options={[
-              { value: "0", label: "zawsze" },
-              { value: "20", label: "20 linii" },
-              { value: "40", label: "40 linii" },
-              { value: "100", label: "100 linii" },
+              { value: "0", label: t("zawsze") },
+              { value: "20", label: t("{n} linii", { n: 20 }) },
+              { value: "40", label: t("{n} linii", { n: 40 }) },
+              { value: "100", label: t("{n} linii", { n: 100 }) },
             ]}
             onChange={(v) => onPatch({ review: { minLines: Number(v) } })}
           />
         </Row>
       )}
       <Row
-        label="Model do eskalacji"
-        desc="Gdy strażnik wyczerpie odesłania albo model kręci się w kółko, pojawi się przycisk przekazania zadania temu modelowi."
+        label={t("Model do eskalacji")}
+        desc={t("Gdy strażnik wyczerpie odesłania albo model kręci się w kółko, pojawi się przycisk przekazania zadania temu modelowi.")}
       >
-        <ModelSelect value={g.escalation.model} models={models} empty="wyłączona" onChange={(v) => onPatch({ escalation: { model: v } })} />
+        <ModelSelect value={g.escalation.model} models={models} empty={t("wyłączona")} onChange={(v) => onPatch({ escalation: { model: v } })} />
       </Row>
       {g.escalation.model && (
-        <Row label="Wróć do poprzedniego modelu" desc="Po zakończeniu eskalowanej odpowiedzi sesja wraca do modelu, który utknął.">
+        <Row label={t("Wróć do poprzedniego modelu")} desc={t("Po zakończeniu eskalowanej odpowiedzi sesja wraca do modelu, który utknął.")}>
           <Toggle value={g.escalation.revert} onChange={(v) => onPatch({ escalation: { revert: v } })} />
         </Row>
       )}
@@ -614,76 +659,76 @@ function QualitySection({
 }
 
 export function TasteSection({ s, models, onPatch }: { s: PiSettings; models: ModelSummary[]; onPatch: (p: SettingsPatch) => void }) {
-  const t = s.gui.taste;
+  const taste = s.gui.taste;
   // A sidecar started before this version doesn't send the section yet.
-  if (!t) return <p className="s-row-desc">Uruchom ponownie sidecar (nowa wersja), żeby zobaczyć te ustawienia.</p>;
-  const critic = t.criticModel ? models.find((m) => `${m.provider}/${m.id}` === t.criticModel) : null;
-  const sees = t.criticModel ? !!critic?.vision : s.modelVision;
+  if (!taste) return <p className="s-row-desc">{t("Uruchom ponownie sidecar (nowa wersja), żeby zobaczyć te ustawienia.")}</p>;
+  const critic = taste.criticModel ? models.find((m) => `${m.provider}/${m.id}` === taste.criticModel) : null;
+  const sees = taste.criticModel ? !!critic?.vision : s.modelVision;
   return (
     <>
-      <h2>Gust</h2>
+      <h2>{t("Gust")}</h2>
       <Row
-        label="Pętla gustu"
-        desc="Przy pracy wizualnej (strony, SVG, modele 3D): najpierw wzorce, potem budowanie, pomiar strony i krytyk ze świeżym spojrzeniem, zanim model skończy."
+        label={t("Pętla gustu")}
+        desc={t("Przy pracy wizualnej (strony, SVG, modele 3D): najpierw wzorce, potem budowanie, pomiar strony i krytyk ze świeżym spojrzeniem, zanim model skończy.")}
       >
-        <Toggle value={t.enabled} onChange={(v) => onPatch({ taste: { enabled: v } })} />
+        <Toggle value={taste.enabled} onChange={(v) => onPatch({ taste: { enabled: v } })} />
       </Row>
-      {t.enabled && (
+      {taste.enabled && (
         <>
           <Row
-            label="Szukanie wzorców"
-            desc="Przed pierwszą zmianą wizualną model szuka inspiracji: stron podobnych do tej, którą robi, albo obrazów tematu (np. goblin do modelu 3D). Za każdym razem inne; słabe strony odpadają w pomiarze. Obraz dołączony do wiadomości zastępuje szukanie."
+            label={t("Szukanie wzorców")}
+            desc={t("Przed pierwszą zmianą wizualną model szuka inspiracji: stron podobnych do tej, którą robi, albo obrazów tematu (np. goblin do modelu 3D). Za każdym razem inne; słabe strony odpadają w pomiarze. Obraz dołączony do wiadomości zastępuje szukanie.")}
           >
             <Segmented
-              value={t.research}
+              value={taste.research}
               options={[
-                { value: "auto", label: "samo" },
-                { value: "ask", label: "pytaj" },
-                { value: "off", label: "wył." },
+                { value: "auto", label: t("samo") },
+                { value: "ask", label: t("pytaj") },
+                { value: "off", label: t("wył.") },
               ]}
-              onChange={(v) => onPatch({ taste: { research: v as typeof t.research } })}
+              onChange={(v) => onPatch({ taste: { research: v as typeof taste.research } })}
             />
           </Row>
           <Row
-            label="Wymagaj czystego ui_audit"
-            desc="Po zmianie strony model musi ją zmierzyć (kontrast, odstępy, wyrównanie, przepełnienie przy 390 px) i poprawić poważne problemy."
+            label={t("Wymagaj czystego ui_audit")}
+            desc={t("Po zmianie strony model musi ją zmierzyć (kontrast, odstępy, wyrównanie, przepełnienie przy 390 px) i poprawić poważne problemy.")}
           >
-            <Toggle value={t.requireAudit} onChange={(v) => onPatch({ taste: { requireAudit: v } })} />
+            <Toggle value={taste.requireAudit} onChange={(v) => onPatch({ taste: { requireAudit: v } })} />
           </Row>
           <Row
-            label="Krytyk"
-            desc="Na końcu osobna sesja bez historii i bez rozumowania autora porównuje wynik ze wzorcem i wypisuje konkretne różnice. Uwagi wracają do modelu."
+            label={t("Krytyk")}
+            desc={t("Na końcu osobna sesja bez historii i bez rozumowania autora porównuje wynik ze wzorcem i wypisuje konkretne różnice. Uwagi wracają do modelu.")}
           >
-            <Toggle value={t.critic} onChange={(v) => onPatch({ taste: { critic: v } })} />
+            <Toggle value={taste.critic} onChange={(v) => onPatch({ taste: { critic: v } })} />
           </Row>
-          {t.critic && (
+          {taste.critic && (
             <>
               <Row
-                label="Model krytyka"
+                label={t("Model krytyka")}
                 desc={
                   sees
-                    ? "Widzi obrazy: porównuje zrzut ze wzorcem."
-                    : "Ten model nie widzi obrazów: przy stronach dostaje pomiary i zarys strony, przy 3D krytyk się nie uruchomi."
+                    ? t("Widzi obrazy: porównuje zrzut ze wzorcem.")
+                    : t("Ten model nie widzi obrazów: przy stronach dostaje pomiary i zarys strony, przy 3D krytyk się nie uruchomi.")
                 }
               >
-                <ModelSelect value={t.criticModel} models={models} empty="ten sam co sesja" onChange={(v) => onPatch({ taste: { criticModel: v } })} />
+                <ModelSelect value={taste.criticModel} models={models} empty={t("ten sam co sesja")} onChange={(v) => onPatch({ taste: { criticModel: v } })} />
               </Row>
-              <Row label="Rundy krytyka" desc="Ile razy krytyk może odesłać wynik do poprawki w jednej odpowiedzi.">
+              <Row label={t("Rundy krytyka")} desc={t("Ile razy krytyk może odesłać wynik do poprawki w jednej odpowiedzi.")}>
                 <Segmented
-                  value={String(t.maxRounds)}
+                  value={String(taste.maxRounds)}
                   options={["1", "2", "3", "4", "5"].map((v) => ({ value: v, label: v }))}
                   onChange={(v) => onPatch({ taste: { maxRounds: Number(v) } })}
                 />
               </Row>
               <Row
-                label="Osobny slot llama.cpp"
-                desc="Krytyk na slocie 1, żeby nie wypierał z pamięci kontekstu rozmowy (bez tego następna tura przelicza cały prompt). Wymaga serwera z --parallel 2 lub więcej."
+                label={t("Osobny slot llama.cpp")}
+                desc={t("Krytyk na slocie 1, żeby nie wypierał z pamięci kontekstu rozmowy (bez tego następna tura przelicza cały prompt). Wymaga serwera z --parallel 2 lub więcej.")}
               >
-                <Toggle value={t.criticSlot !== null} onChange={(v) => onPatch({ taste: { criticSlot: v ? 1 : null } })} />
+                <Toggle value={taste.criticSlot !== null} onChange={(v) => onPatch({ taste: { criticSlot: v ? 1 : null } })} />
               </Row>
             </>
           )}
-          <Row label="Własna galeria" desc="Zrzuty i obrazy, które lubisz, w ~/.pi/agent/design-refs/ (podkatalogi dowolne). Używane, gdy sieć nic nie da albo nie ma sieci.">
+          <Row label={t("Własna galeria")} desc={t("Zrzuty i obrazy, które lubisz, w ~/.pi/agent/design-refs/ (podkatalogi dowolne). Używane, gdy sieć nic nie da albo nie ma sieci.")}>
             <span className="s-row-desc">~/.pi/agent/design-refs</span>
           </Row>
         </>
@@ -692,26 +737,27 @@ export function TasteSection({ s, models, onPatch }: { s: PiSettings; models: Mo
   );
 }
 
-const SAMPLING_FIELDS: { key: keyof Omit<SamplingConfig, "enabled" | "reasoning_budget_tokens">; label: string; step: number; hint: string }[] = [
-  { key: "temperature", label: "temperature", step: 0.05, hint: "kod: 0.2–0.7" },
-  { key: "top_p", label: "top_p", step: 0.05, hint: "np. 0.95" },
-  { key: "top_k", label: "top_k", step: 1, hint: "np. 20" },
-  { key: "min_p", label: "min_p", step: 0.01, hint: "np. 0" },
-  { key: "presence_penalty", label: "presence_penalty", step: 0.1, hint: "przeciw pętlom: 0–1.5" },
-  { key: "repeat_penalty", label: "repeat_penalty", step: 0.01, hint: "1 = wył." },
+/** Sampler fields; hints are built at render time, in the interface language. */
+const samplingFields = (): { key: keyof Omit<SamplingConfig, "enabled" | "reasoning_budget_tokens">; label: string; step: number; hint: string }[] => [
+  { key: "temperature", label: "temperature", step: 0.05, hint: t("kod: 0.2–0.7") },
+  { key: "top_p", label: "top_p", step: 0.05, hint: t("np. {v}", { v: "0.95" }) },
+  { key: "top_k", label: "top_k", step: 1, hint: t("np. {v}", { v: "20" }) },
+  { key: "min_p", label: "min_p", step: 0.01, hint: t("np. {v}", { v: "0" }) },
+  { key: "presence_penalty", label: "presence_penalty", step: 0.1, hint: t("przeciw pętlom: 0–1.5") },
+  { key: "repeat_penalty", label: "repeat_penalty", step: 0.01, hint: t("1 = wył.") },
 ];
 
 function SamplingRows({ cfg, onPatch }: { cfg: SamplingConfig; onPatch: (p: SettingsPatch) => void }) {
   return (
     <>
       <Row
-        label="Limit myślenia na turę"
-        desc="Ile tokenów model może myśleć przed jednym krokiem; potem musi działać. Małe modele potrafią przemyśliwać proste kroki tysiącami tokenów. W evalu 4096 dało ten sam wynik ~15% szybciej."
+        label={t("Limit myślenia na turę")}
+        desc={t("Ile tokenów model może myśleć przed jednym krokiem; potem musi działać. Małe modele potrafią przemyśliwać proste kroki tysiącami tokenów. W evalu 4096 dało ten sam wynik ~15% szybciej.")}
       >
         <Segmented
           value={String(cfg.reasoning_budget_tokens ?? 0)}
           options={[
-            { value: "0", label: "bez limitu" },
+            { value: "0", label: t("bez limitu") },
             { value: "2048", label: "2k" },
             { value: "4096", label: "4k" },
             { value: "8192", label: "8k" },
@@ -720,14 +766,14 @@ function SamplingRows({ cfg, onPatch }: { cfg: SamplingConfig; onPatch: (p: Sett
         />
       </Row>
       <Row
-        label="Własne parametry próbkowania"
-        desc="Nadpisuje preset routera dla każdego zapytania do lokalnego modelu (konfiguracja routera zostaje bez zmian). Puste pole = wartość z presetu."
+        label={t("Własne parametry próbkowania")}
+        desc={t("Nadpisuje preset routera dla każdego zapytania do lokalnego modelu (konfiguracja routera zostaje bez zmian). Puste pole = wartość z presetu.")}
       >
         <Toggle value={cfg.enabled} onChange={(v) => onPatch({ sampling: { enabled: v } })} />
       </Row>
       {cfg.enabled && (
         <div className="sampling-grid">
-          {SAMPLING_FIELDS.map((f) => (
+          {samplingFields().map((f) => (
             <label key={f.key}>
               <span>{f.label}</span>
               <OptionalNumber value={cfg[f.key]} step={f.step} placeholder={f.hint} onCommit={(v) => onPatch({ sampling: { [f.key]: v } })} />
@@ -754,8 +800,8 @@ function OptionalNumber({
   const [draft, setDraft] = useState(value === null ? "" : String(value));
   useEffect(() => setDraft(value === null ? "" : String(value)), [value]);
   const commit = () => {
-    const t = draft.trim().replace(",", ".");
-    const n = t === "" ? null : Number(t);
+    const raw = draft.trim().replace(",", ".");
+    const n = raw === "" ? null : Number(raw);
     if (n !== null && !Number.isFinite(n)) return setDraft(value === null ? "" : String(value));
     if (n !== value) onCommit(n);
   };
@@ -788,36 +834,36 @@ export function AppearanceSection({
   const custom = a.accent !== null || a.background !== null || a.imageUrl !== null || a.theme !== "system";
   return (
     <>
-      <h2>Wygląd</h2>
+      <h2>{t("Wygląd")}</h2>
       <Row
-        label="Motyw"
-        desc={a.background ? "Ustala go teraz kolor tła (jasne tło → jasny motyw), żeby tekst był czytelny." : undefined}
+        label={t("Motyw")}
+        desc={a.background ? t("Ustala go teraz kolor tła (jasne tło → jasny motyw), żeby tekst był czytelny.") : undefined}
       >
         <Segmented
           value={a.theme}
           options={[
-            { value: "system", label: "systemowy" },
-            { value: "dark", label: "ciemny" },
-            { value: "light", label: "jasny" },
+            { value: "system", label: t("systemowy") },
+            { value: "dark", label: t("ciemny") },
+            { value: "light", label: t("jasny") },
           ]}
           onChange={(v) => onPatch({ theme: v as Appearance["theme"] })}
         />
       </Row>
-      <Row label="Kolor akcentu" desc="Przyciski, zaznaczenia, ikony. Logo zostaje w kolorze marki.">
+      <Row label={t("Kolor akcentu")} desc={t("Przyciski, zaznaczenia, ikony. Logo zostaje w kolorze marki.")}>
         <Swatches colors={ACCENTS} value={a.accent} onChange={(accent) => onPatch({ accent })} />
       </Row>
-      <Row label="Kolor tła" desc="Z niego liczone są panele, dymki i bloki kodu.">
+      <Row label={t("Kolor tła")} desc={t("Z niego liczone są panele, dymki i bloki kodu.")}>
         <Swatches colors={BACKGROUNDS} value={a.background} onChange={(background) => onPatch({ background })} />
       </Row>
-      <Row label="Obraz tła" desc="Zdjęcie pod całym oknem. Zapisywane zmniejszone (maks. 2560 px) obok ustawień pi.">
+      <Row label={t("Obraz tła")} desc={t("Zdjęcie pod całym oknem. Zapisywane zmniejszone (maks. 2560 px) obok ustawień pi.")}>
         <div className="bg-pick">
           {a.imageUrl && <img className="bg-thumb" src={a.imageUrl} alt="" />}
           <button className="btn" disabled={busy} onClick={() => fileRef.current?.click()}>
             <ImagePlus size={14} />
-            {busy ? "wczytywanie…" : a.imageUrl ? "Zmień…" : "Wybierz obraz…"}
+            {busy ? t("wczytywanie…") : a.imageUrl ? t("Zmień…") : t("Wybierz obraz…")}
           </button>
           {a.imageUrl && (
-            <button className="icon-btn" title="Usuń obraz" onClick={() => onImage(null)}>
+            <button className="icon-btn" title={t("Usuń obraz")} onClick={() => onImage(null)}>
               <Trash2 size={15} />
             </button>
           )}
@@ -836,15 +882,15 @@ export function AppearanceSection({
       </Row>
       {a.imageUrl && (
         <>
-          <Row label="Przyciemnienie obrazu" desc="Ile koloru tła kłaść na zdjęcie — wyżej = czytelniejszy tekst.">
+          <Row label={t("Przyciemnienie obrazu")} desc={t("Ile koloru tła kłaść na zdjęcie — wyżej = czytelniejszy tekst.")}>
             <Slider value={a.image.dim} min={0} max={0.95} step={0.01} format={(v) => `${Math.round(v * 100)}%`} onChange={(dim) => onPatch({ image: { dim } })} />
           </Row>
-          <Row label="Rozmycie obrazu">
+          <Row label={t("Rozmycie obrazu")}>
             <Slider value={a.image.blur} min={0} max={40} step={1} format={(v) => `${v} px`} onChange={(blur) => onPatch({ image: { blur } })} />
           </Row>
         </>
       )}
-      <Row label="Przywróć domyślny wygląd">
+      <Row label={t("Przywróć domyślny wygląd")}>
         <button
           className="btn"
           disabled={!custom}
@@ -854,7 +900,7 @@ export function AppearanceSection({
           }}
         >
           <RotateCcw size={14} />
-          Resetuj
+          {t("Resetuj")}
         </button>
       </Row>
     </>
@@ -866,11 +912,11 @@ function Swatches({ colors, value, onChange }: { colors: string[]; value: string
   const isCustom = value !== null && !colors.includes(value);
   return (
     <div className="swatches">
-      <button className={`swatch auto ${value === null ? "on" : ""}`} title="Domyślny motywu" onClick={() => onChange(null)} />
+      <button className={`swatch auto ${value === null ? "on" : ""}`} title={t("Domyślny motywu")} onClick={() => onChange(null)} />
       {colors.map((c) => (
         <button key={c} className={`swatch ${value === c ? "on" : ""}`} style={{ background: c }} title={c} onClick={() => onChange(c)} />
       ))}
-      <label className={`swatch custom ${isCustom ? "on" : ""}`} title="Własny kolor" style={isCustom ? { background: value } : undefined}>
+      <label className={`swatch custom ${isCustom ? "on" : ""}`} title={t("Własny kolor")} style={isCustom ? { background: value } : undefined}>
         <input type="color" value={value ?? "#808080"} onChange={(e) => onChange(e.target.value)} />
       </label>
     </div>
