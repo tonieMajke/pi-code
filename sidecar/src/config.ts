@@ -1,7 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 import type { GuiConfig, ToolPolicy } from "../../shared/protocol.js";
 import { DEFAULT_CONSTITUTION } from "./constitution.js";
+import { BrokenJsonError, readJsonObject, updateJsonObject } from "./json-file.js";
 
 export const DEFAULT_CONFIG: GuiConfig = {
   constitution: { enabled: true, hard: true, text: "", maxNudges: 2 },
@@ -44,13 +43,16 @@ type Section = Exclude<keyof GuiConfig, "tools" | "onboarded" | "terminal" | "te
 /** GUI-owned config next to pi's settings.json (pi drops unknown keys from its own file). */
 export class GuiConfigStore {
   private config: GuiConfig;
+  /** The file was broken at start: running on defaults, nothing is written until it is fixed. */
+  readonly broken: BrokenJsonError | null = null;
 
   constructor(private readonly file: string) {
     let raw: Partial<GuiConfig> = {};
     try {
-      raw = JSON.parse(readFileSync(file, "utf8")) as Partial<GuiConfig>;
-    } catch {
-      /* missing or unreadable — defaults */
+      raw = readJsonObject(file) as Partial<GuiConfig>;
+    } catch (e) {
+      if (e instanceof BrokenJsonError) this.broken = e;
+      /* unreadable — defaults */
     }
     this.config = {
       constitution: { ...DEFAULT_CONFIG.constitution, ...raw.constitution },
@@ -125,14 +127,8 @@ export class GuiConfigStore {
     this.save();
   }
 
+  /** Keys this store does not own (voice, anything newer) stay as they are in the file. */
   private save(): void {
-    let raw: Record<string, unknown> = {};
-    try {
-      raw = JSON.parse(readFileSync(this.file, "utf8")) as Record<string, unknown>;
-    } catch {
-      /* new file */
-    }
-    mkdirSync(dirname(this.file), { recursive: true });
-    writeFileSync(this.file, `${JSON.stringify({ ...raw, ...this.config }, null, 2)}\n`);
+    updateJsonObject(this.file, (raw) => ({ ...raw, ...this.config }));
   }
 }

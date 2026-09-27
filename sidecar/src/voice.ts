@@ -1,9 +1,9 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
 import type { VoiceConfig, VoiceInput, VoiceKeySource, VoiceProvider, VoiceState } from "../../shared/protocol.js";
 import { t } from "../../shared/i18n.js";
+import { readJsonObject, updateJsonObject, writeJsonAtomic } from "./json-file.js";
 
 /**
  * Dictation: the microphone is recorded here, not in the webview — WebKitGTK's getUserMedia
@@ -223,9 +223,7 @@ export class VoiceKeys {
     const keys = this.read();
     if (key.trim()) keys[provider] = key.trim();
     else delete keys[provider];
-    mkdirSync(dirname(this.file), { recursive: true });
-    writeFileSync(this.file, `${JSON.stringify(keys, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(this.file, 0o600);
+    writeJsonAtomic(this.file, keys, 0o600);
   }
 
   /** Stored here → env → the same service's key already on this machine (pi, MowaWszędzie). */
@@ -263,7 +261,7 @@ export class VoiceStore {
 
   get(): VoiceConfig {
     try {
-      const raw = (JSON.parse(readFileSync(this.file, "utf8")) as { voice?: Partial<VoiceConfig> }).voice ?? {};
+      const raw = (readJsonObject(this.file) as { voice?: Partial<VoiceConfig> }).voice ?? {};
       const c = { ...DEFAULT_VOICE, ...raw };
       if (!(c.provider in VOICE_PRESETS)) c.provider = DEFAULT_VOICE.provider;
       return c;
@@ -272,19 +270,13 @@ export class VoiceStore {
     }
   }
 
+  /** Only the "voice" key changes; a broken file throws (BrokenJsonError) instead of being replaced. */
   update(patch: Partial<VoiceConfig>): VoiceConfig {
-    let raw: Record<string, unknown> = {};
-    try {
-      raw = JSON.parse(readFileSync(this.file, "utf8")) as Record<string, unknown>;
-    } catch {
-      /* new file */
-    }
     const next = { ...this.get(), ...patch };
     // Switching provider starts from that provider's defaults.
     if (patch.provider && patch.baseUrl === undefined) next.baseUrl = "";
     if (patch.provider && patch.model === undefined) next.model = "";
-    mkdirSync(dirname(this.file), { recursive: true });
-    writeFileSync(this.file, `${JSON.stringify({ ...raw, voice: next }, null, 2)}\n`);
+    updateJsonObject(this.file, (raw) => ({ ...raw, voice: next }));
     return next;
   }
 }

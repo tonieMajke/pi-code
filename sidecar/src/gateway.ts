@@ -230,6 +230,7 @@ export class PiGateway {
     initTheme(this.services.settingsManager.getTheme(), false);
     // PI_GUI_CONFIG lets the eval harness run profiles without touching the user's file.
     this.config = new GuiConfigStore(process.env.PI_GUI_CONFIG ?? `${this.services.agentDir}/pi-gui.json`);
+    if (this.config.broken) this.out({ kind: "notice", level: "error", text: this.config.broken.message });
     setSampling(this.config.get().sampling);
     this.memory = new MemoryStore(process.env.PI_GUI_MEMORY ?? join(this.services.agentDir, "memory", "user.md"));
     // PI_GUI_EPHEMERAL (eval harness): keep throwaway runs out of the user's session history.
