@@ -696,16 +696,17 @@ export default function App() {
     const text = input.trim();
     const images = attachments.length ? attachments : undefined;
     if ((!text && !images) || !state.connected) return;
-    if (!state.model) {
-      // Nothing to send to (the wizard was skipped). pi answers this with a wall of paths, and the
-      // fix is one setting away, so the Enter key opens it instead of failing in the transcript.
-      dispatch({ type: "info", text: noModelHint(), level: "warning" });
-      openSettings("providers");
-      return;
-    }
+    // Commands first: /login and /model are how a model gets picked, so they work without one.
     const slash = images ? null : parseSlash(text);
     if (slash) {
       runSlash(slash.name, slash.args);
+      return;
+    }
+    if (!state.model) {
+      // Nothing to send to (the wizard was skipped). pi answers this with a wall of paths, and the
+      // fix is one setting away. The composer routes Enter to the setting; this guards other callers.
+      dispatch({ type: "info", text: noModelHint(), level: "warning" });
+      openSettings("providers");
       return;
     }
     setInput("");

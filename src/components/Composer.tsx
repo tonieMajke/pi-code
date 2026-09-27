@@ -365,8 +365,13 @@ export function Composer({
       : null;
 
   // No model = nothing to send to: pi would answer with a wall of paths about API keys (/login,
-  // node_modules/.../providers.md). Enter, the send button and the mic all read this one flag.
-  const canSend = connected && Boolean(model) && (value.trim().length > 0 || attachments.length > 0) && !blocked;
+  // node_modules/.../providers.md). Enter and the send button read this one flag. A slash command
+  // still goes: /login and /model are how a model gets picked in the first place.
+  const hasInput = value.trim().length > 0 || attachments.length > 0;
+  const isCommand = attachments.length === 0 && value.trimStart().startsWith("/");
+  const canSend = connected && (Boolean(model) || isCommand) && hasInput && !blocked;
+  /** Enter with text but no model: open the provider settings instead of doing nothing. */
+  const needsModel = connected && !model && !isCommand && hasInput && !blocked;
   const current = modeInfo(mode);
   const ModeIcon = current.icon;
   const modeItems: MenuItem[] = MODES.map((m) => {
@@ -549,6 +554,7 @@ export function Composer({
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               if (canSend) onSend();
+              else if (needsModel) onProviders();
             }
           }}
           placeholder={

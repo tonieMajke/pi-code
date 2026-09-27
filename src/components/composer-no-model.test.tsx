@@ -86,6 +86,28 @@ describe("composer without a model", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("Enter with text opens the provider setting", () => {
+    const onSend = vi.fn();
+    const onProviders = vi.fn();
+    render(<Harness onSend={onSend} onProviders={onProviders} />);
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "zrób kubek" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onProviders).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("a slash command with arguments still goes: /login is how a model gets there", () => {
+    const onSend = vi.fn();
+    const onProviders = vi.fn();
+    render(<Harness onSend={onSend} onProviders={onProviders} />);
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "/login anthropic" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onProviders).not.toHaveBeenCalled();
+  });
+
   it("with a model, Enter sends again", () => {
     const onSend = vi.fn();
     render(<Harness model="Swift" onSend={onSend} />);
