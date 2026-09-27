@@ -473,4 +473,11 @@ export const EN: Record<string, string> = {
   "tylko terminal": "terminal only",
   "brak takiej komendy": "no such command",
   "projekt": "project",
+  "PI_CODE_NODE wskazuje na {node}, a to nie jest działający Node.js. Proces pi potrzebuje Node {required} lub nowszego. Popraw PI_CODE_NODE (albo usuń tę zmienną, żeby użyć systemowego node) i uruchom Pi Code ponownie.": "PI_CODE_NODE points at {node}, which is not a working Node.js. The pi process needs Node {required} or newer. Fix PI_CODE_NODE (or unset it to use the system node) and start Pi Code again.",
+  "PI_CODE_NODE wskazuje na Node {detected} ({node}), a proces pi potrzebuje Node {required} lub nowszego. Wskaż nowszą binarkę w PI_CODE_NODE (albo usuń tę zmienną) i uruchom Pi Code ponownie.": "PI_CODE_NODE points at Node {detected} ({node}), but the pi process needs Node {required} or newer. Point PI_CODE_NODE at a newer binary (or unset it) and start Pi Code again.",
+  "kod wyjścia {code}": "exit code {code}",
+  "zabity sygnałem": "killed by a signal",
+  "Proces pi (sidecar) nie wstał ponownie — powód i poprawka są nad czatem.": "The pi process (sidecar) did not come back — the reason and the fix are above the chat.",
+  "Pokaż Pi Code": "Show Pi Code",
+  "Zakończ": "Quit",
 };

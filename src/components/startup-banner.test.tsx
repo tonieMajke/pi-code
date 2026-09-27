@@ -32,6 +32,13 @@ describe("StartupBanner", () => {
     expect(text()).not.toMatch(/uruchom|Zainstaluj/);
   });
 
+  it("blames PI_CODE_NODE, not the missing install, when that variable was the only candidate", () => {
+    setLang("en");
+    render(<StartupBanner problem={{ ...missing, node: "/usr/bin/python3", from_env: true }} onDismiss={() => {}} />);
+    expect(text()).toContain("PI_CODE_NODE points at /usr/bin/python3");
+    expect(text()).not.toContain("Install Node");
+  });
+
   it("keeps the raw spawn error in the sentence", () => {
     render(<StartupBanner problem={spawn} onDismiss={() => {}} />);
     expect(text()).toContain("Permission denied (os error 13)");

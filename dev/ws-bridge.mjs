@@ -38,7 +38,9 @@ function startSidecar() {
     while (restarts.length && now - restarts[0] > 60000) restarts.shift();
     restarts.push(now);
     const giveUp = restarts.length > 3;
-    for (const ws of wss.clients) ws.close(4002, JSON.stringify({ why, restarting: !giveUp }).slice(0, 120));
+    // `code` (null = signal) is what the UI words in its language; `why` is for older UIs.
+    const reason = JSON.stringify({ why, code, restarting: !giveUp });
+    for (const ws of wss.clients) ws.close(4002, reason.slice(0, 120));
     if (giveUp) process.exit(code ?? 1);
     setTimeout(startSidecar, 500);
   });

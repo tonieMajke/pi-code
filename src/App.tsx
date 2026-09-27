@@ -17,7 +17,7 @@ import { Welcome } from "./components/Welcome";
 import type { BackgroundBlock, ClientCommandInput, OnboardingState, SessionStatus } from "../shared/protocol";
 import { initialState, reducer, type InfoLevel, type LivePerf } from "./lib/reducer";
 import { pushVoiceLevel } from "./lib/voice-meter";
-import { createWsTransport, type PiRequest, type PiTransport } from "./lib/transport";
+import { createWsTransport, downReason, type PiRequest, type PiTransport } from "./lib/transport";
 import { lang, plural, t } from "../shared/i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { createTauriTransport, inTauri, readStartupProblem, type StartupProblem } from "./lib/tauri";
@@ -491,14 +491,18 @@ export default function App() {
       queuedOpenRef.current = null;
       setSwitching(false);
       dispatch({ type: "connected", ok: false });
-      const text = down.restarting
-        ? t("Proces pi (sidecar) zakończył się ({why}) — uruchamiam go ponownie…", { why: down.why })
-        : t("Proces pi (sidecar) zakończył się ({why}) i nie da się go podnieść. Uruchom Pi Code ponownie.", { why: down.why });
+      // The restart itself failed (node gone or too old): the banner names the fix, the line here
+      // only points at it. Otherwise the exit code, worded in the UI language.
+      if (down.startup) setStartup(down.startup);
+      const text = down.startup
+        ? t("Proces pi (sidecar) nie wstał ponownie — powód i poprawka są nad czatem.")
+        : down.restarting
+          ? t("Proces pi (sidecar) zakończył się ({why}) — uruchamiam go ponownie…", { why: downReason(down) })
+          : t("Proces pi (sidecar) zakończył się ({why}) i nie da się go podnieść. Uruchom Pi Code ponownie.", { why: downReason(down) });
       dispatch({ type: "info", text, level: "error" });
       toast(text, down.restarting ? "warning" : "error");
-      // A sidecar that will not come back usually means node is missing or too old: the shell
-      // recorded why, and that message names the fix (the toast line only carries the exit code).
-      void readStartupProblem().then((p) => p && setStartup(p));
+      // An older shell sends no `startup`, but records it all the same.
+      if (!down.startup && !down.restarting) void readStartupProblem().then((p) => p && setStartup(p));
     });
     return () => {
       off();
@@ -857,6 +861,11 @@ export default function App() {
     send({ cmd: "onboarding_done" });
     requestAnimationFrame(() => inputRef.current?.focus());
   };
+
+  // The tray menu is built in Rust, which does not know the UI language.
+  useEffect(() => {
+    if (inTauri()) void invoke("set_tray_labels", { show: t("Pokaż Pi Code"), quit: t("Zakończ") }).catch(() => undefined);
+  }, []);
 
   // Rust owns the close button's behaviour; tell it the user's choice (and on every start).
   useEffect(() => {

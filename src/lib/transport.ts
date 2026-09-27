@@ -1,5 +1,6 @@
 import type { ClientCommand, ClientCommandInput, SidecarOut } from "../../shared/protocol";
 import { t } from "../../shared/i18n";
+import { startupProblemText, type StartupProblem } from "./startup";
 
 /** One command, its reply as a promise (App keeps one pending request per command name). */
 export type PiRequest = <T = unknown>(cmd: ClientCommandInput) => Promise<T>;
@@ -15,8 +16,21 @@ export interface PiTransport {
 }
 
 export interface SidecarDown {
+  /** The shell's own words, for the log; the UI words `code` / `startup` itself (downReason). */
   why: string;
   restarting: boolean;
+  /** Exit code; null = killed by a signal; absent = an older shell or bridge, `why` then. */
+  code?: number | null;
+  /** The restart failed before the sidecar ran (no node, node too old). */
+  startup?: StartupProblem;
+}
+
+/** Why the sidecar went down, in the UI language. */
+export function downReason(d: SidecarDown): string {
+  if (d.startup) return startupProblemText(d.startup);
+  if (typeof d.code === "number") return t("kod wyjścia {code}", { code: d.code });
+  if (d.code === null) return t("zabity sygnałem");
+  return d.why;
 }
 
 /** WS close code the dev bridge uses when its sidecar exited (reason: JSON SidecarDown). */
@@ -28,7 +42,7 @@ export function downFromClose(code: number, reason: string): SidecarDown {
   if (code === CLOSE_SIDECAR_EXIT) {
     try {
       const d = JSON.parse(reason) as Partial<SidecarDown>;
-      return { why: String(d.why ?? ""), restarting: d.restarting !== false };
+      return { why: String(d.why ?? ""), code: d.code, restarting: d.restarting !== false };
     } catch {
       return { why: reason, restarting: true };
     }

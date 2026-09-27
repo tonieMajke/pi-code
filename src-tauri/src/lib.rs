@@ -77,15 +77,16 @@ pub fn parse_node_version(raw: &str) -> Option<(u32, u32, u32)> {
     Some((next()?, next()?, next()?))
 }
 
-/// Why the sidecar never started. The UI translates it (`pi_startup_problem`); `Display` is the
-/// one-line Polish text for the log and for `pi:down`.
-#[derive(Clone, Serialize)]
+/// Why the sidecar never started: facts only, the UI words them (`startupProblemText`) in its
+/// language. `Display` is for the log. `from_env` = the only candidate was `$PI_CODE_NODE`, so
+/// the fix is that variable, not installing node.
+#[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StartupProblem {
-    /// None of the node candidates runs.
-    NodeMissing { node: String, required: String },
-    /// A node runs, but its version is too old (or cannot be read).
-    NodeTooOld { node: String, detected: String, required: String },
+    /// None of the candidates runs and answers `--version` like node does.
+    NodeMissing { node: String, required: String, from_env: bool },
+    /// A node runs, but its version is too old.
+    NodeTooOld { node: String, detected: String, required: String, from_env: bool },
     /// node is fine, the spawn itself failed.
     Spawn { error: String },
 }
@@ -93,53 +94,73 @@ pub enum StartupProblem {
 impl std::fmt::Display for StartupProblem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StartupProblem::NodeMissing { node, required } => {
-                write!(f, "nie znaleziono Node.js (sprawdzono: {node}) — potrzebny Node {required}")
+            StartupProblem::NodeMissing { node, required, .. } => {
+                write!(f, "no Node.js (checked: {node}), Node {required} or newer is needed")
             }
-            StartupProblem::NodeTooOld { node, detected, required } => {
-                write!(f, "Node {detected} ({node}) jest za stary — potrzebny Node {required}")
+            StartupProblem::NodeTooOld { node, detected, required, .. } => {
+                write!(f, "Node {detected} ({node}) is too old, Node {required} or newer is needed")
             }
-            StartupProblem::Spawn { error } => write!(f, "nie da się uruchomić: {error}"),
+            StartupProblem::Spawn { error } => write!(f, "cannot start the sidecar: {error}"),
         }
     }
 }
 
 /// First candidate that runs and reports at least `MIN_NODE`; `probe` is its `node --version`
-/// (None = the binary is not there or does not run). Such candidates are skipped, so a stale
-/// `$PI_CODE_NODE` does not hide a working system node. When only old ones are left, the last of
-/// them names the version in the message.
-pub fn pick_node<S: AsRef<str>, P: Fn(&str) -> Option<String>>(candidates: &[S], probe: P) -> Result<usize, StartupProblem> {
+/// (None = the binary is not there, does not run or hangs). Output that is not a node version
+/// (`PI_CODE_NODE` pointing at python) counts as no node. When only old ones are left, the last
+/// of them names the version in the message.
+pub fn pick_node<S: AsRef<str>, P: Fn(&str) -> Option<String>>(
+    candidates: &[S],
+    from_env: bool,
+    probe: P,
+) -> Result<usize, StartupProblem> {
     let required = version_text(MIN_NODE);
     let mut checked: Vec<String> = Vec::new();
     let mut too_old: Option<(String, String)> = None;
     for (i, c) in candidates.iter().enumerate() {
         let bin = c.as_ref();
-        match probe(bin).as_deref().map(str::trim) {
-            Some(raw) => match parse_node_version(raw) {
-                Some(v) if v >= MIN_NODE => return Ok(i),
-                _ => too_old = Some((bin.to_string(), raw.to_string())),
-            },
+        let raw = probe(bin);
+        match raw.as_deref().map(str::trim).and_then(|r| parse_node_version(r).map(|v| (r, v))) {
+            Some((_, v)) if v >= MIN_NODE => return Ok(i),
+            Some((r, _)) => too_old = Some((bin.to_string(), r.to_string())),
             None => checked.push(bin.to_string()),
         }
     }
     match too_old {
-        Some((node, detected)) => Err(StartupProblem::NodeTooOld { node, detected, required }),
-        None => Err(StartupProblem::NodeMissing { node: checked.join(", "), required }),
+        Some((node, detected)) => Err(StartupProblem::NodeTooOld { node, detected, required, from_env }),
+        None => Err(StartupProblem::NodeMissing { node: checked.join(", "), required, from_env }),
     }
 }
 
+/// `bin --version`, given up after `NODE_PROBE_MS`: this runs in `setup`, before the window shows,
+/// so a binary that hangs must not keep the app from starting.
+const NODE_PROBE_MS: u64 = 3000;
+
 fn node_version_probe(bin: &str) -> Option<String> {
-    let out = Command::new(bin)
+    let mut child = Command::new(bin)
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output()
+        .spawn()
         .ok()?;
-    if !out.status.success() {
-        return None;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(NODE_PROBE_MS);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
     }
-    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
+    Some(out.trim().to_string())
 }
 
 /// Sidecar start failure, kept for the UI: `setup` runs before the webview starts listening, so
@@ -163,6 +184,19 @@ pub struct CloseToTray(AtomicBool);
 #[tauri::command]
 fn set_close_to_tray(state: State<'_, CloseToTray>, enabled: bool) {
     state.0.store(enabled, Ordering::Relaxed);
+}
+
+/// The tray menu items, so the UI can word them in its language (`set_tray_labels`); None when
+/// there is no tray.
+pub struct TrayItems(Mutex<Option<[MenuItem<tauri::Wry>; 2]>>);
+
+/// Rust does not know the UI language: the UI sends the two labels through `t()`.
+#[tauri::command]
+fn set_tray_labels(state: State<'_, TrayItems>, show: String, quit: String) {
+    if let Some([s, q]) = state.0.lock().ok().as_deref().and_then(Option::as_ref) {
+        let _ = s.set_text(show);
+        let _ = q.set_text(quit);
+    }
 }
 
 fn show_main(app: &AppHandle) {
@@ -196,6 +230,9 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    if let Ok(mut items) = app.state::<TrayItems>().0.lock() {
+        *items = Some([show, quit]);
+    }
     Ok(())
 }
 
@@ -244,13 +281,13 @@ fn clean_sidecar_env(cmd: &mut Command) {
     cmd.env_remove("APPDIR");
 }
 
-/// Dev: `pnpm sidecar` (tsx) from the project root. Release (AppImage): the esbuild bundle
-/// from the app resources, run by `$PI_CODE_NODE` or the system `node`.
-/// Which node runs the sidecar: `$PI_CODE_NODE` alone when the user points at one, else the node
-/// bundled in the app resources (CI build, see `.github/workflows/release.yml`) with the system
-/// `node` as the fallback. Each candidate must report at least [`MIN_NODE`].
+/// Which node runs the sidecar: `$PI_CODE_NODE` alone when the user points at one (an explicit
+/// choice that does not work is reported, not silently replaced), else the node bundled in the
+/// app resources, if any, with the system `node` as the fallback. Each candidate must report at
+/// least [`MIN_NODE`].
 fn node_program(app: &AppHandle) -> Result<String, StartupProblem> {
     let mut candidates: Vec<String> = Vec::new();
+    let from_env = matches!(std::env::var_os("PI_CODE_NODE"), Some(ref p) if !p.is_empty());
     match std::env::var_os("PI_CODE_NODE") {
         Some(p) if !p.is_empty() => candidates.push(p.to_string_lossy().into_owned()),
         _ => {
@@ -263,10 +300,12 @@ fn node_program(app: &AppHandle) -> Result<String, StartupProblem> {
             candidates.push("node".to_string());
         }
     }
-    let i = pick_node(&candidates, node_version_probe)?;
+    let i = pick_node(&candidates, from_env, node_version_probe)?;
     Ok(candidates.swap_remove(i))
 }
 
+/// Dev: `pnpm sidecar` (tsx) from the project root. Release (AppImage): the esbuild bundle
+/// from the app resources, run by [`node_program`].
 fn sidecar_command(app: &AppHandle) -> Result<Command, StartupProblem> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     if cfg!(debug_assertions) {
@@ -277,7 +316,7 @@ fn sidecar_command(app: &AppHandle) -> Result<Command, StartupProblem> {
     let res = app
         .path()
         .resource_dir()
-        .map_err(|e| StartupProblem::Spawn { error: format!("brak katalogu zasobów: {e}") })?;
+        .map_err(|e| StartupProblem::Spawn { error: format!("resource dir: {e}") })?;
     let mut cmd = Command::new(node_program(app)?);
     cmd.arg(res.join("sidecar/dist/main.mjs"));
     clean_sidecar_env(&mut cmd);
@@ -332,9 +371,10 @@ fn sidecar_died(app: &AppHandle) {
     }
     drop(state.stdin.lock().ok().and_then(|mut s| s.take()));
     let status = state.child.lock().ok().and_then(|mut c| c.take()).and_then(|c| reap(c, 1000));
-    let why = match status.and_then(|s| s.code()) {
-        Some(code) => format!("kod wyjścia {code}"),
-        None => "zabity sygnałem".to_string(),
+    let code = status.and_then(|s| s.code());
+    let why = match code {
+        Some(code) => format!("exit code {code}"),
+        None => "killed by a signal".to_string(),
     };
     eprintln!("[sidecar] died: {why}");
     let now = std::time::Instant::now();
@@ -344,7 +384,8 @@ fn sidecar_died(app: &AppHandle) {
         r.push(now);
         r.len() > 3
     };
-    let _ = app.emit("pi:down", serde_json::json!({ "why": why, "restarting": !give_up }));
+    // `code` is the fact the UI words in its own language; `why` stays for older UIs and the log.
+    let _ = app.emit("pi:down", serde_json::json!({ "why": why, "code": code, "restarting": !give_up }));
     if give_up {
         return;
     }
@@ -355,7 +396,7 @@ fn sidecar_died(app: &AppHandle) {
         }
         Err(e) => {
             record_problem(app, &e);
-            let _ = app.emit("pi:down", serde_json::json!({ "why": e.to_string(), "restarting": false }));
+            let _ = app.emit("pi:down", serde_json::json!({ "why": e.to_string(), "startup": e, "restarting": false }));
         }
     }
 }
@@ -367,6 +408,7 @@ pub fn run() {
         // Links from chat open in the default browser; the capability scopes it to http(s)/mailto.
         .plugin(tauri_plugin_opener::init())
         .manage(CloseToTray(AtomicBool::new(true)))
+        .manage(TrayItems(Mutex::new(None)))
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.app_handle().state::<CloseToTray>().0.load(Ordering::Relaxed) {
@@ -398,7 +440,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![pi_send, set_close_to_tray, pi_startup_problem])
+        .invoke_handler(tauri::generate_handler![pi_send, set_close_to_tray, set_tray_labels, pi_startup_problem])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
@@ -437,27 +479,39 @@ mod tests {
     #[test]
     fn picks_the_first_node_new_enough() {
         let p = probe(&[("/opt/node/bin/node", "v22.19.0"), ("node", "v26.1.0")]);
-        assert!(matches!(pick_node(&["/opt/node/bin/node", "node"], &p), Ok(0)));
+        assert!(matches!(pick_node(&["/opt/node/bin/node", "node"], false, &p), Ok(0)));
     }
 
+    /// A bundled node that does not run (wrong arch, broken image) leaves the system one.
     #[test]
-    fn falls_back_to_system_node_when_pointed_at_nothing() {
+    fn skips_a_candidate_that_does_not_run() {
         let p = probe(&[("node", "v22.20.0")]);
-        assert!(matches!(pick_node(&["/nie/ma", "node"], &p), Ok(1)));
+        assert!(matches!(pick_node(&["/nie/ma", "node"], false, &p), Ok(1)));
+    }
+
+    /// `PI_CODE_NODE=/usr/bin/python3`: whatever it prints is not a node version.
+    #[test]
+    fn output_that_is_not_a_node_version_is_no_node() {
+        let p = probe(&[("/usr/bin/python3", "Python 3.12.4")]);
+        let err = pick_node(&["/usr/bin/python3"], true, &p).unwrap_err();
+        assert!(
+            matches!(err, StartupProblem::NodeMissing { ref node, from_env: true, .. } if node == "/usr/bin/python3"),
+            "{err:?}"
+        );
     }
 
     #[test]
     fn reports_a_node_that_is_too_old() {
         let p = probe(&[("node", "v20.0.0")]);
-        let err = pick_node(&["node"], &p).unwrap_err();
-        assert!(matches!(err, StartupProblem::NodeTooOld { .. }));
+        let err = pick_node(&["node"], false, &p).unwrap_err();
+        assert!(matches!(err, StartupProblem::NodeTooOld { from_env: false, .. }));
         let text = err.to_string();
         assert!(text.contains("20.0.0") && text.contains("22.19.0"), "{text}");
     }
 
     #[test]
     fn reports_no_node_at_all() {
-        let err = pick_node(&["/nie/ma"], &probe(&[])).unwrap_err();
+        let err = pick_node(&["/nie/ma"], false, &probe(&[])).unwrap_err();
         assert!(matches!(err, StartupProblem::NodeMissing { .. }));
         assert!(err.to_string().contains("/nie/ma"), "{err}");
     }
@@ -474,18 +528,26 @@ mod tests {
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let absent = dir.join("nie-ma");
 
-        let old = pick_node(&[fake.to_str().unwrap()], node_version_probe).unwrap_err();
+        let old = pick_node(&[fake.to_str().unwrap()], true, node_version_probe).unwrap_err();
         assert!(matches!(old, StartupProblem::NodeTooOld { ref detected, .. } if detected == "v20.0.0"), "{old}");
         assert!(old.to_string().contains("22.19.0"), "{old}");
 
-        let none = pick_node(&[absent.to_str().unwrap()], node_version_probe).unwrap_err();
+        let none = pick_node(&[absent.to_str().unwrap()], true, node_version_probe).unwrap_err();
         assert!(matches!(none, StartupProblem::NodeMissing { .. }), "{none}");
 
         // The old one is skipped when a newer one stands next to it.
-        let ok = pick_node(&[fake.to_str().unwrap(), "/usr/bin/true"], |bin| {
+        let ok = pick_node(&[fake.to_str().unwrap(), "/usr/bin/true"], false, |bin| {
             (bin == "/usr/bin/true").then(|| "v22.19.0".to_string())
         });
         assert!(matches!(ok, Ok(1)));
+
+        // A binary that never answers is given up on, not waited for: setup would hang with it.
+        let hang = dir.join("hang");
+        std::fs::write(&hang, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        std::fs::set_permissions(&hang, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(node_version_probe(hang.to_str().unwrap()), None);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

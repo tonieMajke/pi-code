@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientCommand } from "../../shared/protocol";
-import { CLOSE_BRIDGE_BUSY, CLOSE_SIDECAR_EXIT, createWsTransport, downFromClose, withId } from "./transport";
+import { setLang } from "../../shared/i18n";
+import { CLOSE_BRIDGE_BUSY, CLOSE_SIDECAR_EXIT, createWsTransport, downFromClose, downReason, withId } from "./transport";
 
 describe("withId", () => {
   it("builds a valid command for every variant", () => {
@@ -153,5 +154,24 @@ describe("downFromClose", () => {
     expect(downFromClose(CLOSE_SIDECAR_EXIT, JSON.stringify({ why: "sygnał SIGKILL", restarting: false }))).toEqual({ why: "sygnał SIGKILL", restarting: false });
     expect(downFromClose(CLOSE_SIDECAR_EXIT, "garbage")).toEqual({ why: "garbage", restarting: true });
     expect(downFromClose(1006, "")).toEqual({ why: "połączenie z mostkiem zerwane", restarting: true });
+  });
+});
+
+describe("downReason", () => {
+  afterEach(() => setLang("pl"));
+
+  it("words the exit code in the UI language, not the shell's", () => {
+    setLang("en");
+    expect(downReason({ why: "exit code 1", code: 1, restarting: true })).toBe("exit code 1");
+    expect(downReason({ why: "killed by a signal", code: null, restarting: true })).toBe("killed by a signal");
+    setLang("pl");
+    expect(downReason({ why: "exit code 1", code: 1, restarting: true })).toBe("kod wyjścia 1");
+    expect(downReason(downFromClose(CLOSE_SIDECAR_EXIT, JSON.stringify({ why: "x", code: 7, restarting: true })))).toBe("kod wyjścia 7");
+  });
+
+  it("falls back to `why` from an older shell, and names the fix for a failed restart", () => {
+    expect(downReason({ why: "kod wyjścia 3", restarting: false })).toBe("kod wyjścia 3");
+    const startup = { kind: "node_missing", node: "/opt/n", required: "22.19.0", from_env: true } as const;
+    expect(downReason({ why: "", restarting: false, startup })).toContain("PI_CODE_NODE wskazuje na /opt/n");
   });
 });
