@@ -554,6 +554,46 @@ describe("PiGateway background sessions", () => {
   });
 });
 
+describe("PiGateway: a client coming back", () => {
+  type Gate = { gate(id: string, tool: string, input: object): Promise<unknown> };
+
+  it("a re-init says the run is on and asks for the pending approval again", async () => {
+    const { gw, add } = gateway();
+    const s = { ...fakeSession(), sessionId: "front" };
+    s.state.isStreaming = true;
+    const host = add(s);
+    void (host as unknown as Gate).gate("e1", "edit", { path: "calc.py" });
+    await Promise.resolve();
+    const seen: PiEvent[] = [];
+    await gw.init((e) => seen.push(e));
+    const kinds = seen.map((e) => e.kind);
+    expect(seen).toContainEqual({ kind: "run_state", busy: true, since: undefined });
+    expect(seen).toContainEqual({ kind: "approval_request", toolCallId: "e1", toolName: "edit", args: { path: "calc.py" } });
+    // The UI clears its cards on run_state: the re-sent request must come after it.
+    expect(kinds.indexOf("run_state")).toBeLessThan(kinds.indexOf("approval_request"));
+  });
+
+  it("an idle session re-inits as not running, with nothing to approve", async () => {
+    const { gw, add } = gateway();
+    add({ ...fakeSession(), sessionId: "front" });
+    const seen: PiEvent[] = [];
+    await gw.init((e) => seen.push(e));
+    expect(seen).toContainEqual({ kind: "run_state", busy: false, since: undefined });
+    expect(seen.some((e) => e.kind === "approval_request")).toBe(false);
+  });
+
+  it("Stop denies a pending approval, so the run parked on it goes on", async () => {
+    const { gw, add, events } = gateway();
+    const host = add({ ...fakeSession(), sessionId: "front" });
+    const answer = (host as unknown as Gate).gate("e1", "edit", { path: "calc.py" });
+    await Promise.resolve();
+    await gw.abort();
+    await expect(answer).resolves.toMatchObject({ block: true });
+    expect(host.hasApproval("e1")).toBe(false);
+    expect(events).toContainEqual({ kind: "approval_done", toolCallId: "e1", decision: "deny" });
+  });
+});
+
 describe("PiGateway switching", () => {
   it("a run in the session being left does not stream into the new view while that one starts", async () => {
     const { internal, add, all } = gateway();

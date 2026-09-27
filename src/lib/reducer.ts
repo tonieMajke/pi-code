@@ -206,6 +206,12 @@ function attachStats(messages: Msg[], stats: RequestStats): Msg[] {
   return messages;
 }
 
+/** The last turn of a session still running stays open (text and tools keep landing in it). */
+function reopenLast(messages: Msg[]): Msg[] {
+  const last = messages[messages.length - 1];
+  return last?.role === "assistant" && !last.open ? [...messages.slice(0, -1), { ...last, open: true }] : messages;
+}
+
 function historyMessages(items: HistoryItem[]): Msg[] {
   return items.map((i): Msg =>
     i.role === "user"
@@ -268,7 +274,8 @@ export function reducer(state: State, action: Action): State {
     case "models":
       return { ...state, models: action.models };
     case "history":
-      return { ...state, messages: historyMessages(action.items) };
+      // Reloaded mid-run (run_state came first): the last turn is still going.
+      return { ...state, messages: state.busy ? reopenLast(historyMessages(action.items)) : historyMessages(action.items) };
     case "connected": {
       if (action.ok) return { ...state, connected: true };
       // The sidecar is gone: nothing is running any more and nothing will answer.
@@ -308,11 +315,9 @@ export function reducer(state: State, action: Action): State {
           // A session being opened: its transcript replaces whatever was on screen. A session
           // brought back from the background mid-run keeps working: its last turn stays open.
           const messages = historyMessages(e.items);
-          const last = messages[messages.length - 1];
-          if (e.busy && last?.role === "assistant") messages[messages.length - 1] = { ...last, open: true };
           return {
             ...state,
-            messages,
+            messages: e.busy ? reopenLast(messages) : messages,
             busy: e.busy ?? false,
             busySince: e.busy ? (e.since ?? action.at ?? null) : null,
             sessionPath: e.sessionPath,
@@ -410,10 +415,21 @@ export function reducer(state: State, action: Action): State {
           return { ...state, mode: e.mode };
         case "terminal_state":
           return { ...state, terminalOpen: e.open };
+        case "run_state":
+          // A client came back: the sidecar says where the run stands and re-sends what is pending.
+          return {
+            ...state,
+            busy: e.busy,
+            busySince: e.busy ? (e.since ?? state.busySince ?? at ?? null) : null,
+            perf: e.busy ? state.perf : null,
+            approvals: [],
+            dialogs: [],
+            messages: e.busy ? reopenLast(state.messages) : state.messages.map((m) => (m.role === "assistant" ? settleTurn(m, at) : m)),
+          };
         case "approval_request":
           return {
             ...state,
-            approvals: [...state.approvals, { toolCallId: e.toolCallId, toolName: e.toolName, args: e.args }],
+            approvals: [...state.approvals.filter((a) => a.toolCallId !== e.toolCallId), { toolCallId: e.toolCallId, toolName: e.toolName, args: e.args }],
             messages: at === undefined ? state.messages : mapTool(state.messages, e.toolCallId, (t) => ({ ...t, wait: [at] })),
           };
         case "approval_done":

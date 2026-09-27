@@ -351,3 +351,46 @@ describe("status bar step count", () => {
     expect(s.steps).toBe(0);
   });
 });
+
+describe("reducer: a client coming back mid-run", () => {
+  const items = [
+    { role: "user" as const, text: "popraw" },
+    { role: "assistant" as const, parts: [{ type: "tool" as const, tool: { id: "e1", name: "edit", args: {}, status: "running" as const, summary: "" } }] },
+  ];
+
+  it("a reloaded page: run_state, the re-sent approval and the history reply give back the card and an open turn", () => {
+    let s = reducer(initialState, ev({ kind: "run_state", busy: true, since: 100 }, 500));
+    s = reducer(s, ev({ kind: "approval_request", toolCallId: "e1", toolName: "edit", args: { path: "calc.py" } }, 510));
+    s = reducer(s, { type: "history", items });
+    expect(s.busy).toBe(true);
+    expect(s.busySince).toBe(100);
+    expect(s.approvals).toEqual([{ toolCallId: "e1", toolName: "edit", args: { path: "calc.py" } }]);
+    expect(lastAssistant(s).open).toBe(true);
+    expect(tools(lastAssistant(s).parts)[0].status).toBe("running");
+  });
+
+  it("a card the UI still holds is replaced, not doubled", () => {
+    let s = reducer(initialState, ev({ kind: "approval_request", toolCallId: "e1", toolName: "edit", args: {} }, 1));
+    s = reducer(s, ev({ kind: "run_state", busy: true }, 2));
+    expect(s.approvals).toEqual([]);
+    s = reducer(s, ev({ kind: "approval_request", toolCallId: "e1", toolName: "edit", args: {} }, 3));
+    s = reducer(s, ev({ kind: "approval_request", toolCallId: "e1", toolName: "edit", args: {} }, 4));
+    expect(s.approvals).toHaveLength(1);
+  });
+
+  it("the run ended while the page was gone: not busy, the open turn is closed, a running tool marked cut off", () => {
+    let s = reducer(initialState, { type: "user", text: "a", at: 1 });
+    s = reducer(s, ev({ kind: "tool_start", toolCallId: "t1", toolName: "bash", args: {} }, 2));
+    s = reducer(s, ev({ kind: "approval_request", toolCallId: "t1", toolName: "bash", args: {} }, 3));
+    s = reducer(s, ev({ kind: "run_state", busy: false }, 9));
+    expect(s.busy).toBe(false);
+    expect(s.approvals).toEqual([]);
+    expect(lastAssistant(s).open).toBe(false);
+    expect(tools(lastAssistant(s).parts)[0].status).toBe("error");
+  });
+
+  it("the history reply of an idle session stays closed", () => {
+    const s = reducer(initialState, { type: "history", items });
+    expect(lastAssistant(s).open).toBe(false);
+  });
+});

@@ -210,6 +210,10 @@ export class PiGateway {
       await this.active.emitInit();
       this.active.emitUsage(); // a reloaded page starts with no context count
       for (const h of this.hosts.values()) onEvent(h.statusEvent(), h.id);
+      // The page lost its run state and approval cards: a run parked on an approval would wait
+      // for an answer nobody can give (and Esc did nothing — the UI thought it was idle).
+      onEvent({ kind: "run_state", busy: this.active.busy, since: this.active.busySince ?? undefined }, this.active.id);
+      this.active.replay();
       return;
     }
     const workingDir = cwd ?? process.cwd();

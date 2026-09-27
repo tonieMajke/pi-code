@@ -670,6 +670,11 @@ export type PiEvent =
   | { kind: "mode"; mode: PermissionMode }
   | { kind: "approval_request"; toolCallId: string; toolName: string; args: unknown }
   | { kind: "approval_done"; toolCallId: string; decision: ApprovalDecision }
+  /**
+   * A client came back (reloaded page, reconnected socket): is the session on screen mid-run, since when (ms).
+   * The UI drops the approvals and dialogs it holds; the pending ones follow as approval_request / ui_request.
+   */
+  | { kind: "run_state"; busy: boolean; since?: number }
   | { kind: "status"; busy: boolean }
   /** Message from an extension (ctx.ui.notify) or a dialog the GUI cannot show. */
   | { kind: "notice"; level: "info" | "warning" | "error"; text: string }

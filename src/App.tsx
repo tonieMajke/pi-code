@@ -947,13 +947,14 @@ export default function App() {
       } else if (e.key === "Tab" && e.shiftKey && !mod) {
         e.preventDefault();
         setMode(nextMode(state.mode));
-      } else if (e.key === "Escape" && state.busy && !e.defaultPrevented) {
+      } else if (e.key === "Escape" && (state.busy || state.approvals.length > 0) && !e.defaultPrevented) {
+        // A pending approval is denied by the stop (sidecar), whatever the UI thinks of the run.
         stop();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newSession, toggleSidebar, stop, setMode, openFind, state.busy, state.mode, sidebarOpen]);
+  }, [newSession, toggleSidebar, stop, setMode, openFind, state.busy, state.approvals.length, state.mode, sidebarOpen]);
 
   const approval = state.approvals[0];
   const awaiting = new Set(state.approvals.map((a) => a.toolCallId));
