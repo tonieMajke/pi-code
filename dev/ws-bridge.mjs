@@ -5,6 +5,14 @@ import { WebSocketServer } from "ws";
  * Dev bridge: wraps the sidecar's stdio JSONL with a local WebSocket,
  * so the React UI can be developed in a browser against the real sidecar.
  * In the Tauri shell the same sidecar is spawned in-process (no WS).
+ *
+ * Environment:
+ *   PORT              WebSocket port (default 9877).
+ *   CWD               project the first session starts in; passed to the sidecar as PI_GUI_CWD
+ *                     (default: the sidecar's own directory, this repo).
+ * On the UI side, VITE_BRIDGE_PORT points vite at a bridge on another port:
+ *   PORT=9931 CWD=~/proj node dev/ws-bridge.mjs
+ *   VITE_BRIDGE_PORT=9931 node_modules/.bin/vite --port 5191 --strictPort
  */
 const PORT = process.env.PORT ? Number(process.env.PORT) : 9877;
 const CWD = process.env.CWD;

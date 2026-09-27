@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { PiEvent } from "../../shared/protocol";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { PiGateway } from "./gateway";
+import { PiGateway, startCwd } from "./gateway";
 import { historyOf, SessionHost, type HostEnv } from "./session-host";
 
 /** Fake AgentSession: captures the subscriber, lets tests push SDK events. */
@@ -577,6 +577,15 @@ describe("PiGateway background sessions", () => {
     });
     await new Promise((r) => setTimeout(r, 20)); // emitInit reads the git branch
     expect(events).toContainEqual({ kind: "approval_request", toolCallId: "t1", toolName: "bash", args: { command: "touch x" } });
+  });
+});
+
+describe("startCwd: where the first session starts", () => {
+  it("the client's cwd, else PI_GUI_CWD (dev bridge CWD=…), else the sidecar's own directory", () => {
+    expect(startCwd("/proj/a", { PI_GUI_CWD: "/proj/b" })).toBe("/proj/a");
+    expect(startCwd(undefined, { PI_GUI_CWD: "/proj/b" })).toBe("/proj/b");
+    expect(startCwd(undefined, { PI_GUI_CWD: "" })).toBe(process.cwd());
+    expect(startCwd(undefined, {})).toBe(process.cwd());
   });
 });
 

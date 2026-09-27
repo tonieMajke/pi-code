@@ -77,6 +77,11 @@ const COMMIT_SYSTEM_PROMPT =
 
 type Snapshot = { id: string; messages: readonly AgentMessage[]; model: AgentSession["model"] };
 
+/** Where the first session starts: what the client asked for, else PI_GUI_CWD (the dev bridge's CWD), else here. */
+export function startCwd(requested: string | undefined, env: NodeJS.ProcessEnv = process.env): string {
+  return resolve(requested ?? (env.PI_GUI_CWD || process.cwd()));
+}
+
 /**
  * Registry of live pi sessions. One is on screen (`active`); sessions still working when
  * the user switches away keep running in the background (local models up to a limit),
@@ -216,7 +221,7 @@ export class PiGateway {
       this.active.replay();
       return;
     }
-    const workingDir = cwd ?? process.cwd();
+    const workingDir = startCwd(cwd);
     this.cwd = workingDir;
     installFetchTap();
     onPerf((perf, ctx) => {
