@@ -18,7 +18,7 @@ describe("TurnLimit", () => {
     expect(step(l)).toEqual(["stop"]);
   });
 
-  it("counts a parallel batch as one step, and blocks a whole batch without stopping", () => {
+  it("counts a parallel batch as one step, and asks once per batch without stopping", () => {
     const l = new TurnLimit(() => 0);
     l.reset();
     expect(step(l, 14, true)).toEqual(Array(14).fill(null)); // status line + 14 edits

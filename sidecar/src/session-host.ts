@@ -432,6 +432,8 @@ export class SessionHost {
     const todo = new TodoList();
     const recital = new PlanRecital();
     const limit = new TurnLimit();
+    /** toolCallId → status request appended to that call's result. */
+    const statusAsk = new Map<string, string>();
     /** The plan was written or updated in this run (a stale plan from an old task is not enforced). */
     let todoTouched = false;
     let todoNudges = 0;
@@ -492,7 +494,8 @@ export class SessionHost {
       const input = event.input as Record<string, unknown>;
       const silent = limit.beforeTool(cfg().turnLimit);
       if (silent?.label) this.emit({ kind: "guard", label: silent.label });
-      if (silent?.kind === "status") return { block: true, reason: silent.reason };
+      // The call runs; the status request rides on its result (once per message — the first call).
+      if (silent?.kind === "status" && silent.label) statusAsk.set(event.toolCallId, silent.reason);
       if (silent?.kind === "stop") {
         setTimeout(() => void this.abort(), 0); // not from inside the run's own hook
         return { block: true, reason: "Pi Code stopped the run: no status after the limit." };
@@ -547,11 +550,12 @@ export class SessionHost {
       if (tasteOn() && taste.visualKind === "image") loadTools(["look_compare"]);
       const output = event.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
       const note = hard() ? progress.afterTool(event.toolName, event.input, event.isError, output) : null;
-      if (note) {
-        this.emit({ kind: "guard", label: t("Postęp: model kręci się w kółko — dostał sygnał do zmiany podejścia") });
-        return { content: [...event.content, { type: "text" as const, text: `\n\n${note}` }] };
-      }
-      return undefined;
+      if (note) this.emit({ kind: "guard", label: t("Postęp: model kręci się w kółko — dostał sygnał do zmiany podejścia") });
+      const ask = statusAsk.get(event.toolCallId);
+      statusAsk.delete(event.toolCallId);
+      const extra = [note, ask].filter((x): x is string => !!x);
+      if (!extra.length) return undefined;
+      return { content: [...event.content, ...extra.map((text) => ({ type: "text" as const, text: `\n\n${text}` }))] };
     });
 
     pi.registerTool({
@@ -685,6 +689,7 @@ export class SessionHost {
       this.answerFirst.startRun();
       guard.startRun();
       limit.reset();
+      statusAsk.clear();
       taste.startRun();
       progress.startRun();
       todoTouched = false;

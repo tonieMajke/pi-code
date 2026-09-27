@@ -3,8 +3,10 @@
  * "co tam?". The guardian extension used to *ask* for a status with a steer message posing
  * as the user — the model ignored it, and every such message moved the context boundary.
  * This is enforced instead: after `steps` model messages with tool calls, or `minutes`,
- * without visible text, the tool calls are blocked with a request for a status; if the
- * model's next message again has only tool calls, the run is stopped.
+ * without visible text, the request for a status goes into the result of the first call
+ * of that message; if the model's next message again has only tool calls, the run is stopped.
+ * The calls still run: blocking them cost a whole extra turn (prefill + thinking) each time,
+ * and the next message has to carry text anyway.
  *
  * Steps, not calls: 14 parallel edits right after a status line are one step the user can
  * follow; 14 sequential silent reads are 14.
@@ -54,8 +56,8 @@ export class TurnLimit {
       label: first ? t("Limit tury: {what} — model ma podać status", { what }) : "",
       reason:
         `Pi Code: ${this.steps - 1} steps and ${Math.floor(minutes)} min without a word to the user. ` +
-        "This call did not run. First write the user a short status in visible text (1–3 sentences: what is done, what you are doing, what is next). " +
-        "After that you may continue. Answering with tool calls only stops the run.",
+        "In your next message, first write the user a short status in visible text (1–3 sentences: what is done, what you are doing, what is next), " +
+        "then continue. Answering with tool calls only stops the run.",
     };
   }
 }
