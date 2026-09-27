@@ -20,13 +20,15 @@ function userText(m: Msg): string {
  * Index of the user message that started the current run (-1: none). Messages the user types
  * mid-run (they carry MIDRUN_NOTE) and the guardian's "[strażnik]" steers are role "user" too,
  * but moving the boundary on them would shorten outputs in the middle of a run and throw away
- * the cached prefix every time one arrives.
+ * the cached prefix every time one arrives. Same for pi-lens: its findings ("[pi-lens automated
+ * …") are appended as role "user" to a single request only, so the boundary jumped there and
+ * back — two cache misses of 25–80k tokens each and older outputs cut mid-task.
  */
 export function runStart(messages: Msg[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role !== "user") continue;
     const text = userText(messages[i]);
-    if (text.endsWith(MIDRUN_NOTE) || text.startsWith("[strażnik")) continue;
+    if (text.endsWith(MIDRUN_NOTE) || text.startsWith("[strażnik") || text.startsWith("[pi-lens automated")) continue;
     return i;
   }
   return -1;

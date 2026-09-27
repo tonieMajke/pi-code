@@ -28,6 +28,18 @@ describe("runStart", () => {
     expect(after.slice(0, 4)).toEqual(before);
     expect(after[3]).toBe(msgs[3]);
   });
+
+  it("ignores pi-lens findings appended as role user", () => {
+    const msgs = [{ role: "user", content: "old" }, tool(big), { role: "user", content: "task" }, tool(big)];
+    const lens = [
+      { role: "user", content: "[pi-lens automated check — not a user request] Address 🔴 blockers before continuing" },
+      { role: "user", content: "[pi-lens automated context — not a user request] pi-lens: 2 file(s) were formatted" },
+    ];
+    for (const m of lens) {
+      expect(runStart([...msgs, m])).toBe(2);
+      expect(elideOldToolOutput([...msgs, m], 2000)[3]).toBe(msgs[3]);
+    }
+  });
 });
 
 describe("elideOldImages", () => {
