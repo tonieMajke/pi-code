@@ -4,12 +4,11 @@ import type { ApprovalDecision } from "../../shared/protocol";
 import type { Approval } from "../lib/reducer";
 import { summarizeArgs, ToolPreview, toolVerb } from "../lib/tool-card";
 import { bashPrefixes } from "../../shared/shell";
+import { t } from "../../shared/i18n";
 
-const ASK_TEXT: Record<string, string> = {
-  bash: "uruchomić polecenie",
-  edit: "edytować plik",
-  write: "zapisać plik",
-};
+/** Phrased as the answer to "pi chce …". Built while the card renders — the language can change. */
+const askText = (name: string): string | null =>
+  ({ bash: t("uruchomić polecenie"), edit: t("edytować plik"), write: t("zapisać plik") })[name] ?? null;
 
 /**
  * Permission prompt for the oldest parked tool call (Claude Code style):
@@ -72,46 +71,44 @@ export function ApprovalCard({
   const target = summarizeArgs(approval.args, cwd);
 
   return (
-    <div className="approval" role="alertdialog" aria-label="Zgoda na narzędzie">
+    <div className="approval" role="alertdialog" aria-label={t("Zgoda na narzędzie")}>
       <div className="approval-head">
         <Hand size={15} />
         <span>
-          pi chce {ASK_TEXT[approval.toolName] ?? `użyć narzędzia ${toolVerb(approval.toolName)}`}
+          pi chce {askText(approval.toolName) ?? t("użyć narzędzia {tool}", { tool: toolVerb(approval.toolName) })}
           {approval.toolName !== "bash" && target && <code className="approval-target">{target}</code>}
         </span>
-        {queued > 0 && <span className="approval-queue">+{queued} w kolejce</span>}
+        {queued > 0 && <span className="approval-queue">{t("+{n} w kolejce", { n: queued })}</span>}
       </div>
       <div className="approval-body">
         <ToolPreview tool={tool} cwd={cwd} preview />
       </div>
       <div className="approval-actions">
         <button className="btn primary" onClick={() => decide("allow")} disabled={busy}>
-          Pozwól <kbd>Enter</kbd>
+          {t("Pozwól")} <kbd>Enter</kbd>
         </button>
         {canAlways && (
           <button
             className="btn"
             onClick={() => decide("always")}
             disabled={busy}
-            title={prefixes ? "Każde polecenie zaczynające się tak samo przejdzie bez pytania do końca tej sesji (ryzykowne dalej pytają)" : undefined}
+            title={prefixes ? t("Każde polecenie zaczynające się tak samo przejdzie bez pytania do końca tej sesji (ryzykowne dalej pytają)") : undefined}
           >
             {prefixes ? (
               <>
-                Zawsze <code className="approval-prefix">{prefixes.join(", ")}</code> w tej sesji
+                {t("Zawsze")} <code className="approval-prefix">{prefixes.join(", ")}</code> {t("w tej sesji")}
               </>
             ) : (
-              "Zawsze w tej sesji"
+              t("Zawsze w tej sesji")
             )}{" "}
             <kbd>Alt A</kbd>
           </button>
         )}
         <button className="btn danger" onClick={() => decide("deny")} disabled={busy}>
-          Odmów <kbd>Esc</kbd>
+          {t("Odmów")} <kbd>Esc</kbd>
         </button>
         <span className="approval-hint">
-          {reasonDraft.trim()
-            ? "Enter: odmów i przekaż modelowi tekst z pola poniżej"
-            : "albo wpisz poniżej, co zrobić inaczej"}
+          {reasonDraft.trim() ? t("Enter: odmów i przekaż modelowi tekst z pola poniżej") : t("albo wpisz poniżej, co zrobić inaczej")}
         </span>
       </div>
     </div>

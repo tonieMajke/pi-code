@@ -28,7 +28,7 @@ import { useImage, useSeen } from "./image-store";
 import { formatDuration } from "./format";
 import { Lightbox } from "../components/Lightbox";
 import { countChanges, diffEdit, type DiffLine } from "./diff";
-import { plural } from "../../shared/i18n";
+import { plural, t } from "../../shared/i18n";
 
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   read: FileText,
@@ -51,25 +51,29 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   mcp: Plug,
 };
 
-const TOOL_VERBS: Record<string, string> = {
-  read: "Odczyt",
-  write: "Zapis",
-  edit: "Edycja",
-  bash: "Polecenie",
-  glob: "Pliki",
-  find: "Pliki",
-  ls: "Katalog",
-  grep: "Szukanie",
-  web_search: "Web",
-  fetch_content: "Pobranie",
-  source_check: "Źródło",
-  look: "Podgląd",
-  look_compare: "Porównanie",
-  todo: "Plan",
-  ui_audit: "Audyt UI",
-  design_refs: "Wzorce",
-  enable_tools: "Ładuje narzędzia",
-  mcp: "MCP",
+/**
+ * One-word names for the tool cards. Each entry is a call, not a string: this map is built when
+ * the module loads, and the interface language can change while the app runs.
+ */
+const TOOL_VERBS: Record<string, () => string> = {
+  read: () => t("Odczyt"),
+  write: () => t("Zapis"),
+  edit: () => t("Edycja"),
+  bash: () => t("Polecenie"),
+  glob: () => t("Pliki"),
+  find: () => t("Pliki"),
+  ls: () => t("Katalog"),
+  grep: () => t("Szukanie"),
+  web_search: () => "Web",
+  fetch_content: () => t("Pobranie"),
+  source_check: () => t("Źródło"),
+  look: () => t("Podgląd"),
+  look_compare: () => t("Porównanie"),
+  todo: () => "Plan",
+  ui_audit: () => t("Audyt UI"),
+  design_refs: () => t("Wzorce"),
+  enable_tools: () => t("Ładuje narzędzia"),
+  mcp: () => "MCP",
 };
 
 const BROWSER = "browseros_";
@@ -79,7 +83,7 @@ export function toolIcon(name: string) {
 }
 
 export function toolVerb(name: string): string {
-  return TOOL_VERBS[name] ?? (name.startsWith(BROWSER) ? `Przeglądarka: ${name.slice(BROWSER.length)}` : name);
+  return TOOL_VERBS[name]?.() ?? (name.startsWith(BROWSER) ? t("Przeglądarka: {name}", { name: name.slice(BROWSER.length) }) : name);
 }
 
 type Edit = { oldText: string; newText: string };
@@ -208,7 +212,7 @@ export function ToolCard({
           </span>
         )}
         <span className="tool-spacer" />
-        {awaiting && <span className="tool-await">czeka na zgodę</span>}
+        {awaiting && <span className="tool-await">{t("czeka na zgodę")}</span>}
         {!awaiting && duration && <span className="tool-time">{duration}</span>}
         {tool.status === "ok" && <Check size={13} className="tool-status ok" />}
         {tool.status === "error" && <X size={13} className="tool-status error" />}

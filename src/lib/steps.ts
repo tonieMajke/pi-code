@@ -69,14 +69,26 @@ const KIND_OF: Record<string, Kind> = {
   ls: "search",
 };
 
-const NAMES: Record<Kind, [[string, string, string], [string, string]]> = {
-  bash: [["{n} polecenie", "{n} polecenia", "{n} poleceń"], ["{n} command", "{n} commands"]],
-  edit: [["{n} edycja", "{n} edycje", "{n} edycji"], ["{n} edit", "{n} edits"]],
-  read: [["{n} odczyt", "{n} odczyty", "{n} odczytów"], ["{n} read", "{n} reads"]],
-  search: [["{n} wyszukiwanie", "{n} wyszukiwania", "{n} wyszukiwań"], ["{n} search", "{n} searches"]],
-  thinking: [["{n} przemyślenie", "{n} przemyślenia", "{n} przemyśleń"], ["{n} thought", "{n} thoughts"]],
-  other: [["{n} inne narzędzie", "{n} inne narzędzia", "{n} innych narzędzi"], ["{n} other tool", "{n} other tools"]],
-};
+/**
+ * Counted tool kinds in words, in the language the interface has right now — plural() is called
+ * here, at render time, not when the module loads.
+ */
+function kindName(k: Kind, c: number): string {
+  switch (k) {
+    case "bash":
+      return plural(c, ["{n} polecenie", "{n} polecenia", "{n} poleceń"], ["{n} command", "{n} commands"]);
+    case "edit":
+      return plural(c, ["{n} edycja", "{n} edycje", "{n} edycji"], ["{n} edit", "{n} edits"]);
+    case "read":
+      return plural(c, ["{n} odczyt", "{n} odczyty", "{n} odczytów"], ["{n} read", "{n} reads"]);
+    case "search":
+      return plural(c, ["{n} wyszukiwanie", "{n} wyszukiwania", "{n} wyszukiwań"], ["{n} search", "{n} searches"]);
+    case "thinking":
+      return plural(c, ["{n} przemyślenie", "{n} przemyślenia", "{n} przemyśleń"], ["{n} thought", "{n} thoughts"]);
+    default:
+      return plural(c, ["{n} inne narzędzie", "{n} inne narzędzia", "{n} innych narzędzi"], ["{n} other tool", "{n} other tools"]);
+  }
+}
 
 export interface StepsSummary {
   /** "6 kroków: 3 polecenia, 2 przemyślenia, 1 edycja" */
@@ -105,7 +117,7 @@ export function summarizeSteps(parts: Part[], indices: number[]): StepsSummary {
   const n = [...counts.values()].reduce((a, b) => a + b, 0);
   const detail = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([k, c]) => plural(c, ...NAMES[k]))
+    .map(([k, c]) => kindName(k, c))
     .join(", ");
   return {
     label: `${plural(n, ["{n} krok", "{n} kroki", "{n} kroków"], ["{n} step", "{n} steps"])}: ${detail}`,

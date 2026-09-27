@@ -2,6 +2,7 @@ import { Paperclip, Plus } from "lucide-react";
 import type { GuiConfig, SettingsPatch } from "../../shared/protocol";
 import { Menu } from "./Menu";
 import { Toggle } from "./settings-ui";
+import { t } from "../../shared/i18n";
 
 type Addon = {
   key: string;
@@ -27,66 +28,69 @@ function extensionAddon(name: string, label: string, desc: string): Addon {
   };
 }
 
-/** Pi Code's own additions to plain pi — the ones worth switching off mid-task. */
-export const ADDONS: Addon[] = [
+/**
+ * Pi Code's own additions to plain pi — the ones worth switching off mid-task. A function, not a
+ * const: the names and notes are UI copy and the language can change while the app runs.
+ */
+const addonCatalog = (): Addon[] => [
   {
     key: "constitution",
-    label: "Konstytucja",
-    desc: "zasady pracy w prompcie systemowym; zmiana przelicza kontekst przy następnej wiadomości",
+    label: t("Konstytucja"),
+    desc: t("zasady pracy w prompcie systemowym; zmiana przelicza kontekst przy następnej wiadomości"),
     on: (g) => g.constitution.enabled,
     patch: (v) => ({ constitution: { enabled: v } }),
   },
   {
     key: "guards",
-    label: "Strażnicy",
-    desc: "czytaj przed edycją, pętle bez postępu, przypomnienia o weryfikacji",
+    label: t("Strażnicy"),
+    desc: t("czytaj przed edycją, pętle bez postępu, przypomnienia o weryfikacji"),
     on: (g) => g.constitution.hard,
     patch: (v) => ({ constitution: { hard: v } }),
     parent: "constitution",
   },
   {
     key: "review",
-    label: "Recenzja",
-    desc: "drugi przegląd zmian w kodzie po skończonej pracy",
+    label: t("Recenzja"),
+    desc: t("drugi przegląd zmian w kodzie po skończonej pracy"),
     on: (g) => g.review.enabled,
     patch: (v) => ({ review: { enabled: v } }),
   },
   {
     key: "taste",
-    label: "Gust",
-    desc: "samokorekta wyglądu: zrzuty i audyt przy pracy wizualnej",
+    label: t("Gust"),
+    desc: t("samokorekta wyglądu: zrzuty i audyt przy pracy wizualnej"),
     on: (g) => g.taste.enabled,
     patch: (v) => ({ taste: { enabled: v } }),
   },
   {
     key: "critic",
-    label: "Krytyk",
-    desc: "osobne spojrzenie na zrzut przed oddaniem",
+    label: t("Krytyk"),
+    desc: t("osobne spojrzenie na zrzut przed oddaniem"),
     on: (g) => g.taste.critic,
     patch: (v) => ({ taste: { critic: v } }),
     parent: "taste",
   },
   {
     key: "turnLimit",
-    label: "Limit tury",
-    desc: "status po kilku krokach albo minutach bez tekstu",
+    label: t("Limit tury"),
+    desc: t("status po kilku krokach albo minutach bez tekstu"),
     on: (g) => g.turnLimit.enabled,
     patch: (v) => ({ turnLimit: { enabled: v } }),
   },
   {
     key: "memory",
-    label: "Pamięć",
-    desc: "zapamiętane fakty w prompcie i nauka po sesji; zmiana przelicza kontekst",
+    label: t("Pamięć"),
+    desc: t("zapamiętane fakty w prompcie i nauka po sesji; zmiana przelicza kontekst"),
     on: (g) => g.memory.enabled,
     patch: (v) => ({ memory: { enabled: v } }),
   },
-  extensionAddon("pi-lens", "pi-lens", "diagnostyka LSP i lint po każdej edycji; przeładowanie po skończonej turze"),
-  extensionAddon("guardian", "Strażnik pi", "limit czytań z ~/.pi/agent/extensions; przeładowanie po skończonej turze"),
+  extensionAddon("pi-lens", "pi-lens", t("diagnostyka LSP i lint po każdej edycji; przeładowanie po skończonej turze")),
+  extensionAddon("guardian", t("Strażnik pi"), t("limit czytań z ~/.pi/agent/extensions; przeładowanie po skończonej turze")),
 ];
 
 /** Effective state: a sub-switch under a disabled parent does nothing. */
-function effective(g: GuiConfig, a: Addon): boolean {
-  const parent = a.parent ? ADDONS.find((p) => p.key === a.parent) : undefined;
+function effective(g: GuiConfig, a: Addon, all: Addon[]): boolean {
+  const parent = a.parent ? all.find((p) => p.key === a.parent) : undefined;
   return a.on(g) && (!parent || parent.on(g));
 }
 
@@ -105,10 +109,10 @@ export function AddonsMenu({
   onPatch: (patch: SettingsPatch) => void;
   onSettings: () => void;
 }) {
-  const shown = ADDONS.filter((a) => !a.extension || extensions.includes(a.extension));
+  const shown = addonCatalog().filter((a) => !a.extension || extensions.includes(a.extension));
   const top = shown.filter((a) => !a.parent);
   const on = top.filter((a) => a.on(gui)).length;
-  const label = on === 0 ? "Dodatki: wył." : on === top.length ? "Dodatki" : `Dodatki ${on}/${top.length}`;
+  const label = on === 0 ? t("Dodatki: wył.") : on === top.length ? t("Dodatki") : t("Dodatki {on}/{all}", { on, all: top.length });
   /** The dot says "not everything is on"; the count lives in the tooltip. */
   const partial = on < top.length;
   const setAll = (v: boolean) => {
@@ -119,7 +123,7 @@ export function AddonsMenu({
       className="chip-menu addons-menu"
       items={[]}
       trigger={
-        <span className="icon-btn addons-plus" title={`Dołącz obraz · ${label}`}>
+        <span className="icon-btn addons-plus" title={t("Dołącz obraz · {label}", { label })}>
           <Plus size={16} />
           {partial && <span className={`addons-dot ${on === 0 ? "off" : ""}`} />}
         </span>
@@ -135,26 +139,26 @@ export function AddonsMenu({
             }}
           >
             <Paperclip size={14} />
-            <span className="menu-label">Dołącz obraz</span>
-            <span className="menu-hint">albo wklej / upuść</span>
+            <span className="menu-label">{t("Dołącz obraz")}</span>
+            <span className="menu-hint">{t("albo wklej / upuść")}</span>
           </button>
-          <div className="addons-head">Dodatki Pi Code</div>
+          <div className="addons-head">{t("Dodatki Pi Code")}</div>
           {shown.map((a) => {
-            const parentOff = a.parent ? !ADDONS.find((p) => p.key === a.parent)!.on(gui) : false;
+            const parentOff = a.parent ? !shown.find((p) => p.key === a.parent)!.on(gui) : false;
             return (
               <div key={a.key} className={`addons-row ${a.parent ? "sub" : ""} ${parentOff ? "dim" : ""}`}>
                 <div className="addons-text">
                   <div className="addons-label">{a.label}</div>
                   <div className="addons-desc">{a.desc}</div>
                 </div>
-                <Toggle value={effective(gui, a)} disabled={parentOff} onChange={(v) => onPatch(a.patch(v))} />
+                <Toggle value={effective(gui, a, shown)} disabled={parentOff} onChange={(v) => onPatch(a.patch(v))} />
               </div>
             );
           })}
-          <div className="addons-note">Dotyczy wszystkich sesji, działa od następnego kroku modelu.</div>
+          <div className="addons-note">{t("Dotyczy wszystkich sesji, działa od następnego kroku modelu.")}</div>
           <div className="ctx-actions">
             <button className="btn" onClick={() => setAll(on === 0)}>
-              {on === 0 ? "Włącz wszystkie" : "Wyłącz wszystkie"}
+              {on === 0 ? t("Włącz wszystkie") : t("Wyłącz wszystkie")}
             </button>
             <button
               className="btn"
@@ -163,7 +167,7 @@ export function AddonsMenu({
                 onSettings();
               }}
             >
-              Ustawienia…
+              {t("Ustawienia…")}
             </button>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import type { ClientCommand, ClientCommandInput, SidecarOut } from "../../shared/protocol";
+import { t } from "../../shared/i18n";
 
 /** One command, its reply as a promise (App keeps one pending request per command name). */
 export type PiRequest = <T = unknown>(cmd: ClientCommandInput) => Promise<T>;
@@ -32,7 +33,7 @@ export function downFromClose(code: number, reason: string): SidecarDown {
       return { why: reason, restarting: true };
     }
   }
-  return { why: "połączenie z mostkiem zerwane", restarting: true };
+  return { why: t("połączenie z mostkiem zerwane"), restarting: true };
 }
 
 // Explicit per-variant construction: spreading a union does not preserve

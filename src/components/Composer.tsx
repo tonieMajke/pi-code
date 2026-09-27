@@ -14,20 +14,24 @@ import { MODES, modeInfo } from "../lib/modes";
 import { dataUrl, imageFiles } from "../lib/images";
 import { matchCommands, matchPicks, slashState, type PickItem, type SlashEntry, type SlashPick } from "../lib/slash";
 
-const KIND_LABEL: Record<SlashEntry["kind"], string> = {
-  gui: "",
-  extension: "rozszerzenie",
-  prompt: "szablon",
-  skill: "skill",
-  terminal: "tylko terminal",
-};
+/** What a "/" entry is, in one word — built with the popup, so the language is current. */
+const kindLabel = (k: SlashEntry["kind"]): string =>
+  ({
+    gui: "",
+    extension: t("rozszerzenie"),
+    prompt: t("szablon"),
+    skill: "skill",
+    terminal: t("tylko terminal"),
+  })[k];
 
-const PICK_TITLE: Record<SlashPick, string> = {
-  model: "Model tej sesji",
-  thinking: "Poziom myślenia",
-  mode: "Tryb uprawnień",
-  fork: "Nowa sesja od wiadomości — wybierz, od której",
-};
+/** Head of the "/" pick lists — built when the popup opens, so the language is current. */
+const pickTitle = (p: SlashPick): string =>
+  ({
+    model: t("Model tej sesji"),
+    thinking: t("Poziom myślenia"),
+    mode: t("Tryb uprawnień"),
+    fork: t("Nowa sesja od wiadomości — wybierz, od której"),
+  })[p];
 
 export function Composer({
   value,
@@ -403,10 +407,10 @@ export function Composer({
       <div ref={boxRef} className={`composer-box mode-${mode} ${dict.phase !== "idle" ? `dictating ${dict.phase}` : ""}`}>
         {slash && (
           <div className="mention-pop slash-pop" ref={slashPopRef}>
-            {slash.kind === "pick" && <div className="slash-head">{PICK_TITLE[slash.entry.pick!]}</div>}
-            {slash.kind === "pick" && !pickAll && <div className="s-empty">wczytywanie…</div>}
+            {slash.kind === "pick" && <div className="slash-head">{pickTitle(slash.entry.pick!)}</div>}
+            {slash.kind === "pick" && !pickAll && <div className="s-empty">{t("wczytywanie…")}</div>}
             {slashCount === 0 && (slash.kind === "list" || pickAll) && (
-              <div className="s-empty">{slash.kind === "list" ? "brak takiej komendy" : "nic nie pasuje"}</div>
+              <div className="s-empty">{slash.kind === "list" ? t("brak takiej komendy") : t("nic nie pasuje")}</div>
             )}
             {slash.kind === "list" &&
               slashList.map((c, i) => (
@@ -424,7 +428,7 @@ export function Composer({
                     {c.args && <span className="slash-args"> {c.args}</span>}
                   </span>
                   <span className="slash-desc">{c.description}</span>
-                  {KIND_LABEL[c.kind] && <span className={`slash-kind k-${c.kind}`}>{KIND_LABEL[c.kind]}</span>}
+                  {kindLabel(c.kind) && <span className={`slash-kind k-${c.kind}`}>{kindLabel(c.kind)}</span>}
                 </button>
               ))}
             {slash.kind === "pick" &&
@@ -447,8 +451,8 @@ export function Composer({
         )}
         {mention && (
           <div className="mention-pop">
-            {!files && <div className="s-empty">wczytywanie plików…</div>}
-            {files && suggestions.length === 0 && <div className="s-empty">brak pasujących plików</div>}
+            {!files && <div className="s-empty">{t("wczytywanie plików…")}</div>}
+            {files && suggestions.length === 0 && <div className="s-empty">{t("brak pasujących plików")}</div>}
             {suggestions.map((f, i) => {
               const slash = f.lastIndexOf("/");
               return (
@@ -473,7 +477,7 @@ export function Composer({
             {attachments.map((a, i) => (
               <div className="thumb" key={i}>
                 <img src={dataUrl(a)} alt="" />
-                <button className="thumb-x" onClick={() => onRemoveAttachment(i)} title="Usuń">
+                <button className="thumb-x" onClick={() => onRemoveAttachment(i)} title={t("Usuń")}>
                   <X size={11} />
                 </button>
               </div>
@@ -575,7 +579,7 @@ export function Composer({
               onAttach={() => fileRef.current?.click()}
             />
           ) : (
-            <button className="icon-btn attach" onClick={() => fileRef.current?.click()} title="Dołącz obraz (albo wklej / upuść)">
+            <button className="icon-btn attach" onClick={() => fileRef.current?.click()} title={t("Dołącz obraz (albo wklej / upuść)")}>
               <Paperclip size={15} />
             </button>
           )}
@@ -592,7 +596,7 @@ export function Composer({
           />
           <Menu
             className="chip-menu mode-menu"
-            title="Tryb uprawnień · Shift+Tab przełącza"
+            title={t("Tryb uprawnień · Shift+Tab przełącza")}
             trigger={
               <span className={`chip mode-chip mode-${mode}`} title={current.desc}>
                 <ModeIcon size={13} />
@@ -604,11 +608,11 @@ export function Composer({
           />
           <Menu
             className="chip-menu project-menu"
-            title={branch ? `Projekt (nowa sesja w katalogu) · gałąź ${branch}` : "Projekt (nowa sesja w katalogu)"}
+            title={branch ? t("Projekt (nowa sesja w katalogu) · gałąź {branch}", { branch }) : t("Projekt (nowa sesja w katalogu)")}
             trigger={
-              <span className="chip project-chip" title={branch ? `${cwd} · gałąź git: ${branch}` : cwd}>
+              <span className="chip project-chip" title={branch ? t("{cwd} · gałąź git: {branch}", { cwd, branch }) : cwd}>
                 <Folder size={13} />
-                <span className="chip-label">{basename(cwd) || "projekt"}</span>
+                <span className="chip-label">{basename(cwd) || t("projekt")}</span>
                 {branch && (
                   <span className="project-branch">
                     <GitBranch size={12} />
@@ -624,7 +628,7 @@ export function Composer({
           {pct !== null && pct >= HANDOFF_AT && !busy && (
             <button
               className="chip ctx-suggest"
-              title="Kontekst prawie pełny: model streści sesję, a streszczenie trafi do nowej (/handoff)"
+              title={t("Kontekst prawie pełny: model streści sesję, a streszczenie trafi do nowej (/handoff)")}
               onClick={() => onCommand("handoff", "")}
             >
               Handoff?
@@ -685,7 +689,9 @@ export function Composer({
                     </div>
                   ) : (
                     <div className="model-thinking-note">
-                      Decyduje serwer llama.cpp{thinking.server?.budget ? ` (budżet ≤${formatTokens(thinking.server.budget)})` : ""} — zmienisz w Ustawienia → Model i myślenie.
+                      {t("Decyduje serwer llama.cpp{budget} — zmienisz w Ustawienia → Model i myślenie.", {
+                        budget: thinking.server?.budget ? t(" (budżet ≤{n})", { n: formatTokens(thinking.server.budget) }) : "",
+                      })}
                     </div>
                   )}
                 </div>
@@ -746,10 +752,14 @@ export function Composer({
 }
 
 const CTX_PARTS = [
-  { key: "system", label: "Prompt systemowy", cls: "c-system" },
-  { key: "tools", label: "Definicje narzędzi", cls: "c-tools" },
-  { key: "messages", label: "Wiadomości", cls: "c-messages" },
+  { key: "system", cls: "c-system" },
+  { key: "tools", cls: "c-tools" },
+  { key: "messages", cls: "c-messages" },
 ] as const;
+
+/** Names of the context ring parts, in the language the interface has right now. */
+const ctxPartLabel = (key: (typeof CTX_PARTS)[number]["key"]): string =>
+  key === "system" ? t("Prompt systemowy") : key === "tools" ? t("Definicje narzędzi") : t("Wiadomości");
 
 /** From here on a long session gets slow and forgetful: offer a fresh one. */
 const HANDOFF_AT = 80;
@@ -774,7 +784,7 @@ function ContextMenu({
       className="ctx-menu"
       items={[]}
       trigger={
-        <span className="ctx" title="Kontekst — kliknij, żeby zobaczyć rozbicie">
+        <span className="ctx" title={t("Kontekst — kliknij, żeby zobaczyć rozbicie")}>
           <svg viewBox="0 0 20 20" width="16" height="16">
             <circle cx="10" cy="10" r="8" className="ctx-bg" />
             <circle
@@ -810,7 +820,7 @@ function ContextMenu({
             CTX_PARTS.map((p) => (
               <div className="ctx-row" key={p.key}>
                 <span className={`ctx-dot ${p.cls}`} />
-                <span className="ctx-label">{p.label}</span>
+                <span className="ctx-label">{ctxPartLabel(p.key)}</span>
                 <span className="ctx-val">~{formatTokens(b[p.key])}</span>
               </div>
             ))}
@@ -823,24 +833,24 @@ function ContextMenu({
             <button
               className="btn"
               disabled={busy}
-              title="Streść starszą część rozmowy w tej sesji (/compact)"
+              title={t("Streść starszą część rozmowy w tej sesji (/compact)")}
               onClick={() => {
                 close();
                 onCommand("compact", "");
               }}
             >
-              Kompaktuj
+              {t("Kompaktuj")}
             </button>
             <button
               className="btn"
               disabled={busy}
-              title="Model pisze podsumowanie, a ono trafia do pola nowej sesji — poprawiasz i wysyłasz (/handoff)"
+              title={t("Model pisze podsumowanie, a ono trafia do pola nowej sesji — poprawiasz i wysyłasz (/handoff)")}
               onClick={() => {
                 close();
                 onCommand("handoff", "");
               }}
             >
-              Handoff → nowa sesja
+              {t("Handoff → nowa sesja")}
             </button>
           </div>
         </div>

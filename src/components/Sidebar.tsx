@@ -126,7 +126,7 @@ export function Sidebar({
 
   const newGroup = (withSession?: string) => {
     const id = newGroupId();
-    onLayout(createGroup(layout, "Nowa grupa", id, withSession));
+    onLayout(createGroup(layout, t("Nowa grupa"), id, withSession));
     setEditing(id);
   };
 
@@ -137,14 +137,14 @@ export function Sidebar({
       x,
       y,
       items: [
-        { heading: "Przenieś do grupy" },
+        { heading: t("Przenieś do grupy") },
         ...targets.map((g) => ({ label: g.name, icon: <Layers size={14} />, onSelect: () => onLayout(moveToGroup(layout, s.path, g.id)) })),
-        { label: "Nowa grupa…", icon: <Plus size={14} />, onSelect: () => newGroup(s.path) },
+        { label: t("Nowa grupa…"), icon: <Plus size={14} />, onSelect: () => newGroup(s.path) },
         ...(current
-          ? [{ label: `Usuń z grupy „${current.name}”`, icon: <FolderMinus size={14} />, onSelect: () => onLayout(moveToGroup(layout, s.path, null)) }]
+          ? [{ label: t("Usuń z grupy „{name}”", { name: current.name }), icon: <FolderMinus size={14} />, onSelect: () => onLayout(moveToGroup(layout, s.path, null)) }]
           : []),
         "sep" as const,
-        { label: "Usuń czat…", icon: <Trash2 size={14} />, danger: true, onSelect: () => onDelete(s) },
+        { label: t("Usuń czat…"), icon: <Trash2 size={14} />, danger: true, onSelect: () => onDelete(s) },
       ],
     });
   };
@@ -191,7 +191,7 @@ export function Sidebar({
           )}
           <button
             className="s-more icon-btn"
-            title="Więcej"
+            title={t("Więcej")}
             onClick={(e) => {
               e.stopPropagation();
               const r = e.currentTarget.getBoundingClientRect();
@@ -263,14 +263,14 @@ export function Sidebar({
           <span className="brand-name">Pi</span>
           <span className="brand-tag">Code</span>
         </div>
-        <button className="icon-btn" onClick={onCollapse} title="Zwiń panel (Ctrl+B)">
+        <button className="icon-btn" onClick={onCollapse} title={t("Zwiń panel (Ctrl+B)")}>
           <PanelLeftClose size={16} />
         </button>
       </div>
 
-      <button className="new-btn" onClick={onNew} title="Nowa sesja (Ctrl+N)">
+      <button className="new-btn" onClick={onNew} title={t("Nowa sesja (Ctrl+N)")}>
         <SquarePen size={15} />
-        <span>Nowa sesja</span>
+        <span>{t("Nowa sesja")}</span>
         <kbd>Ctrl N</kbd>
       </button>
 
@@ -288,7 +288,7 @@ export function Sidebar({
       <div className="side-tabs">
         <div className="seg" role="tablist">
           <button role="tab" aria-selected={view === "date"} className={view === "date" ? "on" : ""} onClick={() => changeView("date")}>
-            Czaty
+            {t("Czaty")}
           </button>
           <button
             role="tab"
@@ -296,15 +296,15 @@ export function Sidebar({
             className={view === "projects" ? "on" : ""}
             onClick={() => changeView("projects")}
           >
-            Projekty
+            {t("Projekty")}
           </button>
         </div>
-        <button className="icon-btn" title="Nowa grupa" onClick={() => newGroup()}>
+        <button className="icon-btn" title={t("Nowa grupa")} onClick={() => newGroup()}>
           <Layers size={15} />
         </button>
         <button
           className="icon-btn"
-          title="Dodaj projekt (folder)"
+          title={t("Dodaj projekt (folder)")}
           onClick={() => {
             changeView("projects");
             onAddProject();
@@ -331,20 +331,20 @@ export function Sidebar({
                   icon: <Layers size={13} />,
                   count: g.items.length,
                   dropGroup: g.id,
-                  title: "Przeciągnij tu czat, żeby dodać go do grupy",
+                  title: t("Przeciągnij tu czat, żeby dodać go do grupy"),
                   actions: (
                     <button
                       className="icon-btn s-head-act"
-                      title="Grupa"
+                      title={t("Grupa")}
                       onClick={(e) => {
                         const r = e.currentTarget.getBoundingClientRect();
                         setMenu({
                           x: r.left,
                           y: r.bottom + 4,
                           items: [
-                            { label: "Zmień nazwę", icon: <Pencil size={14} />, onSelect: () => setEditing(g.id) },
+                            { label: t("Zmień nazwę"), icon: <Pencil size={14} />, onSelect: () => setEditing(g.id) },
                             {
-                              label: "Usuń grupę (czaty zostają)",
+                              label: t("Usuń grupę (czaty zostają)"),
                               icon: <Trash2 size={14} />,
                               danger: true,
                               onSelect: () => onLayout(deleteGroup(layout, g.id)),
@@ -362,7 +362,7 @@ export function Sidebar({
                 (g.items.length ? (
                   g.items.map((s) => row(s, true))
                 ) : (
-                  <div className="s-empty small">Przeciągnij tu czat albo użyj „⋯” przy czacie.</div>
+                  <div className="s-empty small">{t("Przeciągnij tu czat albo użyj „⋯” przy czacie.")}</div>
                 ))}
             </section>
           ),
@@ -385,13 +385,13 @@ export function Sidebar({
                 title: p.cwd,
                 actions: (
                   <>
-                    <button className="icon-btn s-head-act" title={`Nowa sesja w ${basename(p.cwd)}`} onClick={() => onNewIn(p.cwd)}>
+                    <button className="icon-btn s-head-act" title={t("Nowa sesja w {dir}", { dir: basename(p.cwd) })} onClick={() => onNewIn(p.cwd)}>
                       <Plus size={14} />
                     </button>
                     {p.added && (
                       <button
                         className="icon-btn s-head-act"
-                        title="Projekt"
+                        title={t("Projekt")}
                         onClick={(e) => {
                           const r = e.currentTarget.getBoundingClientRect();
                           setMenu({
@@ -399,7 +399,7 @@ export function Sidebar({
                             y: r.bottom + 4,
                             items: [
                               {
-                                label: "Usuń z listy projektów (czaty zostają)",
+                                label: t("Usuń z listy projektów (czaty zostają)"),
                                 icon: <FolderInput size={14} />,
                                 onSelect: () => onLayout(removeProject(layout, p.cwd)),
                               },
@@ -422,32 +422,32 @@ export function Sidebar({
                         className="s-more-link"
                         onClick={() => setExpanded((e) => (e.includes(p.cwd) ? e.filter((c) => c !== p.cwd) : [...e, p.cwd]))}
                       >
-                        {expanded.includes(p.cwd) ? "Pokaż mniej" : `Pokaż wszystkie (${p.sessions.length})`}
+                        {expanded.includes(p.cwd) ? t("Pokaż mniej") : t("Pokaż wszystkie ({n})", { n: p.sessions.length })}
                       </button>
                     )}
                   </>
                 ) : (
-                  <div className="s-empty small">Brak czatów — „+” zaczyna pierwszy.</div>
+                  <div className="s-empty small">{t("Brak czatów — „+” zaczyna pierwszy.")}</div>
                 ))}
             </section>
           ))}
 
-        {loading && sessions.length === 0 && <div className="s-empty">wczytywanie…</div>}
-        {!loading && nothing && <div className="s-empty">{query ? "nic nie pasuje" : "brak sesji"}</div>}
+        {loading && sessions.length === 0 && <div className="s-empty">{t("wczytywanie…")}</div>}
+        {!loading && nothing && <div className="s-empty">{query ? t("nic nie pasuje") : t("brak sesji")}</div>}
       </nav>
 
       <div className="side-footer">
         <span className="avatar">{(user || "?").charAt(0).toUpperCase()}</span>
         <span className="who">
           <span className="who-name">{user || "…"}</span>
-          <span className="who-sub">pi · lokalnie</span>
+          <span className="who-sub">{t("pi · lokalnie")}</span>
         </span>
         {onStats && (
           <button className="icon-btn" onClick={onStats} title={t("Statystyki modeli")}>
             <BarChart3 size={16} />
           </button>
         )}
-        <button className="icon-btn" onClick={onSettings} title="Ustawienia (Ctrl+,)">
+        <button className="icon-btn" onClick={onSettings} title={t("Ustawienia (Ctrl+,)")}>
           <Settings size={16} />
         </button>
       </div>
