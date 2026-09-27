@@ -831,3 +831,43 @@ describe("PiGateway re-init", () => {
     expect(internal.active).not.toBeNull();
   });
 });
+
+describe("SessionHost: “always in this session” for bash", () => {
+  function host() {
+    const { add, events } = gateway();
+    const h = add(fakeSession());
+    let n = 0;
+    /** Run the gate; `answer` replies to the approval card if one shows up. */
+    const gate = async (command: string, answer: "allow" | "always" | "deny" = "allow") => {
+      const id = `t${++n}`;
+      const before = events.filter((e) => e.kind === "approval_request").length;
+      const p = h.gate(id, "bash", { command });
+      await Promise.resolve();
+      const asked = events.filter((e) => e.kind === "approval_request").length > before;
+      if (asked) h.approve(id, answer);
+      return { asked, result: await p };
+    };
+    return { gate };
+  }
+
+  it("remembers the command's prefix, not all of bash", async () => {
+    const { gate } = host();
+    expect((await gate("pnpm test", "always")).asked).toBe(true);
+    expect((await gate("pnpm test -- -t parser")).asked).toBe(false);
+    expect((await gate("cd x && pnpm test")).asked).toBe(true); // cd was never allowed
+    expect((await gate("pnpm install")).asked).toBe(true);
+    expect((await gate("python3 evil.py")).asked).toBe(true);
+  });
+
+  it("inline code is allowed once, never remembered", async () => {
+    const { gate } = host();
+    await gate("python3 -c 'print(1)'", "always");
+    expect((await gate("python3 -c 'print(2)'")).asked).toBe(true);
+  });
+
+  it("risky actions still ask after “always”", async () => {
+    const { gate } = host();
+    await gate("git push origin main", "always");
+    expect((await gate("git push origin main")).asked).toBe(true);
+  });
+});

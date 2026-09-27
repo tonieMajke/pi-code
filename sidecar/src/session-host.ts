@@ -41,6 +41,7 @@ import { PlanRecital, TODO_DESCRIPTION, TodoList, type TodoItem } from "./todo.j
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, finishIntent } from "./constitution.js";
 import type { GuiConfigStore } from "./config.js";
 import { createSession } from "./session-files.js";
+import { bashPrefixes, coveredByPrefixes } from "../../shared/shell.js";
 import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
 import { elideOldImages, elideOldToolOutput } from "./elide.js";
 import { changedLines, parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
@@ -126,6 +127,8 @@ export class SessionHost {
   private guard: ConstitutionGuard | null = null;
   /** Tool names the user approved "always" for this session. */
   private alwaysAllowed = new Set<string>();
+  /** bash is remembered by command prefix ("pnpm test"), never as a whole. */
+  private alwaysBash = new Set<string>();
   /** After an interruption or a mid-run message, the next reply is text only. */
   private answerFirst = new AnswerFirst();
   private pendingApprovals = new Map<
@@ -357,7 +360,7 @@ export class SessionHost {
     else if (risky) this.emit({ kind: "guard", label: `Ryzykowna akcja — pytam (${risky})` });
     else {
       if (verdict.kind === "allow") return undefined;
-      if (this.alwaysAllowed.has(call.key)) return undefined;
+      if (call.name === "bash" ? coveredByPrefixes(String(call.args.command ?? ""), this.alwaysBash) : this.alwaysAllowed.has(call.key)) return undefined;
     }
 
     const answer = await new Promise<{ decision: ApprovalDecision; reason?: string }>((resolve) => {
@@ -366,7 +369,11 @@ export class SessionHost {
       this.emit({ kind: "approval_request", toolCallId, toolName, args: input });
     });
     this.emit({ kind: "approval_done", toolCallId, decision: answer.decision });
-    if (answer.decision === "always" && !killing && !risky) this.alwaysAllowed.add(call.key);
+    if (answer.decision === "always" && !killing && !risky) {
+      // A command that cannot be remembered by prefix (inline code, substitutions) is allowed once.
+      if (call.name === "bash") for (const p of bashPrefixes(String(call.args.command ?? "")) ?? []) this.alwaysBash.add(p);
+      else this.alwaysAllowed.add(call.key);
+    }
     if (answer.decision === "deny") {
       return {
         block: true,

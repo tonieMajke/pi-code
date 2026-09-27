@@ -3,6 +3,7 @@ import { Hand } from "lucide-react";
 import type { ApprovalDecision } from "../../shared/protocol";
 import type { Approval } from "../lib/reducer";
 import { summarizeArgs, ToolPreview, toolVerb } from "../lib/tool-card";
+import { bashPrefixes } from "../../shared/shell";
 
 const ASK_TEXT: Record<string, string> = {
   bash: "uruchomić polecenie",
@@ -38,6 +39,11 @@ export function ApprovalCard({
     setBusy(false);
   }, [approval.toolCallId]);
 
+  // bash is remembered by prefix ("pnpm test"); inline code (python3 -c …) cannot be remembered at all.
+  const prefixes =
+    approval.toolName === "bash" ? bashPrefixes(String((approval.args as { command?: unknown } | null)?.command ?? "")) : undefined;
+  const canAlways = prefixes !== null;
+
   useEffect(() => {
     // Capture phase + stopPropagation: these keys must not also reach the composer
     // (Enter would send the draft as a steering message) or the global Esc (abort).
@@ -53,7 +59,7 @@ export function ApprovalCard({
         handled();
         // With a draft typed, Enter means "no — do this instead".
         decide(reasonDraft.trim() ? "deny" : "allow");
-      } else if ((e.key === "a" || e.key === "A") && e.altKey) {
+      } else if ((e.key === "a" || e.key === "A") && e.altKey && canAlways) {
         handled();
         decide("always");
       }
@@ -82,9 +88,23 @@ export function ApprovalCard({
         <button className="btn primary" onClick={() => decide("allow")} disabled={busy}>
           Pozwól <kbd>Enter</kbd>
         </button>
-        <button className="btn" onClick={() => decide("always")} disabled={busy}>
-          Zawsze w tej sesji <kbd>Alt A</kbd>
-        </button>
+        {canAlways && (
+          <button
+            className="btn"
+            onClick={() => decide("always")}
+            disabled={busy}
+            title={prefixes ? "Każde polecenie zaczynające się tak samo przejdzie bez pytania do końca tej sesji (ryzykowne dalej pytają)" : undefined}
+          >
+            {prefixes ? (
+              <>
+                Zawsze <code className="approval-prefix">{prefixes.join(", ")}</code> w tej sesji
+              </>
+            ) : (
+              "Zawsze w tej sesji"
+            )}{" "}
+            <kbd>Alt A</kbd>
+          </button>
+        )}
         <button className="btn danger" onClick={() => decide("deny")} disabled={busy}>
           Odmów <kbd>Esc</kbd>
         </button>

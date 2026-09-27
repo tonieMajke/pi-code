@@ -1,6 +1,9 @@
 import type { PermissionMode } from "../../shared/protocol.js";
 import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { parseCommand, SAFE_VAR, type Segment } from "../../shared/shell.js";
+
+export { parseCommand, type Segment };
 
 /** Tools that only look at things. Allowed in every mode, never prompt. */
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls", "glob", "web_search", "fetch_content", "source_check"]);
@@ -33,115 +36,6 @@ const SAFE_START = [
   /^(npm|pnpm|yarn)\s+(list|ls|view|info|why|outdated|audit)(?=\s|$)/,
   /^(node|python3?|cargo|rustc|go|pnpm|npm)\s+(--version|-V)$/,
 ];
-
-/** Leading `VAR=value` that only changes formatting. LD_PRELOAD=, GIT_EXTERNAL_DIFF=, PAGER=… run code. */
-const SAFE_VAR = /^(LANG|LANGUAGE|LC_[A-Z]+|TZ|COLUMNS|LINES|NO_COLOR|FORCE_COLOR|CLICOLOR(_FORCE)?|TERM)=/;
-
-export interface Segment {
-  /** Words with quotes and escapes removed, redirections taken out. */
-  words: string[];
-  /** Output goes to a file (`>`, `>>`, `&>`, `<>`), /dev/null and fd duplication excepted. */
-  writes: boolean;
-}
-
-/**
- * Split a bash command the way the shell would, far enough to judge it: segments at unquoted
- * `;` `&` `|` `&&` `||` and newlines, words unquoted. null = something we will not reason about
- * (command or process substitution, subshells, unbalanced quotes). Errs towards more segments:
- * `#` comments are not recognised, so their text is judged as commands too.
- */
-export function parseCommand(s: string): Segment[] | null {
-  const segs: Segment[] = [];
-  let words: string[] = [];
-  let word: string | null = null;
-  let writes = false;
-  let dropNext = false; // the next word is a redirection target, not an argument
-  const endWord = () => {
-    if (word === null) return;
-    if (dropNext) dropNext = false;
-    else words.push(word);
-    word = null;
-  };
-  const endSeg = () => {
-    endWord();
-    if (words.length || writes) segs.push({ words, writes });
-    words = [];
-    writes = false;
-    dropNext = false;
-  };
-  /** `2>`: the digits before a redirection are its fd, not a word. */
-  const takeFd = () => {
-    if (word !== null && /^\d*$/.test(word)) word = null;
-    else endWord();
-  };
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (c === "\\") {
-      if (s[i + 1] !== "\n") word = (word ?? "") + (s[i + 1] ?? "");
-      i++;
-    } else if (c === "'") {
-      const end = s.indexOf("'", i + 1);
-      if (end < 0) return null;
-      word = (word ?? "") + s.slice(i + 1, end);
-      i = end;
-    } else if (c === "$" && s[i + 1] === "'") {
-      // $'…' — backslash escapes, including \'
-      let j = i + 2;
-      let v = "";
-      for (; j < s.length && s[j] !== "'"; j++) {
-        if (s[j] === "\\") j++;
-        v += s[j] ?? "";
-      }
-      if (j >= s.length) return null;
-      word = (word ?? "") + v;
-      i = j;
-    } else if (c === "`" || (c === "$" && s[i + 1] === "(") || c === "(" || c === ")") {
-      return null;
-    } else if (c === '"') {
-      let j = i + 1;
-      let v = "";
-      for (; j < s.length && s[j] !== '"'; j++) {
-        if (s[j] === "`" || (s[j] === "$" && s[j + 1] === "(")) return null;
-        if (s[j] === "\\" && '$`"\\\n'.includes(s[j + 1] ?? "")) {
-          j++;
-          if (s[j] === "\n") continue;
-        }
-        v += s[j];
-      }
-      if (j >= s.length) return null;
-      word = (word ?? "") + v;
-      i = j;
-    } else if (c === " " || c === "\t") {
-      endWord();
-    } else if (c === ">" || (c === "&" && s[i + 1] === ">")) {
-      if (c === "&") i++;
-      takeFd();
-      let j = i + 1;
-      if (s[j] === ">" || s[j] === "|") j++;
-      if (s[j] === "(") return null; // >(…)
-      const dup = /^&(\d+|-)/.exec(s.slice(j)); // 2>&1, >&-
-      const devNull = /^\s*\/dev\/null(?=[\s;&|]|$)/.exec(s.slice(j));
-      if (dup) i = j + dup[0].length - 1;
-      else if (devNull) i = j + devNull[0].length - 1;
-      else {
-        writes = true;
-        i = j - 1;
-      }
-    } else if (c === "<") {
-      if (s[i + 1] === "(") return null; // <(…)
-      takeFd();
-      if (s[i + 1] === ">") writes = true; // <> opens for writing
-      while (s[i + 1] === "<" || s[i + 1] === ">" || s[i + 1] === "&") i++;
-      dropNext = true;
-    } else if (c === ";" || c === "&" || c === "|" || c === "\n") {
-      endSeg();
-    } else {
-      word = (word ?? "") + c;
-    }
-  }
-  endSeg();
-  return segs;
-}
 
 /** `-o`, `-no` — a short-option cluster containing one of `letters`. */
 const shortOpt = (args: string[], letters: RegExp) => args.some((a) => /^-[^-]/.test(a) && letters.test(a.slice(1)));
