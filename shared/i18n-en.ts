@@ -831,4 +831,5 @@ export const EN: Record<string, string> = {
   "Kopiuj": "Copy",
   "Skopiowano": "Copied",
   "przerwano": "interrupted",
+  "Przerwane — brak wyniku; narzędzie mogło się nie wykonać.": "Interrupted — no result; the tool may not have run.",
 };

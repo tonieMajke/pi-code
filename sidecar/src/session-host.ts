@@ -325,7 +325,7 @@ export class SessionHost {
   historyItems(): HistoryItem[] {
     const st = this.session.state as AgentSession["state"] & { streamingMessage?: AgentMessage; pendingToolCalls?: ReadonlySet<string> };
     const messages = st.streamingMessage && !st.messages.includes(st.streamingMessage) ? [...st.messages, st.streamingMessage] : st.messages;
-    return historyOf(this.id, messages, statsEntries(this.session.sessionManager), st.pendingToolCalls);
+    return historyOf(this.id, messages, statsEntries(this.session.sessionManager), st.pendingToolCalls, this.busy);
   }
 
   historyMessages(): readonly AgentMessage[] {
@@ -1376,15 +1376,21 @@ export class SessionHost {
   }
 }
 
-/** Transcript as the UI renders it: blocks kept in model order, tool images as references. */
+/**
+ * Transcript as the UI renders it: blocks kept in model order, tool images as references.
+ * `busy`: the session is mid-run — calls of its current turn without a result are still to come.
+ */
 export function historyOf(
 sessionId: string,
 messages: readonly AgentMessage[],
 stats?: Map<number, RequestStats[]>,
 running?: ReadonlySet<string>,
+busy = false,
 ): HistoryItem[] {
   const items: HistoryItem[] = [];
   const toolIndex = new Map<string, Extract<HistoryPart, { type: "tool" }>>();
+  /** Calls without a result yet, with the item they belong to. */
+  const open = new Map<string, number>();
   for (const msg of messages) {
     if (msg.role === "user") {
       const images = userImages(msg.content);
@@ -1405,6 +1411,7 @@ running?: ReadonlySet<string>,
             tool: { id: c.id, name: c.name, args: c.arguments, status: running?.has(c.id) ? "running" : "ok", summary: "" },
           };
           toolIndex.set(c.id, part);
+          open.set(c.id, items.length - 1);
           last.parts.push(part);
         }
       }
@@ -1416,6 +1423,7 @@ running?: ReadonlySet<string>,
       if (last?.role === "assistant") last.parts.push({ type: "notice", text: label });
     } else if (msg.role === "toolResult") {
       const part = toolIndex.get(msg.toolCallId);
+      open.delete(msg.toolCallId);
       if (part) {
         part.tool.status = msg.isError ? "error" : "ok";
         part.tool.summary = summarizeToolResult({ content: msg.content });
@@ -1425,6 +1433,18 @@ running?: ReadonlySet<string>,
           part.tool.images = images.map((img, i) => ({ data: "", mimeType: img.mimeType, ref: `${sessionId}/${msg.toolCallId}/${i}` }));
       }
     }
+  }
+  // A call with no result never finished: the sidecar died or the run was cut while it waited
+  // (for approval, say). Shown as ok it looked like an edit that happened — it did not.
+  const lastUser = items.map((i) => i.role).lastIndexOf("user");
+  for (const [id, at] of open) {
+    const tool = toolIndex.get(id)!.tool;
+    if (tool.status === "running" || (busy && at > lastUser)) {
+      tool.status = "running";
+      continue;
+    }
+    tool.status = "error";
+    tool.summary = t("Przerwane — brak wyniku; narzędzie mogło się nie wykonać.");
   }
   return items;
 }

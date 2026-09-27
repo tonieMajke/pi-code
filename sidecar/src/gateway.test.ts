@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PiEvent } from "../../shared/protocol";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PiGateway } from "./gateway";
-import { SessionHost, type HostEnv } from "./session-host";
+import { historyOf, SessionHost, type HostEnv } from "./session-host";
 
 /** Fake AgentSession: captures the subscriber, lets tests push SDK events. */
 function fakeSession() {
@@ -237,6 +237,32 @@ describe("PiGateway.history", () => {
         ],
         stats: [stats],
       },
+    ]);
+  });
+});
+
+describe("historyOf: a tool call without a result", () => {
+  const call = (id: string, ts: number) => ({ role: "assistant", content: [{ type: "toolCall", id, name: "edit", arguments: { path: "calc.py" } }], timestamp: ts });
+  const result = (id: string) => ({ role: "toolResult", toolCallId: id, toolName: "edit", content: [{ type: "text", text: "Edited" }], isError: false, timestamp: 0 });
+  const user = (text: string) => ({ role: "user", content: text, timestamp: 0 });
+  const toolsOf = (items: ReturnType<typeof historyOf>) =>
+    items.flatMap((i) => (i.role === "assistant" ? i.parts.flatMap((p) => (p.type === "tool" ? [p.tool] : [])) : []));
+
+  it("is shown as interrupted, error-style, not as a success (sidecar died while it waited for approval)", () => {
+    const items = historyOf("s", [user("popraw"), call("e1", 1)] as never);
+    expect(toolsOf(items)[0]).toMatchObject({ id: "e1", status: "error", summary: "Przerwane — brak wyniku; narzędzie mogło się nie wykonać." });
+  });
+
+  it("a call with its result stays ok", () => {
+    const items = historyOf("s", [user("popraw"), call("e1", 1), result("e1")] as never);
+    expect(toolsOf(items)[0]).toMatchObject({ status: "ok", summary: "Edited" });
+  });
+
+  it("mid-run: the current turn's call is still to come, an older orphan is interrupted", () => {
+    const items = historyOf("s", [user("a"), call("old", 1), user("b"), call("now", 2)] as never, undefined, new Set(), true);
+    expect(toolsOf(items).map((t) => [t.id, t.status])).toEqual([
+      ["old", "error"],
+      ["now", "running"],
     ]);
   });
 });
