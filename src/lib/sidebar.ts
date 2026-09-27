@@ -1,4 +1,5 @@
 import type { SessionSummary, SidebarGroup, SidebarState } from "../../shared/protocol";
+import { t } from "../../shared/i18n";
 
 /** Sidebar layout edits: pure, so the UI can apply them optimistically and send the result. */
 
@@ -18,7 +19,7 @@ export function moveToGroup(state: SidebarState, path: string, groupId: string |
 }
 
 export function createGroup(state: SidebarState, name: string, id = newGroupId(), withSession?: string): SidebarState {
-  const group: SidebarGroup = { id, name: name.trim() || "Nowa grupa", sessions: [] };
+  const group: SidebarGroup = { id, name: name.trim() || t("Nowa grupa"), sessions: [] };
   const next = { ...state, groups: [...state.groups, group] };
   return withSession ? moveToGroup(next, withSession, id) : next;
 }

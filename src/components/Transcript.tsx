@@ -109,7 +109,7 @@ const UserMessage = memo(function UserMessage({
   return (
     <div className="msg user" data-msg={index} data-part={0}>
       {onEdit && (
-        <button className="edit-btn" onClick={onEdit} title="Edytuj i wyślij ponownie (stara gałąź zostaje w historii sesji)">
+        <button className="edit-btn" onClick={onEdit} title={t("Edytuj i wyślij ponownie (stara gałąź zostaje w historii sesji)")}>
           <Pencil size={13} />
         </button>
       )}
@@ -117,7 +117,7 @@ const UserMessage = memo(function UserMessage({
         {images && images.length > 0 && (
           <div className="bubble-images">
             {images.map((a, i) => (
-              <button key={i} className="bubble-image" onClick={() => setZoom(i)} title="Powiększ">
+              <button key={i} className="bubble-image" onClick={() => setZoom(i)} title={t("Powiększ")}>
                 <img src={dataUrl(a)} alt="" />
               </button>
             ))}
@@ -181,7 +181,7 @@ function AssistantTurn({
     }
     if (b.part.type === "notice") {
       return (
-        <div className="guard-notice" key={i} data-part={b.index} title="Konstytucja odesłała model do pracy (Ustawienia → Konstytucja)">
+        <div className="guard-notice" key={i} data-part={b.index} title={t("Konstytucja odesłała model do pracy (Ustawienia → Konstytucja)")}>
           <Scale size={13} />
           <span>{b.part.text}</span>
         </div>
@@ -207,9 +207,9 @@ function AssistantTurn({
       {!open && onExecutePlan && (
         <div className="plan-cta">
           <button className="btn primary" onClick={onExecutePlan}>
-            <Play size={13} /> Wykonaj plan
+            <Play size={13} /> {t("Wykonaj plan")}
           </button>
-          <span>przełączy na Auto-edycje i każe modelowi zacząć</span>
+          <span>{t("przełączy na Auto-edycje i każe modelowi zacząć")}</span>
         </div>
       )}
       {!open && Boolean(text || stats?.length || checkpoint) && (
@@ -251,11 +251,11 @@ function RestoreButton({
 }) {
   const [armed, setArmed] = useState(false);
   const n = checkpoint.files.length;
-  const list = checkpoint.files.slice(0, 20).join("\n") + (n > 20 ? `\n… i ${n - 20} więcej` : "");
+  const list = checkpoint.files.slice(0, 20).join("\n") + (n > 20 ? `\n${t("… i {n} więcej", { n: n - 20 })}` : "");
   if (checkpoint.restored) {
     return (
       <span className="restore-btn done" title={list}>
-        <Undo2 size={13} /> cofnięto zmiany w {n} {n === 1 ? "pliku" : "plikach"}
+        <Undo2 size={13} /> {plural(n, ["cofnięto zmiany w {n} pliku", "cofnięto zmiany w {n} plikach", "cofnięto zmiany w {n} plikach"], ["reverted changes in {n} file", "reverted changes in {n} files"])}
       </span>
     );
   }
@@ -263,7 +263,7 @@ function RestoreButton({
     <button
       className={`restore-btn ${armed ? "armed" : ""}`}
       disabled={!onRestore}
-      title={`${armed ? "Kliknij jeszcze raz, żeby cofnąć" : "Przywróć pliki do stanu sprzed tej odpowiedzi"}:\n${list}`}
+      title={`${armed ? t("Kliknij jeszcze raz, żeby cofnąć") : t("Przywróć pliki do stanu sprzed tej odpowiedzi")}:\n${list}`}
       onClick={() => {
         if (!armed) {
           setArmed(true);
@@ -275,7 +275,7 @@ function RestoreButton({
       onMouseLeave={() => setArmed(false)}
     >
       <Undo2 size={13} />
-      {armed ? "na pewno? kliknij jeszcze raz" : `Cofnij zmiany plików (${n})`}
+      {armed ? t("na pewno? kliknij jeszcze raz") : t("Cofnij zmiany plików ({n})", { n })}
     </button>
   );
 }
@@ -324,7 +324,7 @@ function Thinking({
   const open = (userOpen ?? defaultOpen) || forceOpen;
   const secs =
     part.start !== undefined ? formatDuration((part.end ?? (now || part.start)) - part.start) : "";
-  const label = active ? `Myśli… ${secs}` : secs && part.end !== part.start ? `Myślał ${secs}` : "Przemyślenia";
+  const label = active ? t("Myśli… {secs}", { secs }) : secs && part.end !== part.start ? t("Myślał {secs}", { secs }) : t("Przemyślenia");
   return (
     <div className={`thinking ${open || active ? "open" : ""} ${active ? "active" : ""}`} data-part={index}>
       <button className="thinking-row" onClick={() => setOpen(!open)}>
@@ -354,12 +354,14 @@ function TurnStats({ stats, onClick, open }: { stats: RequestStats[]; onClick: (
   const detail = stats
     .map(
       (s, i) =>
-        `#${i + 1}: prompt ${s.promptTokens} tok (cache ${s.cacheTokens}) w ${formatDuration(s.promptMs)} → ` +
-        `${Math.round(s.promptPerSec)} t/s · gen ${s.genTokens} tok w ${formatDuration(s.genMs)} → ${Math.round(s.genPerSec)} t/s`,
+        `#${i + 1}: ` +
+        t("prompt {tok} tok (cache {cache}) w {time} → {speed} t/s", { tok: s.promptTokens, cache: s.cacheTokens, time: formatDuration(s.promptMs), speed: Math.round(s.promptPerSec) }) +
+        " · " +
+        t("gen {tok} tok w {time} → {speed} t/s", { tok: s.genTokens, time: formatDuration(s.genMs), speed: Math.round(s.genPerSec) }),
     )
     .join("\n");
   return (
-    <button className={`turn-stats ${open ? "on" : ""}`} onClick={onClick} aria-expanded={open} title={`${stats.length} zapytań do modelu — kliknij: oś czasu tury\n${detail}`}>
+    <button className={`turn-stats ${open ? "on" : ""}`} onClick={onClick} aria-expanded={open} title={`${plural(stats.length, ["{n} zapytanie do modelu", "{n} zapytania do modelu", "{n} zapytań do modelu"], ["{n} model request", "{n} model requests"])} — ${t("kliknij: oś czasu tury")}\n${detail}`}>
       <span>↑ {formatTokens(promptTokens)}</span>
       {cache > 0 && <span className="dim">cache {formatTokens(cache)}</span>}
       {/* tiny cached prompts are all overhead — their "speed" is noise */}
@@ -370,12 +372,9 @@ function TurnStats({ stats, onClick, open }: { stats: RequestStats[]; onClick: (
   );
 }
 
-const SPAN_NAMES: Record<SpanKind, string> = {
-  prompt: "przetwarzanie promptu",
-  gen: "generowanie",
-  tool: "narzędzia",
-  wait: "czekanie na zgodę",
-};
+/** Timeline lane names, in the language the interface has right now. */
+const spanName = (k: SpanKind): string =>
+  k === "prompt" ? t("przetwarzanie promptu") : k === "gen" ? t("generowanie") : k === "tool" ? t("narzędzia") : t("czekanie na zgodę");
 
 /** Where the turn's time went, on two lanes: the model and the tools. */
 function TurnTimeline({ parts, stats }: { parts: Part[]; stats?: RequestStats[] }) {
@@ -389,12 +388,12 @@ function TurnTimeline({ parts, stats }: { parts: Part[]; stats?: RequestStats[] 
           key={i}
           className={`tl-span tl-${s.kind}`}
           style={{ left: `${((s.start - tl.start) / span) * 100}%`, width: `max(2px, ${((s.end - s.start) / span) * 100}%)` }}
-          title={`${t(SPAN_NAMES[s.kind])} · ${s.label} · ${formatDuration(s.end - s.start)}`}
+          title={`${spanName(s.kind)} · ${s.label} · ${formatDuration(s.end - s.start)}`}
         />
       ))}
     </div>
   );
-  const kinds = (Object.keys(SPAN_NAMES) as SpanKind[]).filter((k) => tl.totals[k] > 0);
+  const kinds = (["prompt", "gen", "tool", "wait"] as SpanKind[]).filter((k) => tl.totals[k] > 0);
   return (
     <div className="timeline">
       {tl.end > tl.start && (
@@ -409,7 +408,7 @@ function TurnTimeline({ parts, stats }: { parts: Part[]; stats?: RequestStats[] 
         {kinds.map((k) => (
           <span key={k}>
             <i className={`tl-dot tl-${k}`} />
-            {t(SPAN_NAMES[k])} {formatDuration(tl.totals[k])}
+            {spanName(k)} {formatDuration(tl.totals[k])}
           </span>
         ))}
         {tl.end > tl.start && <span className="tl-total">{t("cała tura")} {formatDuration(tl.end - tl.start)}</span>}

@@ -5,18 +5,27 @@ import type { PiRequest } from "../lib/transport";
 import { Row, Segmented, TextField, Toggle } from "./settings-ui";
 import { t } from "../../shared/i18n";
 
-const SOURCE: Record<VoiceKeySource, string> = {
-  stored: "zapisany w Pi Code",
-  env: "ze zmiennej środowiskowej",
-  pi: "z kluczy pi (auth.json)",
-  mowa: "z MowaWszędzie (~/.config/mowa)",
-  none: "",
-};
+/** Where the key came from, in the language the interface has right now. */
+function sourceText(s: VoiceKeySource): string {
+  switch (s) {
+    case "stored":
+      return t("zapisany w Pi Code");
+    case "env":
+      return t("ze zmiennej środowiskowej");
+    case "pi":
+      return t("z kluczy pi (auth.json)");
+    case "mowa":
+      return t("z MowaWszędzie (~/.config/mowa)");
+    default:
+      return "";
+  }
+}
 
-const LANGS = [
-  { value: "pl", label: "polski" },
-  { value: "en", label: "angielski" },
-  { value: "auto", label: "wykryj" },
+/** Dictation languages, labelled at render time. */
+const langOptions = () => [
+  { value: "pl", label: t("polski") },
+  { value: "en", label: t("angielski") },
+  { value: "auto", label: t("wykryj") },
 ];
 
 export function VoiceSection({ request }: { request: PiRequest }) {
@@ -117,7 +126,7 @@ export function VoiceSection({ request }: { request: PiRequest }) {
           desc={
             prov.keySource !== "none" ? (
               <span className="voice-key-ok">
-                ● {t("jest — {source}", { source: t(SOURCE[prov.keySource]) })}
+                ● {t("jest — {source}", { source: sourceText(prov.keySource) })}
               </span>
             ) : prov.needsKey ? (
               <>
@@ -151,7 +160,7 @@ export function VoiceSection({ request }: { request: PiRequest }) {
         </Row>
       ) : null}
       <Row label={t("Język")} desc={t("Podany wprost jest pewniejszy niż wykrywanie — krótkie zdania bywają brane za inny język.")}>
-        <Segmented value={c.language} options={LANGS.map((l) => ({ value: l.value, label: t(l.label) }))} onChange={(language) => patch({ language })} />
+        <Segmented value={c.language} options={langOptions()} onChange={(language) => patch({ language })} />
       </Row>
       <Row label={t("Model")} desc={t("Puste = {model}", { model: prov.model })}>
         <TextField value={c.model} placeholder={prov.model} onCommit={(model) => patch({ model })} />

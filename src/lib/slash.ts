@@ -1,4 +1,5 @@
 import type { SlashCommandInfo } from "../../shared/protocol";
+import { t } from "../../shared/i18n";
 
 /** gui = done by Pi Code itself; terminal = only pi's TUI has it; the rest pi runs from a prompt. */
 export type SlashKind = "gui" | "terminal" | SlashCommandInfo["source"];
@@ -15,41 +16,44 @@ export type SlashEntry = {
   pick?: SlashPick;
 };
 
-export const BUILTINS: SlashEntry[] = [
-  { name: "compact", description: "Streść rozmowę, żeby zwolnić kontekst", kind: "gui", args: "[instrukcje]" },
-  { name: "new", description: "Nowa sesja w tym projekcie", kind: "gui" },
-  { name: "model", description: "Zmień model tej sesji", kind: "gui", args: "[model]", pick: "model" },
-  { name: "thinking", description: "Poziom myślenia modelu", kind: "gui", args: "[poziom]", pick: "thinking" },
-  { name: "mode", description: "Tryb uprawnień", kind: "gui", args: "[tryb]", pick: "mode" },
-  { name: "fork", description: "Nowa sesja od wybranej wiadomości (wiadomość wraca do edycji)", kind: "gui", pick: "fork" },
-  { name: "handoff", description: "Nowa sesja z podsumowaniem od modelu w polu wiadomości (do poprawienia)", kind: "gui", args: "[cel nowej sesji]" },
-  { name: "clone", description: "Kopia tej sesji jako nowa sesja", kind: "gui" },
-  { name: "name", description: "Zmień nazwę sesji", kind: "gui", args: "<nazwa>" },
-  { name: "session", description: "Statystyki sesji: wiadomości, narzędzia, tokeny", kind: "gui" },
-  { name: "export", description: "Zapisz sesję jako HTML w folderze projektu", kind: "gui" },
-  { name: "copy", description: "Skopiuj ostatnią odpowiedź modelu", kind: "gui" },
-  { name: "reload", description: "Przeładuj rozszerzenia, skille, szablony i pliki kontekstu", kind: "gui" },
-  { name: "settings", description: "Ustawienia", kind: "gui" },
+/** Built-in commands, described in the language the interface has right now. */
+export const builtins = (): SlashEntry[] => [
+  { name: "compact", description: t("Streść rozmowę, żeby zwolnić kontekst"), kind: "gui", args: t("[instrukcje]") },
+  { name: "new", description: t("Nowa sesja w tym projekcie"), kind: "gui" },
+  { name: "model", description: t("Zmień model tej sesji"), kind: "gui", args: "[model]", pick: "model" },
+  { name: "thinking", description: t("Poziom myślenia modelu"), kind: "gui", args: t("[poziom]"), pick: "thinking" },
+  { name: "mode", description: t("Tryb uprawnień"), kind: "gui", args: t("[tryb]"), pick: "mode" },
+  { name: "fork", description: t("Nowa sesja od wybranej wiadomości (wiadomość wraca do edycji)"), kind: "gui", pick: "fork" },
+  { name: "handoff", description: t("Nowa sesja z podsumowaniem od modelu w polu wiadomości (do poprawienia)"), kind: "gui", args: t("[cel nowej sesji]") },
+  { name: "clone", description: t("Kopia tej sesji jako nowa sesja"), kind: "gui" },
+  { name: "name", description: t("Zmień nazwę sesji"), kind: "gui", args: t("<nazwa>") },
+  { name: "session", description: t("Statystyki sesji: wiadomości, narzędzia, tokeny"), kind: "gui" },
+  { name: "export", description: t("Zapisz sesję jako HTML w folderze projektu"), kind: "gui" },
+  { name: "copy", description: t("Skopiuj ostatnią odpowiedź modelu"), kind: "gui" },
+  { name: "reload", description: t("Przeładuj rozszerzenia, skille, szablony i pliki kontekstu"), kind: "gui" },
+  { name: "settings", description: t("Ustawienia"), kind: "gui" },
 ];
 
 /** pi TUI commands without a GUI counterpart yet. */
-export const TERMINAL_ONLY: SlashEntry[] = [
-  { name: "tree", description: "Drzewo sesji", kind: "terminal" },
-  { name: "login", description: "Logowanie do dostawcy modeli", kind: "terminal" },
-  { name: "logout", description: "Wylogowanie z dostawcy", kind: "terminal" },
-  { name: "llama", description: "Zarządzanie modelami w routerze llama.cpp", kind: "terminal" },
-  { name: "scoped-models", description: "Modele do przełączania w TUI", kind: "terminal" },
-  { name: "share", description: "Udostępnij sesję linkiem", kind: "terminal" },
-  { name: "import", description: "Importuj sesję z pliku JSONL", kind: "terminal" },
+export const terminalOnly = (): SlashEntry[] => [
+  { name: "tree", description: t("Drzewo sesji"), kind: "terminal" },
+  { name: "login", description: t("Logowanie do dostawcy modeli"), kind: "terminal" },
+  { name: "logout", description: t("Wylogowanie z dostawcy"), kind: "terminal" },
+  { name: "llama", description: t("Zarządzanie modelami w routerze llama.cpp"), kind: "terminal" },
+  { name: "scoped-models", description: t("Modele do przełączania w TUI"), kind: "terminal" },
+  { name: "share", description: t("Udostępnij sesję linkiem"), kind: "terminal" },
+  { name: "import", description: t("Importuj sesję z pliku JSONL"), kind: "terminal" },
 ];
 
 /** Built-ins first, then what pi offers (extensions, templates, skills), terminal-only last. */
 export function allCommands(pi: SlashCommandInfo[]): SlashEntry[] {
-  const taken = new Set([...BUILTINS, ...TERMINAL_ONLY].map((c) => c.name));
+  const own = builtins();
+  const terminal = terminalOnly();
+  const taken = new Set([...own, ...terminal].map((c) => c.name));
   const fromPi = pi
     .filter((c) => !taken.has(c.name))
     .map((c): SlashEntry => ({ name: c.name, description: c.description, kind: c.source, args: c.source === "extension" ? undefined : "[tekst]" }));
-  return [...BUILTINS, ...fromPi, ...TERMINAL_ONLY];
+  return [...own, ...fromPi, ...terminal];
 }
 
 /** "/name args" filling the whole input. Paths such as "/home/x" are not commands. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allCommands, BUILTINS, matchCommands, matchPicks, parseSlash, slashState } from "./slash";
+import { allCommands, builtins, matchCommands, matchPicks, parseSlash, slashState } from "./slash";
 
 const cmds = allCommands([
   { name: "memory", description: "Show persistent user memory", source: "extension" },
@@ -56,6 +56,6 @@ describe("slash commands", () => {
   });
 
   it("every built-in with a picker also accepts a typed argument", () => {
-    for (const c of BUILTINS.filter((b) => b.pick && b.name !== "fork")) expect(c.args).toBeTruthy();
+    for (const c of builtins().filter((b) => b.pick && b.name !== "fork")) expect(c.args).toBeTruthy();
   });
 });

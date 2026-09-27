@@ -1,4 +1,5 @@
 import type { Attachment } from "../../shared/protocol";
+import { t } from "../../shared/i18n";
 
 const MAX_SIDE = 2048;
 const KEEP_PNG_BELOW = 1_500_000;
@@ -14,7 +15,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 
 /** Image file → base64 attachment, downscaled so the longest side is ≤ 2048 px. */
 export async function fileToAttachment(file: File): Promise<Attachment> {
-  if (!file.type.startsWith("image/")) throw new Error(`nie obrazek: ${file.name}`);
+  if (!file.type.startsWith("image/")) throw new Error(t("to nie jest obraz: {name}", { name: file.name }));
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
   if (scale === 1 && file.size < KEEP_PNG_BELOW) {
