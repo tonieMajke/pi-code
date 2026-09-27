@@ -40,6 +40,7 @@ import { appContext } from "./app-context.js";
 import { PlanRecital, TODO_DESCRIPTION, TodoList, type TodoItem } from "./todo.js";
 import { CONSTITUTION_MESSAGE_TYPE, ConstitutionGuard, finishIntent } from "./constitution.js";
 import type { GuiConfigStore } from "./config.js";
+import { createSession } from "./session-files.js";
 import { changesSince, diffSince, restore, snapshot } from "./checkpoint.js";
 import { elideOldImages, elideOldToolOutput } from "./elide.js";
 import { changedLines, parseVerdict, reviewNudge, reviewPrompt, type ReviewVerdict } from "./review.js";
@@ -1122,7 +1123,7 @@ export class SessionHost {
       commandContextActions: {
         waitForIdle: () => current().waitForIdle(),
         newSession: async (options) => {
-          const sm = SessionManager.create(this.cwd);
+          const sm = createSession(this.cwd);
           if (options?.parentSession) sm.newSession({ parentSession: options.parentSession });
           await options?.setup?.(sm);
           await this.env.startSession(this.cwd, sm);

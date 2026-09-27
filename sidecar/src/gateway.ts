@@ -42,6 +42,7 @@ import { TERMINAL_PRESETS } from "../../shared/terminal.js";
 import { SidebarStore } from "./sidebar-store.js";
 import { DEFAULT_CONSTITUTION } from "./constitution.js";
 import { GuiConfigStore } from "./config.js";
+import { createSession, openSessionFile } from "./session-files.js";
 import { HANDOFF_SYSTEM_PROMPT, handoffMessages, handoffUserText } from "./handoff.js";
 import { installFetchTap, isLocalBaseUrl, onPerf, onRequestDone, setSampling, withRequestContext } from "./perf.js";
 import { aggregate, appendStats, readStats } from "./stats.js";
@@ -233,8 +234,7 @@ export class PiGateway {
     if (this.config.broken) this.out({ kind: "notice", level: "error", text: this.config.broken.message });
     setSampling(this.config.get().sampling);
     this.memory = new MemoryStore(process.env.PI_GUI_MEMORY ?? join(this.services.agentDir, "memory", "user.md"));
-    // PI_GUI_EPHEMERAL (eval harness): keep throwaway runs out of the user's session history.
-    const sm = process.env.PI_GUI_EPHEMERAL ? SessionManager.inMemory(workingDir) : SessionManager.create(workingDir);
+    const sm = createSession(workingDir);
     await this.startSession(workingDir, sm);
   }
 
@@ -348,7 +348,7 @@ export class PiGateway {
       this.bringBack(live);
       return;
     }
-    const sessionManager = SessionManager.open(path);
+    const sessionManager = openSessionFile(path);
     // The session being left stops talking to the view before the new transcript goes out.
     const prev = this.active;
     this.active = null;
@@ -381,7 +381,7 @@ export class PiGateway {
   async newSession(cwd?: string): Promise<void> {
     this.requireServices();
     const target = cwd ?? this.cwd;
-    await this.startSession(target, SessionManager.create(target));
+    await this.startSession(target, createSession(target));
   }
 
   // ── Session in a real terminal (pi TUI: /settings, /login…) ──────────────
@@ -631,7 +631,7 @@ export class PiGateway {
     if (!prompt) throw new Error("model nie napisał handoffu");
     // Persisted parent → the new session keeps a link back (like pi's /handoff).
     const file = s.sessionManager.isPersisted() && s.sessionFile && existsSync(s.sessionFile) ? s.sessionFile : undefined;
-    const sm = SessionManager.create(host.cwd, s.sessionManager.getSessionDir());
+    const sm = createSession(host.cwd, s.sessionManager.getSessionDir());
     if (file) sm.newSession({ parentSession: file });
     await this.startSession(host.cwd, sm);
     return { prompt, from: title };
@@ -645,13 +645,13 @@ export class PiGateway {
     const dir = s.sessionManager.getSessionDir();
     if (!leafId) {
       // Forking before the very first message: an empty session that remembers its parent.
-      const sm = SessionManager.create(host.cwd, dir);
+      const sm = createSession(host.cwd, dir);
       sm.newSession({ parentSession: file });
       await this.startSession(host.cwd, sm);
       return;
     }
     if (!file || !existsSync(file)) throw new Error("sesja nie jest jeszcze zapisana — poczekaj na pierwszą odpowiedź modelu");
-    const sm = SessionManager.open(file, dir);
+    const sm = openSessionFile(file, dir);
     if (!sm.createBranchedSession(leafId)) throw new Error("nie udało się utworzyć nowej sesji");
     await this.startSession(sm.getCwd() || host.cwd, sm);
   }

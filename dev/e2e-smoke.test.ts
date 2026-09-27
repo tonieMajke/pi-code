@@ -78,7 +78,17 @@ describe("e2e smoke: bridge + sidecar over WS", () => {
       cwd: ROOT,
       // In-memory session, own stats log: every test run used to add a chat to the user's
       // sidebar and a line to their model statistics.
-      env: { ...process.env, PORT: String(PORT), PI_GUI_EPHEMERAL: "1", PI_GUI_STATS: join(SCRATCH, "stats.jsonl") },
+      // Config, memory, sidebar and voice keys too: nothing the test does may reach the user's files.
+      env: {
+        ...process.env,
+        PORT: String(PORT),
+        PI_GUI_EPHEMERAL: "1",
+        PI_GUI_STATS: join(SCRATCH, "stats.jsonl"),
+        PI_GUI_CONFIG: join(SCRATCH, "pi-gui.json"),
+        PI_GUI_MEMORY: join(SCRATCH, "memory", "user.md"),
+        PI_GUI_SIDEBAR: join(SCRATCH, "sidebar.json"),
+        PI_GUI_VOICE_KEYS: join(SCRATCH, "voice-keys.json"),
+      },
       stdio: ["ignore", "ignore", "inherit"],
       detached: true,
     });
