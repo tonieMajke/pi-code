@@ -9,6 +9,8 @@ import { CopyButton, markdownComponents } from "../lib/code-block";
 import { ToolCard } from "../lib/tool-card";
 import { formatDuration, formatTokens } from "../lib/format";
 import { dataUrl } from "../lib/images";
+import { groupSteps, summarizeSteps, toBlocks, type Block } from "../lib/steps";
+import { plural } from "../../shared/i18n";
 import { Lightbox } from "./Lightbox";
 
 const REMARK = [remarkGfm, remarkBreaks];
@@ -127,25 +129,6 @@ const UserMessage = memo(function UserMessage({
   );
 });
 
-type Block =
-  | { kind: "part"; part: Exclude<Part, { type: "tool" }>; index: number }
-  | { kind: "tools"; tools: { tool: ToolItem; index: number }[] };
-
-/** Consecutive tool calls render as one compact group (Claude Code style). */
-function toBlocks(parts: Part[]): Block[] {
-  const blocks: Block[] = [];
-  parts.forEach((p, index) => {
-    if (p.type === "tool") {
-      const last = blocks[blocks.length - 1];
-      if (last?.kind === "tools") last.tools.push({ tool: p.tool, index });
-      else blocks.push({ kind: "tools", tools: [{ tool: p.tool, index }] });
-    } else {
-      blocks.push({ kind: "part", part: p, index });
-    }
-  });
-  return blocks;
-}
-
 function AssistantTurn({
   index,
   openPart,
@@ -172,45 +155,53 @@ function AssistantTurn({
   awaiting: Set<string>;
   onExecutePlan?: () => void;
 }) {
-  const blocks = toBlocks(parts);
+  const blocks = groupSteps(toBlocks(parts), open, (i) => hiddenReply(parts, i));
   const text = parts
     .filter((p): p is Extract<Part, { type: "text" }> => p.type === "text")
     .map((p) => p.text)
     .join("\n\n");
+  const render = (b: Block, i: number): React.ReactNode => {
+    if (b.kind === "steps") {
+      return (
+        <StepsRow key={i} parts={parts} indices={b.indices} forceOpen={b.indices.includes(openPart)}>
+          {b.blocks.map(render)}
+        </StepsRow>
+      );
+    }
+    if (b.kind === "tools") {
+      return (
+        <div className="tool-group" key={i}>
+          {b.tools.map(({ tool, index: p }) => (
+            <ToolCard key={tool.id} tool={tool} cwd={cwd} now={now} awaiting={awaiting.has(tool.id)} part={p} forceOpen={openPart === p} />
+          ))}
+        </div>
+      );
+    }
+    if (b.part.type === "notice") {
+      return (
+        <div className="guard-notice" key={i} data-part={b.index} title="Konstytucja odesłała model do pracy (Ustawienia → Konstytucja)">
+          <Scale size={13} />
+          <span>{b.part.text}</span>
+        </div>
+      );
+    }
+    if (b.part.type === "thinking") {
+      return (
+        <Thinking
+          key={i}
+          part={b.part}
+          now={now}
+          index={b.index}
+          forceOpen={openPart === b.index}
+          defaultOpen={hiddenReply(parts, b.index)}
+        />
+      );
+    }
+    return <Markdown key={i} text={b.part.text} index={b.index} />;
+  };
   return (
     <div className="msg assistant" data-msg={index}>
-      {blocks.map((b, i) => {
-        if (b.kind === "tools") {
-          return (
-            <div className="tool-group" key={i}>
-              {b.tools.map(({ tool, index: p }) => (
-                <ToolCard key={tool.id} tool={tool} cwd={cwd} now={now} awaiting={awaiting.has(tool.id)} part={p} forceOpen={openPart === p} />
-              ))}
-            </div>
-          );
-        }
-        if (b.part.type === "notice") {
-          return (
-            <div className="guard-notice" key={i} data-part={b.index} title="Konstytucja odesłała model do pracy (Ustawienia → Konstytucja)">
-              <Scale size={13} />
-              <span>{b.part.text}</span>
-            </div>
-          );
-        }
-        if (b.part.type === "thinking") {
-          return (
-            <Thinking
-              key={i}
-              part={b.part}
-              now={now}
-              index={b.index}
-              forceOpen={openPart === b.index}
-              defaultOpen={hiddenReply(parts, b.index)}
-            />
-          );
-        }
-        return <Markdown key={i} text={b.part.text} index={b.index} />;
-      })}
+      {blocks.map(render)}
       {!open && onExecutePlan && (
         <div className="plan-cta">
           <button className="btn primary" onClick={onExecutePlan}>
@@ -226,6 +217,24 @@ function AssistantTurn({
           {stats && stats.length > 0 && <TurnStats stats={stats} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A finished chain of steps as one row: "▸ 6 kroków: 3 polecenia, 1 edycja · 2 min". */
+function StepsRow({ parts, indices, forceOpen, children }: { parts: Part[]; indices: number[]; forceOpen: boolean; children: React.ReactNode }) {
+  const [userOpen, setOpen] = useState(false);
+  const open = userOpen || forceOpen;
+  const sum = summarizeSteps(parts, indices);
+  return (
+    <div className={`steps ${open ? "open" : ""}`} data-part={indices[0]}>
+      <button className="steps-row" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <ChevronRight size={14} className="tool-chevron" />
+        <span className="steps-label">{sum.label}</span>
+        {sum.errors > 0 && <span className="steps-err">· {plural(sum.errors, ["{n} błąd", "{n} błędy", "{n} błędów"], ["{n} error", "{n} errors"])}</span>}
+        {sum.ms !== null && <span className="steps-time">· {formatDuration(sum.ms)}</span>}
+      </button>
+      {open && <div className="steps-body">{children}</div>}
     </div>
   );
 }

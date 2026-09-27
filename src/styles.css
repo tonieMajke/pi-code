@@ -421,6 +421,20 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 }
 .codeblock code { font-size: inherit; }
 
+/* A finished chain of steps folded into one row */
+.steps { font-size: 13.5px; }
+.steps-row {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  border: none; background: none; padding: 3px 6px 3px 2px; border-radius: 7px;
+  color: var(--muted); text-align: left;
+}
+.steps-row:hover { color: var(--text); }
+.steps-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steps-err { color: var(--err); flex: none; }
+.steps-time { color: var(--faint); flex: none; }
+.steps.open .steps-row > .tool-chevron { transform: rotate(90deg); }
+.steps-body { margin: 4px 0 2px 8px; padding-left: 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+
 /* Thinking */
 .thinking { font-size: 13.5px; }
 .thinking-row {
