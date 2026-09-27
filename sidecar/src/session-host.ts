@@ -1412,7 +1412,7 @@ running?: ReadonlySet<string>,
       if (saved) last.stats = [...(last.stats ?? []), ...saved];
     } else if (msg.role === "custom" && msg.customType === CONSTITUTION_MESSAGE_TYPE) {
       const last = items[items.length - 1];
-      const label = (msg.details as { label?: string } | undefined)?.label ?? "Konstytucja";
+      const label = (msg.details as { label?: string } | undefined)?.label ?? t("Konstytucja");
       if (last?.role === "assistant") last.parts.push({ type: "notice", text: label });
     } else if (msg.role === "toolResult") {
       const part = toolIndex.get(msg.toolCallId);

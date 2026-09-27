@@ -393,7 +393,7 @@ export function SettingsDialog({
               {section === "app" && (
                 <>
                   <h2>{t("Aplikacja")}</h2>
-                  <Row label={t("Język")} desc={t("Język interfejsu. Po zmianie okno przeładuje się.")}>
+                  <Row label={t("Język")} desc={t("Język interfejsu. Zmiana działa od razu.")}>
                     <Segmented value={lang()} options={LANGS.map((l) => ({ value: l.id, label: l.label }))} onChange={(v) => onLang(v as Lang)} />
                   </Row>
                   <Row label={t("Powiadomienia")} desc={t("Systemowe powiadomienie, gdy pi skończy albo czeka na zgodę, a okno jest w tle.")}>

@@ -13,8 +13,10 @@
  *     text, user-facing JSX attributes, and code strings that look like a phrase (have a space,
  *     are not a class list or a path).
  *
- * Rule 2 is a word list, so it can miss a phrase made only of words it does not know. Rule 1
- * catches most copy anyway: Polish rarely goes a sentence without a diacritic.
+ *  3. A word the dictionary knows as Polish (polishVocabulary) in any user-facing literal.
+ *
+ * Rule 2 is a fixed word list and misses what it does not know; rule 3 learns from the
+ * dictionary. Rule 1 catches most copy anyway: Polish rarely goes a sentence without a diacritic.
  */
 
 export type LiteralKind = "string" | "template" | "jsx-text" | "jsx-attr";
@@ -287,7 +289,7 @@ export function literals(src: string, jsx: boolean): Literal[] {
 export const POLISH = /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
 /** Polish words that are commonly written with no diacritic at all. `\b` is ASCII-only in JS. */
 export const WORDS =
-  /(?<![\p{L}\d_])(wczytywanie|wczytaj|brak\w*|nic|pasuje|pasujących|komend\w*|projek\w*|sesj\w*|czat\w*|grup\w*|modele|modelu|modelem|modeli|ustawieni\w*|dodaj|wybierz|zapisz|zamknij|szukaj|tryb\w*|wszystk\w*|gotowe|nowa|nowy|nowe|nazwa|nazw\w*|katalog\w*|plik\w*|pracuj\w*|anuluj|zawsze|pytaj|edytuj|sekcja|przewi\w*|kliknij|odrzu\w*|jest|nie|tak|albo|oraz|tylko|teraz|potem|przez|dla|tej|tego|jako|jeszcze|cofnij|pokaz|ukryj|kopia|zmiany|przerwij|sprawdz\w*|zapisano|zaladuj|wiadomo\w*|odswiez|ponownie)(?![\p{L}\d_])/iu;
+  /(?<![\p{L}\d_])(wczytywanie|wczytaj|brak\w*|nic|pasuje|pasujących|komend\w*|projek\w*|sesj\w*|czat\w*|grup\w*|modele|modelu|modelem|modeli|ustawieni\w*|dodaj|wybierz|zapisz|zamknij|szukaj|tryb\w*|wszystk\w*|gotowe|nowa|nowy|nowe|nazwa|nazw\w*|katalog\w*|plik\w*|pracuj\w*|anuluj|zawsze|pytaj|edytuj|sekcja|przewi\w*|kliknij|odrzu\w*|jest|nie|tak|albo|oraz|tylko|teraz|potem|przez|dla|tej|tego|jako|jeszcze|cofnij|pokaz|ukryj|kopia|zmiany|przerwij|sprawdz\w*|zapisano|zaladuj|wiadomo\w*|odswiez|ponownie|chce|chcesz)(?![\p{L}\d_])/iu;
 
 /** Attributes that are never shown to the user. */
 const TECH_ATTRS = /^(className|key|id|type|name|href|src|role|rel|target|htmlFor|lang|autoComplete|inputMode|method|action|value|defaultValue|mode|kind|variant|size|align|side|data-[\w-]+|aria-(?!label|description|placeholder)[\w-]+|viewBox|d|fill|stroke\w*|xmlns|tabIndex|dir|accept)$/;
@@ -305,12 +307,27 @@ function phraseLike(text: string): boolean {
 
 export interface Hit {
   line: number;
-  rule: "polish" | "word";
+  rule: "polish" | "word" | "vocab";
   text: string;
 }
 
-/** Hits for one source file. `jsx` = the file may contain JSX (.tsx). */
-export function scanSource(src: string, jsx: boolean): Hit[] {
+const vocabWords = (s: string) => s.toLowerCase().match(/\p{L}{4,}/gu) ?? [];
+
+/**
+ * Rule 3's word list: words of the Polish keys in shared/i18n-en.ts that no English value uses.
+ * It grows with the dictionary, so a word the UI already translates somewhere ("Kopiuj",
+ * "pewno") is caught when it turns up untranslated anywhere else.
+ */
+export function polishVocabulary(en: Record<string, string>): Set<string> {
+  const english = new Set(Object.values(en).flatMap(vocabWords));
+  return new Set(Object.keys(en).flatMap(vocabWords).filter((w) => !english.has(w)));
+}
+
+/**
+ * Hits for one source file. `jsx` = the file may contain JSX (.tsx). `vocab` enables rule 3:
+ * any user-facing literal holding one of these words, even a single word with no diacritics.
+ */
+export function scanSource(src: string, jsx: boolean, vocab?: Set<string>): Hit[] {
   const hits: Hit[] = [];
   const lineOf = (i: number) => src.slice(0, i).split("\n").length;
   for (const lit of literals(src, jsx)) {
@@ -325,6 +342,7 @@ export function scanSource(src: string, jsx: boolean): Hit[] {
     }
     const copyLike = lit.kind === "jsx-text" || lit.kind === "jsx-attr" || phraseLike(text);
     if (copyLike && WORDS.test(text)) hits.push({ line: lineOf(lit.from), rule: "word", text });
+    else if (vocab && vocabWords(text).some((w) => vocab.has(w))) hits.push({ line: lineOf(lit.from), rule: "vocab", text });
   }
   return hits;
 }

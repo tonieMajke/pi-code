@@ -5,8 +5,13 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Composer } from "./Composer";
 import { allCommands } from "../lib/slash";
 import { isNoModelFailure } from "../lib/no-model";
+import { setLang } from "../../shared/i18n";
+import { modeInfo } from "../lib/modes";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setLang("pl");
+});
 
 const RAW_PI_ERROR =
   "prompt: No API key found for the selected model. Use /login <provider> to set the API key. See /home/u/.pi/npm/node_modules/@earendil-works/pi-coding-agent/docs/providers.md";
@@ -128,5 +133,22 @@ describe("isNoModelFailure", () => {
   it("leaves every other failure to the normal error bar", () => {
     expect(isNoModelFailure("connect ECONNREFUSED 127.0.0.1:8080")).toBe(false);
     expect(isNoModelFailure("git: not a repository")).toBe(false);
+  });
+});
+
+describe("language switch", () => {
+  // App bumps a version on a switch and re-renders; nothing is reloaded. That only works while
+  // every label is built at render time, which is what this checks on a real component.
+  it("the next render is in the new language, with no reload", () => {
+    const { rerender } = render(<Harness model="Swift" />);
+    const box = () => screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(box().placeholder).toBe("Opisz zadanie albo zadaj pytanie");
+    expect(modeInfo("ask").label).toBe("Pytaj");
+
+    setLang("en");
+    rerender(<Harness model="Swift" />);
+    expect(box().placeholder).toBe("Describe the task or ask a question");
+    expect(modeInfo("ask").label).toBe("Ask");
+    expect(screen.getByTitle("Send (Enter)")).toBeTruthy();
   });
 });

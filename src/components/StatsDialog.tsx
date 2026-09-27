@@ -6,15 +6,25 @@ import { formatDuration, formatTokens } from "../lib/format";
 import { locale, plural, t } from "../../shared/i18n";
 import { Segmented } from "./settings-ui";
 
-const ROLE_LABEL: Record<RequestRole, string> = {
-  main: t("sesje"),
-  critic: t("krytyk"),
-  reviewer: t("recenzent"),
-  handoff: t("handoff"),
-  memory: t("nauka pamięci"),
-  compact: t("kompaktowanie"),
-  commit: t("opis commitu"),
-};
+/** Who made the request, in the language the interface has right now. */
+function roleLabel(role: RequestRole): string {
+  switch (role) {
+    case "main":
+      return t("sesje");
+    case "critic":
+      return t("krytyk");
+    case "reviewer":
+      return t("recenzent");
+    case "handoff":
+      return t("handoff");
+    case "memory":
+      return t("nauka pamięci");
+    case "compact":
+      return t("kompaktowanie");
+    case "commit":
+      return t("opis commitu");
+  }
+}
 
 const speed = (v: number | null) => (v === null ? "—" : v >= 100 ? String(Math.round(v)) : v.toFixed(1).replace(".", locale() === "pl-PL" ? "," : "."));
 
@@ -143,7 +153,7 @@ export function StatsDialog({ request, onClose }: { request: PiRequest; onClose:
                   <ul className="stats-list">
                     {d.overhead.map((o) => (
                       <li key={o.role}>
-                        <span>{ROLE_LABEL[o.role]}</span>
+                        <span>{roleLabel(o.role)}</span>
                         <span className="num">{t("{n} zap. · ↑ {prompt} · ↓ {gen}", { n: o.requests, prompt: formatTokens(o.promptTokens), gen: formatTokens(o.genTokens) })}</span>
                       </li>
                     ))}

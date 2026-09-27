@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentProps } from "react";
 import { Check, Copy } from "lucide-react";
 import type { Highlighter } from "shiki";
 import { isExternalUrl, openExternal } from "./open-url";
+import { t } from "../../shared/i18n";
 
 const THEME = "github-dark";
 const LANGS = ["typescript", "tsx", "javascript", "jsx", "bash", "python", "rust", "json", "css", "html"];
@@ -76,7 +77,7 @@ export async function copyText(text: string): Promise<void> {
   }
 }
 
-export function CopyButton({ text, label = "Kopiuj" }: { text: string; label?: string }) {
+export function CopyButton({ text, label = t("Kopiuj") }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
@@ -90,7 +91,7 @@ export function CopyButton({ text, label = "Kopiuj" }: { text: string; label?: s
       title={label}
     >
       {done ? <Check size={13} /> : <Copy size={13} />}
-      <span>{done ? "Skopiowano" : label}</span>
+      <span>{done ? t("Skopiowano") : label}</span>
     </button>
   );
 }

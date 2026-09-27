@@ -75,7 +75,7 @@ export function ApprovalCard({
       <div className="approval-head">
         <Hand size={15} />
         <span>
-          pi chce {askText(approval.toolName) ?? t("użyć narzędzia {tool}", { tool: toolVerb(approval.toolName) })}
+          {t("pi chce {what}", { what: askText(approval.toolName) ?? t("użyć narzędzia {tool}", { tool: toolVerb(approval.toolName) }) })}
           {approval.toolName !== "bash" && target && <code className="approval-target">{target}</code>}
         </span>
         {queued > 0 && <span className="approval-queue">{t("+{n} w kolejce", { n: queued })}</span>}

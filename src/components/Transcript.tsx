@@ -10,7 +10,7 @@ import { ToolCard } from "../lib/tool-card";
 import { formatDuration, formatTokens } from "../lib/format";
 import { dataUrl } from "../lib/images";
 import { groupSteps, summarizeSteps, toBlocks, type Block } from "../lib/steps";
-import { plural, t } from "../../shared/i18n";
+import { lang, plural, t, type Lang } from "../../shared/i18n";
 import { turnTimeline, type Span, type SpanKind } from "../lib/timeline";
 import { Lightbox } from "./Lightbox";
 
@@ -53,6 +53,7 @@ export function Transcript({
             index={i}
             text={m.text}
             images={m.images}
+            lang={lang()}
             onEdit={onEdit && (() => onEdit(fromEnd.get(i)!))}
           />
         ) : m.role === "command" ? (
@@ -103,6 +104,8 @@ const UserMessage = memo(function UserMessage({
   index: number;
   text: string;
   images?: Attachment[];
+  /** Not read: a language switch has to re-render the memoized titles. */
+  lang: Lang;
   onEdit?: () => void;
 }) {
   const [zoom, setZoom] = useState<number | null>(null);

@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { scanSource } from "./i18n-scan";
+import { EN } from "../shared/i18n-en";
+import { polishVocabulary, scanSource } from "./i18n-scan";
 
 /**
  * Every Polish string the user can see goes through t() / plural(), so the English interface
@@ -28,9 +29,11 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+const VOCAB = polishVocabulary(EN);
+
 function scanFile(path: string): string[] {
   const rel = relative(ROOT, path).replace(/\\/g, "/");
-  return scanSource(readFileSync(path, "utf8"), path.endsWith(".tsx"))
+  return scanSource(readFileSync(path, "utf8"), path.endsWith(".tsx"), VOCAB)
     .filter((h) => !ALLOWED.some(([file, text]) => rel === file && h.text.includes(text)))
     .map((h) => `${rel}:${h.line}: ${h.text.slice(0, 90)}`);
 }
@@ -43,7 +46,7 @@ describe("every UI string is translatable", () => {
 
   it("every exception still matches something (a stale one would hide a new string)", () => {
     for (const [file, text] of ALLOWED) {
-      const hits = scanSource(readFileSync(join(ROOT, file), "utf8"), file.endsWith(".tsx"));
+      const hits = scanSource(readFileSync(join(ROOT, file), "utf8"), file.endsWith(".tsx"), VOCAB);
       expect(hits.some((h) => h.text.includes(text)), `${file}: ${text}`).toBe(true);
     }
   });
@@ -56,11 +59,19 @@ describe("the scanner", () => {
     expect(hits(`export function A() { return <div title="Nowa grupa">{x && <b>Szukaj sesji</b>}</div>; }`)).toEqual(["Nowa grupa", "Szukaj sesji"]);
     expect(hits(`const L = items.map((i) => <li key={i}>Brak sesji w tym projekcie</li>);`)).toEqual(["Brak sesji w tym projekcie"]);
     expect(hits(`const e = <b title={on ? "Ukryj panel" : "Pokaż panel"} />;`)).toEqual(["Ukryj panel", "Pokaż panel"]);
+    // Found by eye on the English approval card: two plain words before a translated phrase.
+    expect(hits(`const e = <span>pi chce {t("edytować plik")}</span>;`)).toEqual(["pi chce"]);
   });
 
   it("finds single-quoted strings and template chunks", () => {
     expect(hits(`const x = 'Nowa grupa zapisana';`, false)).toEqual(["Nowa grupa zapisana"]);
     expect(hits("const x = `Brak modelu ${m} w projekcie`;", false)).toEqual(["Brak modelu", "w projekcie"]);
+  });
+
+  it("rule 3 knows single words from the dictionary", () => {
+    const vocab = polishVocabulary({ Kopiuj: "Copy", "Na pewno?": "Sure?" });
+    expect(scanSource(`const b = <span>{done ? "Skopiowano" : label}</span>; const c = { label: "Kopiuj" };`, true, vocab).map((h) => h.text)).toEqual(["Kopiuj"]);
+    expect(scanSource(`const e = <span>Na pewno?</span>;`, true, vocab).map((h) => h.text)).toEqual(["Na pewno?"]);
   });
 
   it("skips what t() / plural() already translate", () => {

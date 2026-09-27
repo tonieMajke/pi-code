@@ -46,7 +46,7 @@ import { Toasts, type Toast } from "./components/Toasts";
 import { ChangesPanel } from "./components/ChangesPanel";
 import { GpuStatus } from "./components/GpuStatus";
 import { CommandPalette, type Command } from "./components/CommandPalette";
-import { MODES } from "./lib/modes";
+import { modes } from "./lib/modes";
 import { ApprovalCard } from "./components/Approval";
 import { fileToAttachment, imageFiles } from "./lib/images";
 import { modeInfo, nextMode } from "./lib/modes";
@@ -448,7 +448,7 @@ export default function App() {
         case "compact":
           setSettings(msg.result as PiSettings);
           setCompacting(false);
-          if (afterHistoryRef.current.length) afterHistoryRef.current.push({ role: "info", text: "Kontekst skompaktowany.", level: "info" });
+          if (afterHistoryRef.current.length) afterHistoryRef.current.push({ role: "info", text: t("Kontekst skompaktowany."), level: "info" });
           tp.send({ cmd: "history" });
           return;
         case "rewind":
@@ -728,7 +728,7 @@ export default function App() {
         const a = await fileToAttachment(f);
         setAttachments((cur) => [...cur, a]);
       } catch (err) {
-        dispatch({ type: "error", error: `obraz: ${err instanceof Error ? err.message : String(err)}` });
+        dispatch({ type: "error", error: `${t("obraz")}: ${err instanceof Error ? err.message : String(err)}` });
       }
     }
   }, []);
@@ -753,7 +753,7 @@ export default function App() {
 
   const executePlan = () => {
     setMode("acceptEdits");
-    const text = "Wykonaj ten plan.";
+    const text = t("Wykonaj ten plan.");
     dispatch({ type: "user", text, at: Date.now() });
     send({ cmd: "prompt", text });
   };
@@ -863,10 +863,8 @@ export default function App() {
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
-  // The tray menu is built in Rust, which does not know the UI language.
-  useEffect(() => {
-    if (inTauri()) void invoke("set_tray_labels", { show: t("Pokaż Pi Code"), quit: t("Zakończ") }).catch(() => undefined);
-  }, []);
+  // The tray menu is built in Rust, which does not know the UI language (again on a switch).
+  useEffect(syncTrayLabels, []);
 
   // Rust owns the close button's behaviour; tell it the user's choice (and on every start).
   useEffect(() => {
@@ -879,12 +877,20 @@ export default function App() {
     send({ cmd: "settings_get" });
   }, [send]);
 
-  /** Module-level labels are built once at load, so a language switch reloads the window. */
+  /**
+   * Labels are built at render time (no translated module constants), so a language switch is
+   * one re-render: the version bump below is what makes React run it. The sidecar words its own
+   * messages, so it is told too, and the settings snapshot is asked for again.
+   */
+  const [, setLangVersion] = useState(0);
   const changeLang = useCallback(
     (l: Lang) => {
       saveLang(l);
+      document.documentElement.lang = l;
       send({ cmd: "lang_set", lang: l });
-      setTimeout(() => window.location.reload(), 50);
+      send({ cmd: "settings_get" });
+      syncTrayLabels();
+      setLangVersion((v) => v + 1);
     },
     [send],
   );
@@ -1044,7 +1050,8 @@ export default function App() {
         return;
       case "mode": {
         const q = args.toLowerCase();
-        const m = MODES.find((x) => x.id.toLowerCase() === q || x.label.toLowerCase() === q) ?? MODES.find((x) => x.label.toLowerCase().includes(q));
+        const all = modes();
+        const m = all.find((x) => x.id.toLowerCase() === q || x.label.toLowerCase() === q) ?? all.find((x) => x.label.toLowerCase().includes(q));
         if (!args || !m) {
           setInput("/mode ");
           return;
@@ -1116,7 +1123,7 @@ export default function App() {
         if (!settings) return null;
         return settings.thinking.available.map((l) => ({ key: l, label: l, active: l === settings.thinking.level }));
       case "mode":
-        return MODES.map((m) => ({ key: m.id, label: m.label, hint: m.desc, active: m.id === state.mode }));
+        return modes().map((m) => ({ key: m.id, label: m.label, hint: m.desc, active: m.id === state.mode }));
       case "fork":
         return forkPoints?.map((f) => ({ key: f.entryId, label: f.text.replace(/\s+/g, " ").slice(0, 120) || t("(pusta wiadomość)") })) ?? null;
     }
@@ -1156,7 +1163,7 @@ export default function App() {
       : []),
     { id: "handoff", group: t("Akcje"), label: t("Handoff → nowa sesja"), keywords: "handoff podsumowanie przekazanie", run: () => runSlash("handoff", "") },
     ...(state.busy ? [{ id: "stop", group: t("Akcje"), label: t("Przerwij model"), hint: <kbd>Esc</kbd>, run: stop }] : []),
-    ...MODES.map((m) => ({
+    ...modes().map((m) => ({
       id: `mode-${m.id}`,
       group: t("Tryb uprawnień"),
       label: m.label,
@@ -1608,6 +1615,11 @@ function StuckCard({
       </div>
     </div>
   );
+}
+
+/** The tray menu is built in Rust, which does not know the UI language. */
+function syncTrayLabels(): void {
+  if (inTauri()) void invoke("set_tray_labels", { show: t("Pokaż Pi Code"), quit: t("Zakończ") }).catch(() => undefined);
 }
 
 function formatStats(st: SessionStats): string {

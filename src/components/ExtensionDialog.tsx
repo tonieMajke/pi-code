@@ -62,7 +62,7 @@ export function ExtensionDialog({
       <div className="ext-head">
         <Puzzle size={14} />
         <span className="ext-title">{request.title}</span>
-        {queued > 0 && <span className="ext-queued">+{queued} w kolejce</span>}
+        {queued > 0 && <span className="ext-queued">{t("+{n} w kolejce", { n: queued })}</span>}
       </div>
       {request.method === "confirm" && <div className="ext-message">{request.message}</div>}
       {request.method === "select" && (

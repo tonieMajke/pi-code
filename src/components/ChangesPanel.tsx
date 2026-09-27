@@ -191,7 +191,7 @@ function ChangedFile({ file, onRevert, action }: { file: FileChange; onRevert: (
             onMouseLeave={() => setConfirm(false)}
           >
             <Undo2 size={13} />
-            {confirm && <span>Na pewno?</span>}
+            {confirm && <span>{t("Na pewno?")}</span>}
           </button>
         )}
       </div>

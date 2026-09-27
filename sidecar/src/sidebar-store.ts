@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { SidebarState } from "../../shared/protocol.js";
+import { t } from "../../shared/i18n.js";
 
 export const EMPTY_SIDEBAR: SidebarState = { groups: [], projects: [] };
 
@@ -12,7 +13,7 @@ export function normalizeSidebar(raw: unknown): SidebarState {
   const groups = (Array.isArray(r.groups) ? r.groups : [])
     .map((g) => (g && typeof g === "object" ? (g as Record<string, unknown>) : {}))
     .filter((g) => typeof g.id === "string" && g.id && !seen.has(g.id) && seen.add(g.id))
-    .map((g) => ({ id: g.id as string, name: typeof g.name === "string" && g.name.trim() ? g.name.trim() : "Grupa", sessions: strings(g.sessions) }));
+    .map((g) => ({ id: g.id as string, name: typeof g.name === "string" && g.name.trim() ? g.name.trim() : t("Grupa"), sessions: strings(g.sessions) }));
   // A session belongs to at most one group: the first one keeps it.
   const taken = new Set<string>();
   for (const g of groups) g.sessions = g.sessions.filter((p) => !taken.has(p) && taken.add(p));

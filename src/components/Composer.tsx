@@ -6,11 +6,11 @@ import { DictationBar, MicButton, useDictation } from "./Dictation";
 import type { PiRequest } from "../lib/transport";
 import { insertDictation } from "../lib/voice-meter";
 import { Menu, type MenuItem } from "./Menu";
-import { t } from "../../shared/i18n";
+import { plural, t } from "../../shared/i18n";
 import { noModelAction, noModelHint } from "../lib/no-model";
 import { basename, formatTokens, shortModelName } from "../lib/format";
 import type { Outgoing } from "../lib/reducer";
-import { MODES, modeInfo } from "../lib/modes";
+import { modeInfo, modes } from "../lib/modes";
 import { dataUrl, imageFiles } from "../lib/images";
 import { matchCommands, matchPicks, slashState, type PickItem, type SlashEntry, type SlashPick } from "../lib/slash";
 
@@ -327,7 +327,7 @@ export function Composer({
     key: "__pick",
     label: (
       <span className="proj-item">
-        <span className="proj-name">Inny folder…</span>
+        <span className="proj-name">{t("Inny folder…")}</span>
       </span>
     ),
     hint: <FolderPlus size={14} />,
@@ -356,7 +356,7 @@ export function Composer({
       : thinking.server
         ? thinking.server.budget
           ? `≤${formatTokens(thinking.server.budget)}`
-          : "serwer"
+          : t("serwer")
         : "";
 
   const pct =
@@ -374,7 +374,7 @@ export function Composer({
   const needsModel = connected && !model && !isCommand && hasInput && !blocked;
   const current = modeInfo(mode);
   const ModeIcon = current.icon;
-  const modeItems: MenuItem[] = MODES.map((m) => {
+  const modeItems: MenuItem[] = modes().map((m) => {
     const Icon = m.icon;
     return {
       key: m.id,
@@ -401,10 +401,10 @@ export function Composer({
             <div className="pending-item" key={i}>
               <Clock size={13} />
               <span className="pending-text">
-                {p.images?.length ? `[${p.images.length} obraz] ` : ""}
+                {p.images?.length ? `[${plural(p.images.length, ["{n} obraz", "{n} obrazy", "{n} obrazów"], ["{n} image", "{n} images"])}] ` : ""}
                 {p.text}
               </span>
-              <span className="pending-tag">czeka na koniec kroku</span>
+              <span className="pending-tag">{t("czeka na koniec kroku")}</span>
             </div>
           ))}
         </div>

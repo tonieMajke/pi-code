@@ -10,6 +10,7 @@ import type {
   UiRequest,
   Usage,
 } from "../../shared/protocol";
+import { t } from "../../shared/i18n";
 import { stripMidrunNote } from "../../shared/midrun";
 
 export type { RequestStats } from "../../shared/protocol";
@@ -232,7 +233,7 @@ function settleTurn(m: Assistant, at: number | undefined): Assistant {
     open: false,
     parts: closeThinking(m.parts, at).map((p) =>
       p.type === "tool" && p.tool.status === "running"
-        ? { ...p, tool: { ...p.tool, status: "error", summary: p.tool.summary || "przerwano", end: at } }
+        ? { ...p, tool: { ...p.tool, status: "error", summary: p.tool.summary || t("przerwano"), end: at } }
         : p,
     ),
   };

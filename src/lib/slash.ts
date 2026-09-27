@@ -52,7 +52,7 @@ export function allCommands(pi: SlashCommandInfo[]): SlashEntry[] {
   const taken = new Set([...own, ...terminal].map((c) => c.name));
   const fromPi = pi
     .filter((c) => !taken.has(c.name))
-    .map((c): SlashEntry => ({ name: c.name, description: c.description, kind: c.source, args: c.source === "extension" ? undefined : "[tekst]" }));
+    .map((c): SlashEntry => ({ name: c.name, description: c.description, kind: c.source, args: c.source === "extension" ? undefined : t("[tekst]") }));
   return [...own, ...fromPi, ...terminal];
 }
 

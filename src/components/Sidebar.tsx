@@ -549,17 +549,26 @@ function FloatingMenu({ menu, onClose }: { menu: FloatMenu; onClose: () => void 
   );
 }
 
-const MARK_TITLES: Record<SessionStatus, string> = {
-  working: t("pracuje"),
-  slot: t("czeka na slot — model zajęty przez inną sesję"),
-  approval: t("czeka na zgodę"),
-  done: t("skończyła — jeszcze nie widziana"),
-  error: t("skończyła z błędem"),
-  idle: "",
-};
+/** The session mark's tooltip, in the language the interface has right now. */
+function markTitle(status: SessionStatus): string {
+  switch (status) {
+    case "working":
+      return t("pracuje");
+    case "slot":
+      return t("czeka na slot — model zajęty przez inną sesję");
+    case "approval":
+      return t("czeka na zgodę");
+    case "done":
+      return t("skończyła — jeszcze nie widziana");
+    case "error":
+      return t("skończyła z błędem");
+    default:
+      return "";
+  }
+}
 
 /** Dot before the title: pulsing = working, hollow = waiting for the model, terracotta = needs you. */
 function StatusMark({ status }: { status?: SessionStatus }) {
   if (!status || status === "idle") return null;
-  return <span className={status === "working" ? "s-busy" : `s-mark s-${status}`} title={MARK_TITLES[status]} />;
+  return <span className={status === "working" ? "s-busy" : `s-mark s-${status}`} title={markTitle(status)} />;
 }
