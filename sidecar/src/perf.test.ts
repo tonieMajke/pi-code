@@ -13,6 +13,15 @@ describe("perf", () => {
     expect(parseChunk("data: {broken")).toBeNull();
   });
 
+  it("parseChunk marks chunks with generated output and reads usage", () => {
+    expect(parseChunk('data: {"choices":[{"delta":{"role":"assistant","content":""}}]}')?.generated).toBe(false);
+    expect(parseChunk('data: {"choices":[{"delta":{"reasoning_content":"We"}}]}')?.generated).toBe(true);
+    expect(parseChunk('data: {"choices":[{"delta":{"tool_calls":[{"index":0}]}}]}')?.generated).toBe(true);
+    const u = parseChunk('data: {"choices":[],"usage":{"prompt_tokens":57,"completion_tokens":152,"prompt_tokens_details":{"cached_tokens":40}}}');
+    expect(u?.usage?.completion_tokens).toBe(152);
+    expect(u?.usage?.prompt_tokens_details?.cached_tokens).toBe(40);
+  });
+
   it("GenMeter reports the rate over the last second, not the request average", () => {
     const m = new GenMeter();
     m.add(0, 0);
@@ -41,5 +50,56 @@ describe("request context", () => {
     await Promise.all([run("a", 1), run("b", null)]);
     expect(seen.sort()).toEqual(["a:after:undefined", "a:main:1", "b:after:undefined", "b:main:null"]);
     expect(requestContext()).toBeUndefined();
+  });
+});
+
+describe("fetch tap on a local server without llama.cpp timings", () => {
+  it("measures prompt time and decode speed itself and asks for usage", async () => {
+    const { createServer } = await import("node:http");
+    const { installFetchTap, onPerf } = await import("./perf");
+    let sentBody: Record<string, unknown> = {};
+    const server = createServer((req, res) => {
+      if (req.url === "/health") return res.writeHead(200, { server: "uvicorn" }).end("{}");
+      let raw = "";
+      req.on("data", (d) => (raw += d));
+      req.on("end", async () => {
+        sentBody = JSON.parse(raw);
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        await new Promise((r) => setTimeout(r, 100)); // "prompt processing"
+        res.write('data: {"choices":[{"delta":{"role":"assistant","content":""}}]}\n\n');
+        for (let i = 0; i < 5; i++) {
+          res.write(`data: {"choices":[{"delta":{"content":"t${i}"}}]}\n\n`);
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        res.write('data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":900}}}\n\n');
+        res.end("data: [DONE]\n\n");
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    const seen: import("../../shared/protocol").Perf[] = [];
+    onPerf((p) => seen.push(p));
+    installFetchTap();
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST",
+        body: JSON.stringify({ model: "m", stream: true, messages: [] }),
+      });
+      expect(await res.text()).toContain("[DONE]");
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      onPerf(null);
+      server.close();
+    }
+    expect(sentBody.stream_options).toEqual({ include_usage: true });
+    expect(sentBody.timings_per_token).toBeUndefined();
+    const done = seen.find((p) => p.phase === "done");
+    expect(done).toMatchObject({ phase: "done", promptTokens: 1000, cacheTokens: 900, genTokens: 5 });
+    if (done?.phase !== "done") throw new Error("no done");
+    expect(done.promptMs).toBeGreaterThanOrEqual(90);
+    expect(done.promptPerSec).toBeGreaterThan(0);
+    expect(done.promptPerSec).toBeLessThan(1100); // 100 fresh tokens in ≥ 0.1 s
+    expect(done.genPerSec).toBeGreaterThan(20);
+    expect(seen.some((p) => p.phase === "gen")).toBe(true);
   });
 });

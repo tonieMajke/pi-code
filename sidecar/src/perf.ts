@@ -18,6 +18,8 @@ type Timings = {
   predicted_ms?: number;
 };
 type Progress = { total: number; cache: number; processed: number; time_ms: number };
+type Usage = { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
+type Delta = { content?: string | null; reasoning_content?: string | null; reasoning?: string | null; tool_calls?: unknown[] };
 
 /**
  * Who a model request is for. Set around session.prompt() and side calls (critic, review,
@@ -77,13 +79,15 @@ export class GenMeter {
   }
 }
 
-export function parseChunk(line: string): { timings?: Timings; progress?: Progress } | null {
+export function parseChunk(line: string): { timings?: Timings; progress?: Progress; usage?: Usage; generated: boolean } | null {
   if (!line.startsWith("data:")) return null;
   const json = line.slice(5).trim();
   if (!json || json === "[DONE]") return null;
   try {
-    const obj = JSON.parse(json) as { timings?: Timings; prompt_progress?: Progress };
-    return { timings: obj.timings, progress: obj.prompt_progress };
+    const obj = JSON.parse(json) as { timings?: Timings; prompt_progress?: Progress; usage?: Usage | null; choices?: { delta?: Delta }[] };
+    // A chunk that carries generated output — servers without timings stream about one token per chunk.
+    const generated = (obj.choices ?? []).some(({ delta: d }) => !!(d && (d.content || d.reasoning_content || d.reasoning || d.tool_calls?.length)));
+    return { timings: obj.timings, progress: obj.prompt_progress, usage: obj.usage ?? undefined, generated };
   } catch {
     return null;
   }
@@ -157,6 +161,78 @@ async function consume(stream: ReadableStream<Uint8Array>, req: { ctx: RequestCo
       emit(done, true);
       try {
         recorder?.({ ...done, model: req.model, ttftMs, ctx: req.ctx });
+      } catch {
+        /* a broken stats log must not break the session */
+      }
+    }
+  }
+}
+
+/**
+ * Speed readout for local servers that send no llama.cpp timings (FreeToken, vLLM, Ollama…),
+ * measured on our side: prompt time = until the first generated chunk, decode speed from
+ * chunks (≈ tokens) over wall time, exact token counts from the final `usage` block. The prompt
+ * figure includes network and queueing, so it reads a little low; cached prompt tokens only
+ * count when the server reports them (FreeToken: --enable-cache-report).
+ */
+async function consumeTimed(stream: ReadableStream<Uint8Array>, req: { ctx: RequestContext | undefined; model: string; sentAt: number }): Promise<void> {
+  const reader = stream.getReader();
+  const dec = new TextDecoder();
+  const meter = new GenMeter();
+  let buf = "";
+  let firstAt: number | null = null;
+  let lastAt = 0;
+  let chunks = 0;
+  let usage: Usage | undefined;
+  let lastEmit = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n")) !== -1) {
+        const chunk = parseChunk(buf.slice(0, idx).trim());
+        buf = buf.slice(idx + 1);
+        if (!chunk) continue;
+        if (chunk.usage) usage = chunk.usage;
+        if (!chunk.generated) continue;
+        const now = Date.now();
+        firstAt ??= now;
+        lastAt = now;
+        chunks++;
+        const perSec = meter.add(chunks, now - firstAt);
+        if (now - lastEmit >= EMIT_EVERY_MS) {
+          lastEmit = now;
+          const ms = now - firstAt;
+          listener?.({ phase: "gen", tokens: chunks, perSec, avgPerSec: ms > 0 ? (chunks / ms) * 1000 : 0 }, req.ctx);
+        }
+      }
+    }
+  } catch {
+    // aborted request — nothing to report
+  } finally {
+    if (firstAt !== null) {
+      const promptTokens = usage?.prompt_tokens ?? 0;
+      const cacheTokens = usage?.prompt_tokens_details?.cached_tokens ?? 0;
+      const promptMs = firstAt - req.sentAt;
+      const fresh = Math.max(0, promptTokens - cacheTokens);
+      // The first chunk arrives before its token is timed, so the decode window starts there.
+      const genTokens = usage?.completion_tokens ?? chunks;
+      const genMs = lastAt - firstAt;
+      const done: Extract<Perf, { phase: "done" }> = {
+        phase: "done",
+        promptTokens,
+        cacheTokens,
+        promptPerSec: promptMs > 0 && fresh > 0 ? (fresh / promptMs) * 1000 : 0,
+        promptMs,
+        genTokens,
+        genPerSec: genMs > 0 && chunks > 1 ? ((chunks - 1) / genMs) * 1000 : 0,
+        genMs,
+      };
+      listener?.(done, req.ctx);
+      try {
+        recorder?.({ ...done, model: req.model, ttftMs: promptMs, ctx: req.ctx });
       } catch {
         /* a broken stats log must not break the session */
       }
@@ -270,14 +346,24 @@ export function installFetchTap(): void {
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const origin = chatCompletionOrigin(url);
-    if (!origin || typeof init?.body !== "string" || !(await isLlamaServer(origin, orig))) return orig(input, init);
+    if (!origin || typeof init?.body !== "string") return orig(input, init);
+    const llama = await isLlamaServer(origin, orig);
     let body = init.body;
     const ctx = context.getStore();
     let model = "";
+    let streamed = false;
     try {
       const obj = JSON.parse(body) as Record<string, unknown>;
       model = typeof obj.model === "string" ? obj.model : "";
-      if (obj.stream === true) {
+      streamed = obj.stream === true;
+      if (streamed && !llama) {
+        // Standard OpenAI field — the token counts for the timed readout come from it.
+        const so = (obj.stream_options ?? {}) as Record<string, unknown>;
+        if (so.include_usage !== true) {
+          obj.stream_options = { ...so, include_usage: true };
+          body = JSON.stringify(obj);
+        }
+      } else if (streamed) {
         obj.timings_per_token = true;
         obj.return_progress = true;
         applySampling(obj, sampling);
@@ -302,8 +388,12 @@ export function installFetchTap(): void {
       track(key, -1);
       return res;
     }
+    if (!llama && !streamed) {
+      track(key, -1);
+      return res;
+    }
     const [forPi, forUs] = res.body.tee();
-    void consume(forUs, { ctx, model, sentAt }).finally(() => track(key, -1));
+    void (llama ? consume : consumeTimed)(forUs, { ctx, model, sentAt }).finally(() => track(key, -1));
     return new Response(forPi, { status: res.status, statusText: res.statusText, headers: res.headers });
   };
 }
