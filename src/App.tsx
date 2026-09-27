@@ -50,6 +50,7 @@ import { MODES } from "./lib/modes";
 import { ApprovalCard } from "./components/Approval";
 import { fileToAttachment, imageFiles } from "./lib/images";
 import { modeInfo, nextMode } from "./lib/modes";
+import { isNoModelFailure, noModelHint, noModelInfo } from "./lib/no-model";
 import { Sidebar } from "./components/Sidebar";
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
@@ -329,6 +330,12 @@ export default function App() {
           }
         }
         if (msg.cmd === "appearance_image") setImageBusy(false);
+        if (isNoModelFailure(msg.error ?? "")) {
+          // pi quotes the SDK's docs path and a /login lecture; the model chip and Settings are
+          // the whole story here, so the chat gets one line and the bar stays clean.
+          dispatch({ type: "info", text: noModelInfo(), level: "warning" });
+          return;
+        }
         dispatch({ type: "error", error: `${msg.cmd ?? "pi"}: ${msg.error}` });
         return;
       }
@@ -689,6 +696,13 @@ export default function App() {
     const text = input.trim();
     const images = attachments.length ? attachments : undefined;
     if ((!text && !images) || !state.connected) return;
+    if (!state.model) {
+      // Nothing to send to (the wizard was skipped). pi answers this with a wall of paths, and the
+      // fix is one setting away, so the Enter key opens it instead of failing in the transcript.
+      dispatch({ type: "info", text: noModelHint(), level: "warning" });
+      openSettings("providers");
+      return;
+    }
     const slash = images ? null : parseSlash(text);
     if (slash) {
       runSlash(slash.name, slash.args);

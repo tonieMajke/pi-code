@@ -7,6 +7,7 @@ import type { PiRequest } from "../lib/transport";
 import { insertDictation } from "../lib/voice-meter";
 import { Menu, type MenuItem } from "./Menu";
 import { t } from "../../shared/i18n";
+import { noModelAction, noModelHint } from "../lib/no-model";
 import { basename, formatTokens, shortModelName } from "../lib/format";
 import type { Outgoing } from "../lib/reducer";
 import { MODES, modeInfo } from "../lib/modes";
@@ -359,7 +360,9 @@ export function Composer({
       ? Math.min(100, (usage.contextTokens / usage.contextWindow) * 100)
       : null;
 
-  const canSend = connected && (value.trim().length > 0 || attachments.length > 0) && !blocked;
+  // No model = nothing to send to: pi would answer with a wall of paths about API keys (/login,
+  // node_modules/.../providers.md). Enter, the send button and the mic all read this one flag.
+  const canSend = connected && Boolean(model) && (value.trim().length > 0 || attachments.length > 0) && !blocked;
   const current = modeInfo(mode);
   const ModeIcon = current.icon;
   const modeItems: MenuItem[] = MODES.map((m) => {
@@ -546,12 +549,12 @@ export function Composer({
           }}
           placeholder={
             blocked
-              ? "Co model ma zrobić zamiast tego? (Enter = odmów z tym komentarzem)"
+              ? t("Co model ma zrobić zamiast tego? (Enter = odmów z tym komentarzem)")
               : busy
-                ? "Dopisz wskazówkę dla modelu (Enter = steering)…"
+                ? t("Dopisz wskazówkę dla modelu (Enter = steering)…")
                 : mode === "plan"
-                  ? "Opisz, co zaplanować — model tylko czyta i analizuje"
-                  : "Opisz zadanie albo zadaj pytanie"
+                  ? t("Opisz, co zaplanować — model tylko czyta i analizuje")
+                  : t("Opisz zadanie albo zadaj pytanie")
           }
           rows={1}
           autoFocus
@@ -646,7 +649,7 @@ export function Composer({
             className="chip-menu model-menu"
             title="Model"
             trigger={
-              <span className="chip model-chip" title={`${provider}/${model}${thinkingText ? ` · myślenie: ${thinkingText}` : ""}`}>
+              <span className="chip model-chip" title={`${provider}/${model} · ${t("Model tej sesji")}${thinkingText ? ` · ${t("myślenie")}: ${thinkingText}` : ""}`}>
                 <Cpu size={13} />
                 {model && shortModelName(model) !== model ? (
                   <span className="chip-label">
@@ -691,11 +694,11 @@ export function Composer({
           />
           {dictOn && <MicButton phase={dict.phase} ready={dict.voice?.ready ?? false} onClick={dict.toggle} />}
           {busy && !value.trim() && attachments.length === 0 ? (
-            <button className="send stop" onClick={onStop} title="Przerwij (Esc)">
+            <button className="send stop" onClick={onStop} title={t("Przerwij (Esc)")}>
               <Square size={11} fill="currentColor" />
             </button>
           ) : (
-            <button className="send" onClick={onSend} disabled={!canSend} title="Wyślij (Enter)">
+            <button className="send" onClick={onSend} disabled={!canSend} title={t("Wyślij (Enter)")}>
               <ArrowUp size={16} strokeWidth={2.4} />
             </button>
           )}
@@ -710,23 +713,32 @@ export function Composer({
             </>
           ) : connected ? (
             <>
-              <kbd>Enter</kbd> wyślij · <kbd>Shift Enter</kbd> nowa linia · <kbd>/</kbd> komendy · <kbd>Shift Tab</kbd> tryb
+              <kbd>Enter</kbd> {t("wyślij")} · <kbd>Shift Enter</kbd> {t("nowa linia")} · <kbd>/</kbd> {t("komendy")} · <kbd>Shift Tab</kbd> {t("tryb")}
               {dictOn && (
                 <>
                   {" "}
-                  · <kbd>Ctrl M</kbd> dyktuj
+                  · <kbd>Ctrl M</kbd> {t("dyktuj")}
                 </>
               )}
               {busy && (
                 <>
                   {" "}
-                  · <kbd>Esc</kbd> przerwij
+                  · <kbd>Esc</kbd> {t("przerwij")}
                 </>
               )}
             </>
           ) : (
-            <span className="warn">łączenie z pi…</span>
+            <span className="warn">{t("łączenie z pi…")}</span>
           )}
+        </div>
+      )}
+      {/* The wizard skipped, nothing is selected: say where to go instead of accepting a send. */}
+      {connected && !model && (
+        <div className="composer-hint model-need" role="status">
+          <span className="warn">{noModelHint()}</span>
+          <button type="button" className="btn small" onClick={onProviders}>
+            {noModelAction()}
+          </button>
         </div>
       )}
     </div>

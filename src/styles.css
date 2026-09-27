@@ -692,6 +692,10 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .composer-hint { text-align: center; font-size: 11.5px; color: var(--faint); padding-top: 8px; }
 .composer-hint .warn { color: var(--accent); }
 
+/* No model picked: the caption becomes a way out (the wizard was skipped, the chip is empty). */
+.model-need { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.model-need .btn.small { padding: 2px 8px; font-size: 11.5px; }
+
 /* ── Menu ───────────────────────────────── */
 .menu { position: relative; }
 .menu-trigger { border: none; background: none; padding: 0; border-radius: 8px; }
