@@ -768,6 +768,11 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .approval-target { font-family: var(--mono); font-size: 12px; margin-left: 6px; color: var(--text-2); font-weight: 400; }
 .approval-prefix { font-family: var(--mono); font-size: 12px; padding: 0 4px; border-radius: 4px; background: var(--hover); }
 .approval-queue { margin-left: auto; font-size: 11.5px; color: var(--faint); font-weight: 400; }
+.approval-risk { padding: 0 14px 6px; font-size: 12.5px; color: var(--warn); }
+.approval-note {
+  margin: 0 14px 8px; padding: 8px 10px; border-radius: 8px; background: var(--hover);
+  font-size: 13px; white-space: pre-wrap; max-height: 160px; overflow: auto;
+}
 .approval-body { max-height: 260px; overflow: auto; }
 .approval-body .tool-body { padding: 0 14px 8px; }
 .approval-actions {

@@ -16,7 +16,7 @@ import { stripMidrunNote } from "../../shared/midrun";
 export type { RequestStats } from "../../shared/protocol";
 import type { RequestStats } from "../../shared/protocol";
 export type LivePerf = Exclude<Perf, { phase: "done" }>;
-export type Approval = { toolCallId: string; toolName: string; args: unknown };
+export type Approval = { toolCallId: string; toolName: string; args: unknown; risk?: string; note?: string };
 export type Outgoing = { text: string; images?: Attachment[] };
 
 export interface ToolItem {
@@ -429,7 +429,7 @@ export function reducer(state: State, action: Action): State {
         case "approval_request":
           return {
             ...state,
-            approvals: [...state.approvals.filter((a) => a.toolCallId !== e.toolCallId), { toolCallId: e.toolCallId, toolName: e.toolName, args: e.args }],
+            approvals: [...state.approvals.filter((a) => a.toolCallId !== e.toolCallId), { toolCallId: e.toolCallId, toolName: e.toolName, args: e.args, risk: e.risk, note: e.note }],
             messages: at === undefined ? state.messages : mapTool(state.messages, e.toolCallId, (t) => ({ ...t, wait: [at] })),
           };
         case "approval_done":

@@ -668,7 +668,8 @@ export type PiEvent =
   /** role: side calls (critic…) show live progress but their timings stay out of the turn footer. */
   | { kind: "perf"; perf: Perf; role?: RequestRole }
   | { kind: "mode"; mode: PermissionMode }
-  | { kind: "approval_request"; toolCallId: string; toolName: string; args: unknown }
+  /** risk: why the call always asks (a risky or foreign-kill command); note: the model's own explanation of it. */
+  | { kind: "approval_request"; toolCallId: string; toolName: string; args: unknown; risk?: string; note?: string }
   | { kind: "approval_done"; toolCallId: string; decision: ApprovalDecision }
   /**
    * A client came back (reloaded page, reconnected socket): is the session on screen mid-run, since when (ms).

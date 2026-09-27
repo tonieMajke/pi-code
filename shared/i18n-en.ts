@@ -789,6 +789,8 @@ export const EN: Record<string, string> = {
   "Start rozszerzeń": "Starting extensions",
   "Zabijanie procesu spoza Pi Code — pytam ({what})": "Killing a process Pi Code did not start — asking ({what})",
   "Ryzykowna akcja — pytam ({what})": "Risky action — asking ({what})",
+  "Ryzykowne polecenie bez wyjaśnienia — model ma je najpierw opisać": "Risky command without an explanation — the model must describe it first",
+  "Dlaczego pytam:": "Why I ask:",
   "Włącz narzędzia": "Enable tools",
   "Zawsze szukaj": "Always look",
   "Nigdy nie szukaj": "Never look",

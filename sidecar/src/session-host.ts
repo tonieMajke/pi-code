@@ -133,8 +133,10 @@ export class SessionHost {
   private answerFirst = new AnswerFirst();
   private pendingApprovals = new Map<
     string,
-    { resolve: (d: { decision: ApprovalDecision; reason?: string }) => void; toolName: string; args: unknown }
+    { resolve: (d: { decision: ApprovalDecision; reason?: string }) => void; toolName: string; args: unknown; risk?: string; note?: string }
   >();
+  /** Risky commands already sent back once for an explanation — the second try goes to the card as is. */
+  private explainAsked = new Set<string>();
   /** Deferred tools the model loaded in this session. */
   private onDemand = new Set<string>();
   /** Worktree snapshot taken when the current run started (git projects only). */
@@ -316,7 +318,7 @@ export class SessionHost {
 
   /** Brought back on screen: approvals, dialogs and the queue the UI dropped while it was elsewhere. */
   replay(): void {
-    for (const [toolCallId, p] of this.pendingApprovals) this.emit({ kind: "approval_request", toolCallId, toolName: p.toolName, args: p.args });
+    for (const [toolCallId, p] of this.pendingApprovals) this.emit({ kind: "approval_request", toolCallId, toolName: p.toolName, args: p.args, risk: p.risk, note: p.note });
     for (const request of this.dialogs.open) this.emit({ kind: "ui_request", request });
     if (this.queue.steering || this.queue.followUp) this.emit({ kind: "queue", ...this.queue });
   }
@@ -347,6 +349,24 @@ export class SessionHost {
     for (const id of [...this.pendingApprovals.keys()]) this.approve(id, "deny", "run aborted");
   }
 
+  /** Visible text the model wrote in the message that makes this tool call (its explanation), or undefined. */
+  private explanationFor(toolCallId: string): string | undefined {
+    const msgs = this.historyMessages();
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i] as { role?: string; content?: unknown };
+      if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+      const blocks = m.content as { type?: string; text?: string; id?: string }[];
+      if (!blocks.some((b) => b.type === "toolCall" && b.id === toolCallId)) continue;
+      const text = blocks
+        .filter((b) => b.type === "text" && typeof b.text === "string")
+        .map((b) => b.text!.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      return text.length >= 20 ? text : undefined;
+    }
+    return undefined;
+  }
+
   /** pi `tool_call` hook: returns a block result or undefined (allowed). */
   async gate(toolCallId: string, toolName: string, input: Record<string, unknown>) {
     const call = unwrapMcp(toolName, input);
@@ -363,10 +383,28 @@ export class SessionHost {
       if (call.name === "bash" ? coveredByPrefixes(String(call.args.command ?? ""), this.alwaysBash) : this.alwaysAllowed.has(call.key)) return undefined;
     }
 
+    const risk = killing ?? risky ?? undefined;
+    const note = risk ? this.explanationFor(toolCallId) : undefined;
+    if (risk && !note && call.name === "bash") {
+      // The user decides on a risky command from the card: the model has to say what it does first.
+      const key = String(call.args.command ?? "");
+      if (!this.explainAsked.has(key)) {
+        this.explainAsked.add(key);
+        this.emit({ kind: "guard", label: t("Ryzykowne polecenie bez wyjaśnienia — model ma je najpierw opisać") });
+        return {
+          block: true,
+          reason:
+            `Not run: this command is risky (${risk}) and the user must approve it. First write in visible text ` +
+            `the exact command in a code block and one or two plain sentences on what it does, what it changes ` +
+            `and what could go wrong. Then call it again, unchanged.`,
+        };
+      }
+    }
+
     const answer = await new Promise<{ decision: ApprovalDecision; reason?: string }>((resolve) => {
-      this.pendingApprovals.set(toolCallId, { resolve, toolName, args: input });
+      this.pendingApprovals.set(toolCallId, { resolve, toolName, args: input, risk, note });
       this.setStatus("approval");
-      this.emit({ kind: "approval_request", toolCallId, toolName, args: input });
+      this.emit({ kind: "approval_request", toolCallId, toolName, args: input, risk, note });
     });
     this.emit({ kind: "approval_done", toolCallId, decision: answer.decision });
     if (answer.decision === "always" && !killing && !risky) {

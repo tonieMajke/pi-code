@@ -80,6 +80,12 @@ export function ApprovalCard({
         </span>
         {queued > 0 && <span className="approval-queue">{t("+{n} w kolejce", { n: queued })}</span>}
       </div>
+      {approval.risk && (
+        <div className="approval-risk">
+          <strong>{t("Dlaczego pytam:")}</strong> {approval.risk}
+        </div>
+      )}
+      {approval.note && <div className="approval-note">{approval.note}</div>}
       <div className="approval-body">
         <ToolPreview tool={tool} cwd={cwd} preview />
       </div>

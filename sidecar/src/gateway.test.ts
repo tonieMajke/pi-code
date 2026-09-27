@@ -526,7 +526,7 @@ describe("PiGateway background sessions", () => {
     const { gw, internal, add } = gateway();
     add({ ...fakeSession(), sessionId: "front" });
     const bg = add({ ...fakeSession(), sessionId: "back" }, false);
-    const answer = (bg as unknown as { gate(id: string, tool: string, input: object): Promise<unknown> }).gate("call-1", "bash", { command: "rm -rf x" });
+    const answer = (bg as unknown as { gate(id: string, tool: string, input: object): Promise<unknown> }).gate("call-1", "bash", { command: "touch x" });
     await Promise.resolve();
     expect(bg.status).toBe("approval");
     expect(internal.active?.hasApproval("call-1")).toBe(false);
@@ -942,7 +942,53 @@ describe("SessionHost: “always in this session” for bash", () => {
 
   it("risky actions still ask after “always”", async () => {
     const { gate } = host();
+    expect((await gate("git push origin main")).asked).toBe(false); // sent back for an explanation first
     await gate("git push origin main", "always");
     expect((await gate("git push origin main")).asked).toBe(true);
+  });
+});
+
+describe("SessionHost: a risky command comes with the model's explanation", () => {
+  function host() {
+    const { add, events } = gateway();
+    const s = fakeSession();
+    const h = add(s);
+    let n = 0;
+    /** The model calls `command`, having written `text` before it in the same message. */
+    const gate = async (command: string, text = "") => {
+      const id = `r${++n}`;
+      const content = [...(text ? [{ type: "text", text }] : []), { type: "toolCall", id, name: "bash", arguments: { command } }];
+      s.state.messages.push({ role: "assistant", content, timestamp: n });
+      const p = h.gate(id, "bash", { command });
+      await Promise.resolve();
+      const req = events.find((e) => e.kind === "approval_request" && e.toolCallId === id);
+      if (req) h.approve(id, "allow");
+      return { req, result: await p };
+    };
+    return { gate };
+  }
+
+  it("without one, the call goes back to the model once, then to the card", async () => {
+    const { gate } = host();
+    const first = await gate("sudo pacman -Syu");
+    expect(first.req).toBeUndefined();
+    expect(first.result).toMatchObject({ block: true, reason: expect.stringContaining("runs as root") });
+    const second = await gate("sudo pacman -Syu");
+    expect(second.req).toMatchObject({ risk: "runs as root", note: undefined });
+    expect(second.result).toBeUndefined();
+  });
+
+  it("the card shows why it asks and what the model said the command does", async () => {
+    const { gate } = host();
+    const why = "```\nrm -rf build\n```\nKasuje katalog build z wynikami kompilacji; odtworzy go następny build.";
+    const { req } = await gate("rm -rf build", why);
+    expect(req).toMatchObject({ risk: expect.stringContaining("deletes"), note: why });
+  });
+
+  it("an ordinary command asks as before, with no risk on the card", async () => {
+    const { gate } = host();
+    const { req } = await gate("touch x");
+    expect(req).toMatchObject({ toolName: "bash" });
+    expect(req && "risk" in req ? req.risk : undefined).toBeUndefined();
   });
 });
