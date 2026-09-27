@@ -7,6 +7,7 @@ import { AppearanceStore } from "./appearance.js";
 import { PiGateway } from "./gateway.js";
 import { OWNER_ENV } from "./permissions.js";
 import { t } from "../../shared/i18n.js";
+import { scanCleanup } from "./cleanup.js";
 import { Dictation, RATE, VoiceKeys, VoiceStore, transcribe, wav } from "./voice.js";
 import { gitChanges, gitCommit, gitRevert, gitStage, gitUnstage, listFiles, notify, routerStatus } from "./workspace.js";
 import type { ClientCommand, CommandName, PiEvent, SidecarOut } from "../../shared/protocol.js";
@@ -95,6 +96,7 @@ const KNOWN = new Set<CommandName>([
   "sidebar_get",
   "sidebar_set",
   "session_delete",
+  "cleanup_scan",
   "dir_check",
   "lang_set",
   "memory_get",
@@ -304,6 +306,10 @@ async function handle(cmd: ClientCommand): Promise<void> {
       case "session_delete":
         requireReady();
         reply(cmd.id, cmd.cmd, true, await gateway.deleteSession(cmd.path));
+        return;
+      case "cleanup_scan":
+        requireReady();
+        reply(cmd.id, cmd.cmd, true, await scanCleanup(await gateway.listSessions()));
         return;
       case "dir_check":
         reply(cmd.id, cmd.cmd, true, { path: checkDir(cmd.path) });

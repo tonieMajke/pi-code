@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BookMarked, Mic, Plug, Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Sparkles, Terminal, Trash2, Wrench, X } from "lucide-react";
+import { BookMarked, Eraser, Mic, Plug, Brain, Bell, Box, FileText, ImagePlus, Layers, Palette, RotateCcw, RotateCw, Scale, ShieldCheck, Sparkles, Terminal, Trash2, Wrench, X } from "lucide-react";
 import type { Appearance, AppearancePatch, ModelSummary, PiSettings, QueueMode, SamplingConfig, SettingsPatch, ToolPolicy } from "../../shared/protocol";
 import { formatTokens } from "../lib/format";
 import { NumberField, Row, Segmented, TextField, Toggle } from "./settings-ui";
 import { MemorySection } from "./MemorySection";
 import { ProvidersPanel } from "./Providers";
 import { VoiceSection } from "./VoiceSection";
+import { CleanupSection } from "./CleanupSection";
 import type { PiRequest } from "../lib/transport";
 import { lang, LANGS, t, type Lang } from "../../shared/i18n";
 import { TERMINAL_PRESETS, terminalChoiceFor, terminalTemplateFor, type TerminalChoice } from "../../shared/terminal";
@@ -26,6 +27,7 @@ const SECTIONS = [
   { id: "resources", label: "Rozszerzenia i skille", icon: Box },
   { id: "look", label: "Wygląd", icon: Palette },
   { id: "app", label: "Aplikacja", icon: Bell },
+  { id: "cleanup", label: "Sprzątanie", icon: Eraser },
 ] as const;
 export type SectionId = (typeof SECTIONS)[number]["id"];
 
@@ -58,11 +60,14 @@ export function SettingsDialog({
   onClose,
   request,
   onProvidersChanged,
+  onSessionsChanged,
   onLang,
   initialSection,
 }: {
   request: PiRequest;
   onProvidersChanged: () => void;
+  /** Settings → Cleanup deleted chats: the sidebar list is stale. */
+  onSessionsChanged: () => void;
   onLang: (l: Lang) => void;
   initialSection?: SectionId;
   settings: PiSettings | null;
@@ -131,6 +136,8 @@ export function SettingsDialog({
             </>
           ) : section === "voice" ? (
             <VoiceSection request={request} />
+          ) : section === "cleanup" ? (
+            <CleanupSection request={request} onDeleted={onSessionsChanged} />
           ) : !s ? (
             <div className="s-empty">wczytywanie ustawień pi…</div>
           ) : (

@@ -131,6 +131,8 @@ export function withId(cmd: ClientCommandInput, id: number): ClientCommand {
       return { id, cmd: "sidebar_set", state: cmd.state };
     case "session_delete":
       return { id, cmd: "session_delete", path: cmd.path };
+    case "cleanup_scan":
+      return { id, cmd: "cleanup_scan" };
     case "dir_check":
       return { id, cmd: "dir_check", path: cmd.path };
     case "session_clone":

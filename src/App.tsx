@@ -1470,6 +1470,7 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
           request={request}
           initialSection={settingsSection}
+          onSessionsChanged={() => send({ cmd: "sessions_list" })}
           onProvidersChanged={refreshModels}
           onLang={changeLang}
         />

@@ -1589,3 +1589,19 @@ button.turn-stats:hover, button.turn-stats.on { background: var(--hover); color:
 .ft-mark.mod { background: var(--warn); }
 .ft-mark.new { background: var(--ok); }
 .ft-empty { color: var(--faint); font-size: 12.5px; padding: 10px; }
+
+/* ── Settings → Cleanup ─────────────────── */
+.cleanup-refresh { vertical-align: middle; margin-left: 6px; }
+.cleanup-bar { display: flex; gap: 8px; margin: 8px 0; }
+.cleanup-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 8px; }
+.cleanup-row { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 13px; }
+.cleanup-row:first-child { border-top: 0; }
+.cleanup-row:not(label) { grid-template-columns: 1fr; }
+label.cleanup-row { cursor: pointer; }
+label.cleanup-row:hover { background: var(--hover); }
+.cleanup-row input { grid-row: span 2; }
+.cleanup-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.cleanup-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--faint); }
+.cleanup-meta code { font-size: 11px; }
+.cleanup-cmd { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--code-bg); font-family: var(--mono); font-size: 12.5px; }
+.cleanup-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; }
