@@ -750,3 +750,73 @@ describe("PiGateway terminal", () => {
     }
   });
 });
+
+describe("SessionHost: a message sent while the run is still starting", () => {
+  // Extensions (MCP) can take seconds before the first turn. A second message in that window used
+  // to go to the SDK as a mid-run follow-up with the "sent while you were working" note.
+  function starting() {
+    const { gw, events, add } = gateway();
+    const prompts: string[] = [];
+    const followUps: string[] = [];
+    let endRun = () => {};
+    const base = fakeSession();
+    const session = Object.assign(base, {
+      steer: vi.fn(async () => undefined),
+      followUp: vi.fn(async (text: string) => void followUps.push(text)),
+      prompt: vi.fn(async (text: string) => {
+        prompts.push(text);
+        base.state.isStreaming = true;
+        base.push({ type: "turn_start" });
+        await new Promise<void>((r) => (endRun = r));
+        base.state.isStreaming = false;
+      }),
+    });
+    const host = add(session);
+    let ready = () => {};
+    host.extensionsReady = new Promise<void>((r) => (ready = r));
+    return { gw, session, events, prompts, followUps, ready: () => ready(), endRun: () => endRun() };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("waits locally, then goes out as an ordinary follow-up once the run streams", async () => {
+    const t = starting();
+    const first = t.gw.prompt("zrób A");
+    await tick();
+    await t.gw.prompt("i jeszcze B");
+    expect(t.session.followUp).not.toHaveBeenCalled();
+    expect(t.session.steer).not.toHaveBeenCalled();
+    expect(t.events).toContainEqual({ kind: "queue", steering: 0, followUp: 1 });
+    t.ready();
+    await tick();
+    expect(t.prompts).toEqual(["zrób A"]);
+    expect(t.followUps).toEqual(["i jeszcze B"]); // no mid-run note
+    t.endRun();
+    await first;
+  });
+
+  it("with no run at all (an extension command), the waiting message becomes the next prompt", async () => {
+    const t = starting();
+    t.session.prompt = vi.fn(async (text: string) => void t.prompts.push(text)) as never;
+    const first = t.gw.prompt("/memory");
+    await tick();
+    await t.gw.prompt("potem to");
+    t.ready();
+    await first;
+    await tick();
+    expect(t.prompts).toEqual(["/memory", "potem to"]);
+    expect(t.session.followUp).not.toHaveBeenCalled();
+  });
+
+  it("Stop drops what was waiting", async () => {
+    const t = starting();
+    const first = t.gw.prompt("zrób A");
+    await tick();
+    await t.gw.prompt("B");
+    await t.gw.abort();
+    t.ready();
+    await tick();
+    expect(t.followUps).toEqual([]);
+    t.endRun();
+    await first;
+  });
+});

@@ -112,6 +112,14 @@ export class SessionHost {
   session!: AgentSession;
   /** True from prompt() call until it resolves — covers the gap before isStreaming flips. */
   private running = false;
+  /**
+   * prompt() was called but the run has not started (extensions still loading, MCP can take
+   * seconds). Messages sent meanwhile wait here: handing them to the SDK as mid-run steering
+   * would mark them "sent while you were working" and force a text-only reply to a turn that
+   * never happened. They go out as ordinary follow-ups at the first turn_start.
+   */
+  private starting = false;
+  private early: { text: string; images?: Attachment[] }[] = [];
   private disposed = false;
   private taste: TasteGuard | null = null;
   private guard: ConstitutionGuard | null = null;
@@ -1198,6 +1206,11 @@ export class SessionHost {
   async prompt(text: string, images?: Attachment[], behavior?: "steer" | "followUp"): Promise<void> {
     const s = this.session;
     const imgs = images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
+    if (this.starting) {
+      this.early.push({ text, images });
+      this.emit({ kind: "queue", steering: 0, followUp: this.early.length });
+      return;
+    }
     this.answerFirst.userMessage(text, this.busy);
     if (this.busy) {
       // The user is steering: the taste loop stops pushing its own agenda.
@@ -1209,6 +1222,7 @@ export class SessionHost {
       return;
     }
     this.running = true;
+    this.starting = true;
     if (!s.state.messages.length) this.firstPrompt = text;
     this.busySince = Date.now();
     this.setStatus("working");
@@ -1223,12 +1237,34 @@ export class SessionHost {
       );
     } finally {
       this.running = false;
+      this.starting = false;
       // An extension command may finish without an agent run — the UI still waits for "settled".
       if (this.settledRuns === runs && !s.state.isStreaming) this.emit({ kind: "settled" });
+      // No run started (an extension command, an error): what waited becomes the next prompt.
+      const [next, ...rest] = this.early.splice(0);
+      if (next && !this.disposed) {
+        void this.prompt(next.text, next.images)
+          .catch((err: unknown) => this.emit({ kind: "notice", level: "error", text: err instanceof Error ? err.message : String(err) }));
+        this.early.push(...rest);
+      }
+    }
+  }
+
+  /** The run is streaming: messages that arrived while it started are queued the normal way. */
+  private flushEarly(): void {
+    if (!this.starting) return;
+    this.starting = false;
+    for (const m of this.early.splice(0)) {
+      const imgs = m.images?.map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
+      void this.session.followUp(m.text, imgs).catch((err: unknown) =>
+        this.emit({ kind: "notice", level: "error", text: err instanceof Error ? err.message : String(err) }),
+      );
     }
   }
 
   async abort(): Promise<void> {
+    // Stop drops queued messages too (the UI shows them as not sent).
+    this.early = [];
     // A run parked on an approval prompt can't observe abort — release it first.
     this.denyAllPending();
     this.dialogs.cancelAll();
@@ -1289,6 +1325,7 @@ export class SessionHost {
           return;
         case "turn_start":
           this.emit({ kind: "turn_start" });
+          this.flushEarly();
           return;
         case "turn_end":
           this.emit({ kind: "turn_end" });
