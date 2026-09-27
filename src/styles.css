@@ -620,6 +620,7 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .project-chip .chip-label { max-width: 140px; }
 .model-chip .chip-label { max-width: 190px; }
 .model-menu .menu-pop { min-width: 280px; }
+.model-menu .menu-items { max-height: 420px; }
 .model-thinking-pop {
   display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 6px; margin-top: 4px;
   border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-2);
@@ -722,6 +723,18 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-hint { flex: none; font-size: 11.5px; color: var(--faint); display: flex; }
 .menu-item.active .menu-hint { color: var(--accent); }
+.menu-item.hl { background: var(--hover); color: var(--text); }
+.menu-search {
+  width: calc(100% - 8px); margin: 2px 4px 6px; padding: 6px 9px; font-size: 13px;
+  border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); outline: none;
+}
+.menu-search:focus { border-color: var(--accent); }
+/* Provider headers stay on top while their models scroll under them. */
+.menu-group {
+  position: sticky; top: 0; z-index: 1; background: var(--surface);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--faint); padding: 8px 10px 3px;
+}
+.menu-empty { padding: 8px 10px; font-size: 12.5px; color: var(--faint); }
 .proj-item { display: flex; flex-direction: column; line-height: 1.3; }
 .proj-name { font-weight: 500; }
 .proj-path { font-size: 11.5px; color: var(--faint); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; }

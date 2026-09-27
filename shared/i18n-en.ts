@@ -43,6 +43,8 @@ export const EN: Record<string, string> = {
   "Model pracuje na plikach w tym folderze": "The model works on the files in this folder",
   "zmień folder": "change folder",
   "Dostawcy modeli…": "Model providers…",
+  "Szukaj modelu…": "Search models…",
+  "Żaden model nie pasuje": "No model matches",
   "wybierz model": "choose a model",
   "Nic nowego do zapamiętania w tej rozmowie.": "Nothing new to remember in this chat.",
   "Krótkie fakty o Tobie, które model dostaje na początku każdej sesji: preferencje, sprzęt, projekty, sposób pracy. Możesz je poprawiać i usuwać.": "Short facts about you that the model gets at the start of every session: preferences, hardware, projects, how you work. You can edit and delete them.",

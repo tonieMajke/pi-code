@@ -9,6 +9,7 @@ import { Menu, type MenuItem } from "./Menu";
 import { plural, t } from "../../shared/i18n";
 import { noModelAction, noModelHint } from "../lib/no-model";
 import { basename, formatTokens, shortModelName } from "../lib/format";
+import { groupByProvider, providerLabel } from "../lib/providers";
 import type { Outgoing } from "../lib/reducer";
 import { modeInfo, modes } from "../lib/modes";
 import { dataUrl, imageFiles } from "../lib/images";
@@ -334,9 +335,12 @@ export function Composer({
     onSelect: onPickFolder,
   });
 
-  const modelItems: MenuItem[] = models.map((m) => ({
+  // Grouped by provider (in the order pi lists them), searchable by model and provider name.
+  const modelItems: MenuItem[] = groupByProvider(models).map((m) => ({
     key: `${m.provider}/${m.id}`,
     label: m.id,
+    group: providerLabel(m.provider),
+    search: `${m.id} ${m.name} ${m.provider}`,
     hint: m.id === model && m.provider === provider ? <Check size={14} /> : formatTokens(m.contextWindow),
     active: m.id === model && m.provider === provider,
     onSelect: () => onModel(m),
@@ -345,6 +349,7 @@ export function Composer({
     key: "__providers",
     label: <span className="proj-item"><span className="proj-name">{t("Dostawcy modeli…")}</span></span>,
     hint: <Plug size={14} />,
+    keep: true,
     onSelect: onProviders,
   });
 
@@ -679,6 +684,8 @@ export function Composer({
               </span>
             }
             items={modelItems}
+            searchPlaceholder={t("Szukaj modelu…")}
+            emptyText={t("Żaden model nie pasuje")}
             footer={
               thinking && (thinking.available.length > 0 || thinking.server) ? (
                 <div className="model-thinking-pop">
