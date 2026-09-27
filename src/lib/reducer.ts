@@ -59,6 +59,8 @@ export interface State {
   busy: boolean;
   /** When the current run started (ms) — drives the "working" timer. */
   busySince: number | null;
+  /** Model requests in the current run (turn_start events) — "krok 5" in the status bar. */
+  steps: number;
   model: string;
   provider: string;
   cwd: string;
@@ -109,6 +111,7 @@ export const initialState: State = {
   messages: [],
   busy: false,
   busySince: null,
+  steps: 0,
   model: "",
   provider: "",
   cwd: "",
@@ -243,6 +246,7 @@ export function reducer(state: State, action: Action): State {
         messages: [...state.messages, userMsg(action.text, action.images)],
         busy: true,
         busySince: action.at ?? null,
+        steps: 0,
         error: null,
         stuck: null,
       };
@@ -250,7 +254,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         messages: [...state.messages, { role: "command", text: action.text }],
-        ...(action.run ? { busy: true, busySince: action.at ?? null, error: null } : {}),
+        ...(action.run ? { busy: true, busySince: action.at ?? null, steps: 0, error: null } : {}),
       };
     case "info":
       return { ...state, messages: [...state.messages, { role: "info", text: action.text, level: action.level ?? "info" }] };
@@ -295,6 +299,8 @@ export function reducer(state: State, action: Action): State {
       const e = action.event;
       const at = action.at;
       switch (e.kind) {
+        case "turn_start":
+          return { ...state, steps: state.steps + 1 };
         case "history": {
           // A session being opened: its transcript replaces whatever was on screen. A session
           // brought back from the background mid-run keeps working: its last turn stays open.

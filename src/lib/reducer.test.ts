@@ -339,3 +339,15 @@ describe("switching sessions", () => {
     expect(s.branch).toBe("main");
   });
 });
+
+describe("status bar step count", () => {
+  it("counts model requests in the run and starts over with the next message", () => {
+    let s = reducer(initialState, { type: "user", text: "a", at: 1 });
+    s = reducer(s, ev({ kind: "turn_start" }));
+    s = reducer(s, ev({ kind: "turn_start" }));
+    expect(s.steps).toBe(2);
+    s = reducer(s, ev({ kind: "settled" }));
+    s = reducer(s, { type: "user", text: "b", at: 2 });
+    expect(s.steps).toBe(0);
+  });
+});

@@ -299,4 +299,10 @@ export const EN: Record<string, string> = {
   "Proces pi (sidecar) zakończył się ({why}) i nie da się go podnieść. Uruchom Pi Code ponownie.": "The pi process (sidecar) ended ({why}) and will not come back. Restart Pi Code.",
   "pi działa ponownie.": "pi is running again.",
   "Liczę kontekst sesji…": "Measuring the session context…",
+  "Pracuje": "Working",
+  "Czeka na slot": "Waiting for a slot",
+  "Czyta kontekst": "Reading context",
+  "Generuje": "Generating",
+  "krok {n}": "step {n}",
+  "przerwij": "stop",
 };

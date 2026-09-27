@@ -1315,7 +1315,6 @@ export default function App() {
                   onExecutePlan={planDone ? executePlan : undefined}
                   findTarget={findTarget}
                 />
-                {state.busy && !approval && <Working since={state.busySince} now={now} perf={state.perf} />}
               </div>
             </div>
             <div className="dock">
@@ -1347,6 +1346,7 @@ export default function App() {
                   reasonDraft={input}
                 />
               )}
+              {state.busy && !approval && <Working since={state.busySince} now={now} perf={state.perf} steps={state.steps} />}
               {composer}
             </div>
           </>
@@ -1526,40 +1526,49 @@ function firstUserText(state: { messages: { role: string; text?: string }[] }): 
   return m?.text?.replace(/\s+/g, " ").slice(0, 80) ?? "";
 }
 
-function Working({ since, now, perf }: { since: number | null; now: number; perf: LivePerf | null }) {
-  let label = "Pracuje…";
-  let detail: string | null = null;
+/** One status line above the composer while a run works: "✻ Generuje · 1:42 · krok 5 · 38 t/s". */
+function Working({ since, now, perf, steps }: { since: number | null; now: number; perf: LivePerf | null; steps: number }) {
+  let label = t("Pracuje");
+  let speed: string | null = null;
+  let detail = "";
   let progress: number | null = null;
   if (perf?.phase === "waiting") {
-    label = t("Czeka na slot…");
+    label = t("Czeka na slot");
     detail = t("model liczy teraz dla innej sesji; ta ruszy, gdy tamta skończy zapytanie");
   } else if (perf?.phase === "prompt") {
     const fresh = perf.total - perf.cache;
     const done = perf.processed - perf.cache;
     progress = fresh > 0 ? Math.min(1, done / fresh) : 1;
-    label = "Czyta kontekst…";
+    label = t("Czyta kontekst");
+    speed = `${Math.round(progress * 100)}%`;
     detail =
-      `${Math.round(progress * 100)}% z ${formatTokens(fresh)} tok` +
+      `${formatTokens(fresh)} tok` +
       (perf.cache > 0 ? ` (cache ${formatTokens(perf.cache)})` : "") +
       (perf.perSec > 0 ? ` · PP ${Math.round(perf.perSec)} t/s` : "");
   } else if (perf?.phase === "gen") {
-    label = "Generuje…";
-    detail = `${perf.perSec.toFixed(1).replace(".", ",")} t/s · ${perf.tokens} tok`;
+    label = t("Generuje");
+    speed = `${perf.perSec.toFixed(1).replace(".", ",")} t/s`;
+    detail = `${perf.tokens} tok`;
   }
   return (
-    <div className="working">
+    <div className="working" title={detail || undefined}>
       <span className="working-star">✻</span>
       <span className="shimmer">{label}</span>
+      {since !== null && <span className="working-sep">·</span>}
       {since !== null && <span className="working-time">{formatDuration(now - since)}</span>}
-      {detail && <span className="working-perf">{detail}</span>}
+      {steps > 0 && <span className="working-sep">·</span>}
+      {steps > 0 && <span className="working-steps">{t("krok {n}", { n: steps })}</span>}
+      {speed && <span className="working-sep">·</span>}
+      {speed && <span className="working-perf">{speed}</span>}
+      {detail && <span className="working-detail">{detail}</span>}
+      <span className="working-hint">
+        <kbd>Esc</kbd> {t("przerwij")}
+      </span>
       {progress !== null && (
         <span className="working-bar">
           <span style={{ width: `${progress * 100}%` }} />
         </span>
       )}
-      <span className="working-hint">
-        <kbd>Esc</kbd> przerwij
-      </span>
     </div>
   );
 }
