@@ -1,5 +1,6 @@
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { t } from "../../shared/i18n.js";
 
 /** The file exists but is not a JSON object. It is left alone; a copy sits at `backup`. */
 export class BrokenJsonError extends Error {
@@ -8,7 +9,7 @@ export class BrokenJsonError extends Error {
     readonly backup: string,
     cause: string,
   ) {
-    super(`${file} nie jest poprawnym JSON-em (${cause}). Ustawienia nie są zapisywane; kopia: ${backup}. Popraw albo usuń ten plik i uruchom Pi Code ponownie.`);
+    super(t("{file} nie jest poprawnym JSON-em ({cause}). Ustawienia nie są zapisywane; kopia: {backup}. Popraw albo usuń ten plik i uruchom Pi Code ponownie.", { file, cause, backup }));
   }
 }
 
@@ -24,7 +25,7 @@ export function readJsonObject(file: string): Record<string, unknown> {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return {};
     throw e;
   }
-  let cause = "to nie obiekt";
+  let cause = t("to nie obiekt");
   try {
     const v = JSON.parse(text) as unknown;
     if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;

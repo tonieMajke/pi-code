@@ -176,7 +176,7 @@ export class PiGateway {
   }
 
   private requireHost(): SessionHost {
-    if (this.terminal) throw new Error("Sesja otwarta w terminalu");
+    if (this.terminal) throw new Error(t("Sesja otwarta w terminalu"));
     if (!this.active) throw new Error("session not initialized");
     return this.active;
   }
@@ -394,7 +394,7 @@ export class PiGateway {
   async openInTerminal(): Promise<void> {
     const host = this.requireHost();
     const sessionPath = host.path;
-    if (!sessionPath) throw new Error("sesja nie ma jeszcze pliku");
+    if (!sessionPath) throw new Error(t("sesja nie ma jeszcze pliku"));
     const sessionDir = host.session.sessionManager.getSessionDir();
     const cwd = host.cwd;
     const template = this.config!.get().terminal ?? TERMINAL_PRESETS.konsole;
@@ -467,7 +467,7 @@ export class PiGateway {
   // ── Commands routed to a session ──────────────────────────────────────────
 
   private hostFor(session?: string): SessionHost {
-    if (this.terminal) throw new Error("Sesja otwarta w terminalu");
+    if (this.terminal) throw new Error(t("Sesja otwarta w terminalu"));
     if (!session) return this.requireHost();
     const host = this.hosts.get(session);
     if (!host) throw new Error(t("tej sesji nie ma już w pamięci"));
@@ -508,10 +508,10 @@ export class PiGateway {
     const [sessionId, toolCallId, index] = ref.split("/");
     // The transcript on screen may be an early preview of a session still starting (openSession).
     const messages = this.shown?.sessionId === sessionId ? this.shown.messages : (this.hosts.get(sessionId)?.historyMessages() ?? null);
-    if (!messages) throw new Error("obraz z innej sesji");
+    if (!messages) throw new Error(t("obraz z innej sesji"));
     const msg = messages.find((m) => m.role === "toolResult" && m.toolCallId === toolCallId);
     const img = msg?.role === "toolResult" ? toolImages({ content: msg.content })[Number(index)] : undefined;
-    if (!img) throw new Error("nie ma takiego obrazu");
+    if (!img) throw new Error(t("nie ma takiego obrazu"));
     return { ...img, ref };
   }
 
@@ -570,11 +570,11 @@ export class PiGateway {
   async fork(entryId: string): Promise<string> {
     const host = this.requireHost();
     const s = host.session;
-    if (host.busy) throw new Error("model pracuje — fork po zakończeniu");
+    if (host.busy) throw new Error(t("model pracuje — fork po zakończeniu"));
     const entry = s.sessionManager.getEntry(entryId) as
       | { type: string; parentId: string | null; message?: { role: string; content: Parameters<typeof userText>[0] } }
       | undefined;
-    if (!entry || entry.type !== "message" || entry.message?.role !== "user") throw new Error("nie ma takiej wiadomości w sesji");
+    if (!entry || entry.type !== "message" || entry.message?.role !== "user") throw new Error(t("nie ma takiej wiadomości w sesji"));
     const text = userText(entry.message.content);
     await this.branchInto(host, entry.parentId);
     return text;
@@ -583,9 +583,9 @@ export class PiGateway {
   /** New session with a copy of the active branch — pi's /clone. */
   async clone(): Promise<void> {
     const host = this.requireHost();
-    if (host.busy) throw new Error("model pracuje — kopia po zakończeniu");
+    if (host.busy) throw new Error(t("model pracuje — kopia po zakończeniu"));
     const leaf = host.session.sessionManager.getLeafId();
-    if (!leaf) throw new Error("sesja jest pusta — nie ma czego kopiować");
+    if (!leaf) throw new Error(t("sesja jest pusta — nie ma czego kopiować"));
     await this.branchInto(host, leaf);
   }
 
@@ -597,10 +597,10 @@ export class PiGateway {
   async handoff(goal: string): Promise<{ prompt: string; from: string }> {
     const host = this.requireHost();
     const s = host.session;
-    if (host.busy || host.handoffAbort) throw new Error("model pracuje — handoff po zakończeniu");
-    if (!s.model) throw new Error("brak modelu");
+    if (host.busy || host.handoffAbort) throw new Error(t("model pracuje — handoff po zakończeniu"));
+    if (!s.model) throw new Error(t("brak modelu"));
     const messages = handoffMessages(s.sessionManager.getBranch() as never);
-    if (!messages.length) throw new Error("sesja jest pusta — nie ma czego przekazać");
+    if (!messages.length) throw new Error(t("sesja jest pusta — nie ma czego przekazać"));
     const conversation = serializeConversation(convertToLlm(messages as never));
     // Same title the sidebar shows: the name, else the first user message.
     const first = messages.find((m) => (m as { role?: string }).role === "user") as { content: Parameters<typeof userText>[0] } | undefined;
@@ -620,8 +620,8 @@ export class PiGateway {
           { signal: abort.signal, cacheRetention: "none", sessionId: randomUUID() },
         ),
       );
-      if (res.stopReason === "aborted" || abort.signal.aborted) throw new Error("handoff przerwany");
-      if (res.stopReason === "error") throw new Error(res.errorMessage || "model zwrócił błąd");
+      if (res.stopReason === "aborted" || abort.signal.aborted) throw new Error(t("handoff przerwany"));
+      if (res.stopReason === "error") throw new Error(res.errorMessage || t("model zwrócił błąd"));
       prompt = res.content
         .map((c) => (c.type === "text" ? c.text : ""))
         .join("\n")
@@ -629,7 +629,7 @@ export class PiGateway {
     } finally {
       host.handoffAbort = null;
     }
-    if (!prompt) throw new Error("model nie napisał handoffu");
+    if (!prompt) throw new Error(t("model nie napisał handoffu"));
     // Persisted parent → the new session keeps a link back (like pi's /handoff).
     const file = s.sessionManager.isPersisted() && s.sessionFile && existsSync(s.sessionFile) ? s.sessionFile : undefined;
     const sm = createSession(host.cwd, s.sessionManager.getSessionDir());
@@ -641,7 +641,7 @@ export class PiGateway {
   /** Same file handling as pi's runtime fork: a new session file holding root → leafId. */
   private async branchInto(host: SessionHost, leafId: string | null): Promise<void> {
     const s = host.session;
-    if (!s.sessionManager.isPersisted()) throw new Error("sesja nie jest zapisywana na dysk");
+    if (!s.sessionManager.isPersisted()) throw new Error(t("sesja nie jest zapisywana na dysk"));
     const file = s.sessionFile;
     const dir = s.sessionManager.getSessionDir();
     if (!leafId) {
@@ -651,9 +651,9 @@ export class PiGateway {
       await this.startSession(host.cwd, sm);
       return;
     }
-    if (!file || !existsSync(file)) throw new Error("sesja nie jest jeszcze zapisana — poczekaj na pierwszą odpowiedź modelu");
+    if (!file || !existsSync(file)) throw new Error(t("sesja nie jest jeszcze zapisana — poczekaj na pierwszą odpowiedź modelu"));
     const sm = openSessionFile(file, dir);
-    if (!sm.createBranchedSession(leafId)) throw new Error("nie udało się utworzyć nowej sesji");
+    if (!sm.createBranchedSession(leafId)) throw new Error(t("nie udało się utworzyć nowej sesji"));
     await this.startSession(sm.getCwd() || host.cwd, sm);
   }
 
@@ -674,7 +674,7 @@ export class PiGateway {
   async deleteSession(path: string): Promise<{ path: string; active: boolean }> {
     const root = resolve(this.requireServices().agentDir, "sessions");
     const file = resolve(path);
-    if (!file.startsWith(root + sep) || !file.endsWith(".jsonl")) throw new Error("to nie jest plik sesji pi");
+    if (!file.startsWith(root + sep) || !file.endsWith(".jsonl")) throw new Error(t("to nie jest plik sesji pi"));
     const host = [...this.hosts.values()].find((h) => h.path && resolve(h.path) === file);
     const active = !!host && host === this.active;
     if (host) {
@@ -959,7 +959,7 @@ export class PiGateway {
       if (i.source === "builtin") return "wbudowane";
       if (i.source === "auto") return "lokalne";
       const name = i.source.replace(/^npm:/, "");
-      return i.scope === "project" ? `projekt · ${name}` : name;
+      return i.scope === "project" ? `${t("projekt")} · ${name}` : name;
     };
     return {
       settingsFile: `${services.agentDir}/settings.json`,
@@ -1071,7 +1071,7 @@ export class PiGateway {
     }
     await sm.flush();
     const errors = sm.drainErrors();
-    if (errors.length) throw new Error(`zapis ustawień: ${errors.map((e) => String(e.error ?? e)).join("; ")}`);
+    if (errors.length) throw new Error(`${t("zapis ustawień")}: ${errors.map((e) => String(e.error ?? e)).join("; ")}`);
     return this.settings();
   }
 
@@ -1137,6 +1137,6 @@ async function trash(file: string): Promise<void> {
     await run("gio", ["trash", file]);
   } catch (err) {
     const e = err as { code?: string; stderr?: string };
-    throw new Error(e.code === "ENOENT" ? "brak programu gio — nie mogę przenieść do kosza" : `kosz: ${String(e.stderr ?? err).trim()}`);
+    throw new Error(e.code === "ENOENT" ? t("brak programu gio — nie mogę przenieść do kosza") : `${t("kosz")}: ${String(e.stderr ?? err).trim()}`);
   }
 }

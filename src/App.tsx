@@ -324,7 +324,8 @@ export default function App() {
         if (msg.cmd === "history_image") return; // stale ref after a session switch — nothing to show
         if (msg.cmd === "session_handoff") {
           dispatch({ type: "event", event: { kind: "settled" }, at: Date.now() });
-          if (/przerwany/.test(msg.error ?? "")) {
+          // The sidecar words it in the UI language: "handoff przerwany" / "handoff cancelled".
+          if (/przerwany|cancelled/.test(msg.error ?? "")) {
             dispatch({ type: "info", text: t("Handoff przerwany — zostajesz w tej sesji."), level: "warning" });
             return;
           }

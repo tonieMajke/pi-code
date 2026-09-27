@@ -70,7 +70,7 @@ export async function gitChanges(cwd: string): Promise<GitChanges> {
 export async function gitRevert(cwd: string, path: string): Promise<void> {
   const root = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
   const st = (await git(root, ["status", "--porcelain=v1", "--", path])).slice(0, 2);
-  if (st === "??") throw new Error("plik nieśledzony przez git — nie cofam (usuń go ręcznie)");
+  if (st === "??") throw new Error(t("plik nieśledzony przez git — nie cofam (usuń go ręcznie)"));
   await git(root, ["restore", "--staged", "--worktree", "--source=HEAD", "--", path]);
 }
 

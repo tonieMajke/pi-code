@@ -287,7 +287,7 @@ export function literals(src: string, jsx: boolean): Literal[] {
 export const POLISH = /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
 /** Polish words that are commonly written with no diacritic at all. `\b` is ASCII-only in JS. */
 export const WORDS =
-  /(?<![\p{L}\d_])(wczytywanie|wczytaj|brak\w*|nic|pasuje|pasujących|komend\w*|projekt\w*|sesj\w*|czat\w*|grup\w*|modele|modelu|modelem|modeli|ustawieni\w*|dodaj|wybierz|zapisz|zamknij|szukaj|tryb\w*|wszystk\w*|gotowe|nowa|nowy|nowe|nazwa|nazw\w*|katalog\w*|plik\w*|pracuj\w*|anuluj|zawsze|pytaj|edytuj|sekcja|przewi\w*|kliknij|odrzu\w*|jest|nie|tak|albo|oraz|tylko|teraz|potem|przez|dla|tej|tego|jako|jeszcze|cofnij|pokaz|ukryj|kopia|zmiany|przerwij|sprawdz\w*|zapisano|zaladuj|wiadomo\w*|odswiez|ponownie)(?![\p{L}\d_])/iu;
+  /(?<![\p{L}\d_])(wczytywanie|wczytaj|brak\w*|nic|pasuje|pasujących|komend\w*|projek\w*|sesj\w*|czat\w*|grup\w*|modele|modelu|modelem|modeli|ustawieni\w*|dodaj|wybierz|zapisz|zamknij|szukaj|tryb\w*|wszystk\w*|gotowe|nowa|nowy|nowe|nazwa|nazw\w*|katalog\w*|plik\w*|pracuj\w*|anuluj|zawsze|pytaj|edytuj|sekcja|przewi\w*|kliknij|odrzu\w*|jest|nie|tak|albo|oraz|tylko|teraz|potem|przez|dla|tej|tego|jako|jeszcze|cofnij|pokaz|ukryj|kopia|zmiany|przerwij|sprawdz\w*|zapisano|zaladuj|wiadomo\w*|odswiez|ponownie)(?![\p{L}\d_])/iu;
 
 /** Attributes that are never shown to the user. */
 const TECH_ATTRS = /^(className|key|id|type|name|href|src|role|rel|target|htmlFor|lang|autoComplete|inputMode|method|action|value|defaultValue|mode|kind|variant|size|align|side|data-[\w-]+|aria-(?!label|description|placeholder)[\w-]+|viewBox|d|fill|stroke\w*|xmlns|tabIndex|dir|accept)$/;

@@ -5,6 +5,8 @@
  * before the model may finish.
  */
 
+import { plural } from "../../shared/i18n.js";
+
 export type TodoStatus = "pending" | "in_progress" | "done" | "skipped";
 export type TodoItem = { text: string; status: TodoStatus };
 
@@ -57,7 +59,7 @@ export class TodoList {
     const open = this.open;
     if (!open.length) return null;
     return {
-      label: `Plan: ${open.length} ${open.length === 1 ? "punkt niezrobiony" : "punkty niezrobione"}`,
+      label: plural(open.length, ["Plan: {n} punkt niezrobiony", "Plan: {n} punkty niezrobione", "Plan: {n} punktów niezrobionych"], ["Plan: {n} item not done", "Plan: {n} items not done"]),
       content:
         `[Plan check]\nYour todo list still has ${open.length} open item(s):\n${open.map((i) => `${MARK[i.status]} ${i.text}`).join("\n")}\n` +
         "Finish them, or update the list: mark done what is done, skipped (with a reason) what is not needed. Then finish.",

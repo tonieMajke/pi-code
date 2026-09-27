@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { plural, t } from "../../shared/i18n.js";
 
 /**
  * The "constitution": standing rules for the model (appended to the system prompt)
@@ -270,7 +271,7 @@ export class ConstitutionGuard {
     if (this.editSeq > 0 && this.checkSeq < this.editSeq && !visualOnly) {
       const files = this.edited.filter((p) => !DOC_FILE.test(p)).map(rel);
       nudge = {
-        label: `Wymuszona weryfikacja: zmieniono ${files.length} plik(i) bez sprawdzenia`,
+        label: plural(files.length, ["Wymuszona weryfikacja: zmieniono {n} plik bez sprawdzenia", "Wymuszona weryfikacja: zmieniono {n} pliki bez sprawdzenia", "Wymuszona weryfikacja: zmieniono {n} plików bez sprawdzenia"], ["Verification required: {n} file changed with no check", "Verification required: {n} files changed with no check"]),
         content:
           `[Constitution: verification required]\nYou changed ${files.join(", ")} but ran no check after the last change. ` +
           "Before you finish: run the most relevant check (tests, type check, build, or run the program), read the whole output, and fix any failure. " +
@@ -279,7 +280,7 @@ export class ConstitutionGuard {
       };
     } else if (this.lastCheck?.failed && this.checkSeq >= this.editSeq) {
       nudge = {
-        label: "Wymuszona poprawka: ostatnie sprawdzenie nie przeszło",
+        label: t("Wymuszona poprawka: ostatnie sprawdzenie nie przeszło"),
         content:
           `[Constitution: failing check]\nThe last check failed and nothing was changed after it:\n  ${this.lastCheck.command}\n` +
           "Fix the cause and run the check again. If it cannot be fixed now, say so explicitly and explain why — do not report the task as done.",
@@ -287,14 +288,14 @@ export class ConstitutionGuard {
     }
     if (!nudge && this.visualSeq > this.sawSeq) {
       nudge = {
-        label: "Wymuszony podgląd: zmiana wizualna bez obejrzenia wyniku",
+        label: t("Wymuszony podgląd: zmiana wizualna bez obejrzenia wyniku"),
         content:
           `[Constitution: look at your work]\nYou changed ${this.visualWhat.join(", ")} but have not looked at the result since. ` +
           "Render it and look: use the look tool (page URL or .html/.svg/.dot/.mmd file), or the Blender/Blockbench MCP screenshot tool for 3D. " +
           "Check layout, alignment, spacing, contrast, overlaps and whether it matches the request; fix what is off, then look again.",
       };
     }
-    if (!nudge) return this.loopBlocks >= 2 ? { stuck: "Model w kółko powtarza nieudane wywołania" } : null;
+    if (!nudge) return this.loopBlocks >= 2 ? { stuck: t("Model w kółko powtarza nieudane wywołania") } : null;
     if (this.nudges >= maxNudges) return { stuck: nudge.label };
     this.nudges++;
     return nudge;

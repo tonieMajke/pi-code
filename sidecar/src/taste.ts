@@ -1,4 +1,5 @@
 import { isAbsolute, resolve } from "node:path";
+import { plural, t } from "../../shared/i18n.js";
 import { isSceneChange, VISUAL_FILE } from "./constitution.js";
 
 /**
@@ -197,11 +198,11 @@ export class TasteGuard {
           kind: "nudge",
           nudge: stale
             ? {
-                label: "Gust: wymuszony ui_audit po zmianie wyglądu",
+                label: t("Gust: wymuszony ui_audit po zmianie wyglądu"),
                 content: `[Taste: measure]\nYou changed the page but have not measured it since. Run ui_audit ${where}, fix every HIGH item (and MEDIUM where easy), then run it again.`,
               }
             : {
-                label: `Gust: ${this.auditHigh} poważn${this.auditHigh === 1 ? "y problem" : "e problemy"} z ui_audit`,
+                label: plural(this.auditHigh, ["Gust: {n} poważny problem z ui_audit", "Gust: {n} poważne problemy z ui_audit", "Gust: {n} poważnych problemów z ui_audit"], ["Taste: {n} serious ui_audit problem", "Taste: {n} serious ui_audit problems"]),
                 content: `[Taste: measure]\nThe last ui_audit still lists ${this.auditHigh} HIGH problem(s). Fix them and run ui_audit ${where} again. If one is intentional, say which and why.`,
               },
         };

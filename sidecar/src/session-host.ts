@@ -53,7 +53,7 @@ import { TasteGuard, type VisualKind } from "./taste.js";
 import { CRITIC_SYSTEM_PROMPT, criticNudge, criticPrompt, pageOutline, pickReference } from "./critic.js";
 import { open as openPage, withPage } from "./browser.js";
 import { memoryPrompt, type MemoryStore } from "./memory.js";
-import { t } from "../../shared/i18n.js";
+import { plural, t } from "../../shared/i18n.js";
 
 const run = promisify(execFile);
 
@@ -198,7 +198,7 @@ export class SessionHost {
     host.subscribe();
     // Not awaited: switching sessions must not wait for extensions (~200 ms, more with MCP).
     host.extensionsReady = host.bindExtensions().catch((err: unknown) =>
-      host.emit({ kind: "notice", level: "error", text: `Start rozszerzeń: ${err instanceof Error ? err.message : String(err)}` }),
+      host.emit({ kind: "notice", level: "error", text: `${t("Start rozszerzeń")}: ${err instanceof Error ? err.message : String(err)}` }),
     );
     return host;
   }
@@ -356,8 +356,8 @@ export class SessionHost {
     // downloads, publishing, writing outside the project) ask in every mode, "always allow" included.
     const killing = toolName === "bash" && typeof input.command === "string" ? foreignKill(input.command, startedByApp) : null;
     const risky = killing ? null : riskyAction(call, this.cwd);
-    if (killing) this.emit({ kind: "guard", label: `Zabijanie procesu spoza Pi Code — pytam (${killing})` });
-    else if (risky) this.emit({ kind: "guard", label: `Ryzykowna akcja — pytam (${risky})` });
+    if (killing) this.emit({ kind: "guard", label: t("Zabijanie procesu spoza Pi Code — pytam ({what})", { what: killing }) });
+    else if (risky) this.emit({ kind: "guard", label: t("Ryzykowna akcja — pytam ({what})", { what: risky }) });
     else {
       if (verdict.kind === "allow") return undefined;
       if (call.name === "bash" ? coveredByPrefixes(String(call.args.command ?? ""), this.alwaysBash) : this.alwaysAllowed.has(call.key)) return undefined;
@@ -418,7 +418,7 @@ export class SessionHost {
     // Deferred tools: listed by name in the system prompt, loaded on request.
     pi.registerTool({
       name: ENABLE_TOOLS,
-      label: "Włącz narzędzia",
+      label: t("Włącz narzędzia"),
       description:
         "Load tools that are available on demand (see 'On-demand tools' in the system prompt). " +
         "Their full definitions become usable from your next step.",
@@ -466,10 +466,13 @@ export class SessionHost {
         let research = cfg().taste.research;
         if (research === "ask" && taste.beforeTool(event.toolName, input, "auto") !== null) {
           // beforeTool counted a block; the user decides whether it stands.
-          const choice = await ctx.ui.select("Poszukać wzorców przed pracą wizualną?", ["Tak", "Nie, tym razem", "Zawsze szukaj", "Nigdy nie szukaj"]);
-          if (choice === "Zawsze szukaj") this.config.update("taste", { research: "auto" });
-          if (choice === "Nigdy nie szukaj") this.config.update("taste", { research: "off" });
-          if (choice === "Tak" || choice === "Zawsze szukaj") {
+          const yes = t("Tak");
+          const always = t("Zawsze szukaj");
+          const never = t("Nigdy nie szukaj");
+          const choice = await ctx.ui.select(t("Poszukać wzorców przed pracą wizualną?"), [yes, t("Nie, tym razem"), always, never]);
+          if (choice === always) this.config.update("taste", { research: "auto" });
+          if (choice === never) this.config.update("taste", { research: "off" });
+          if (choice === yes || choice === always) {
             loadTools(["design_refs"]);
             return { block: true, reason: "Taste: the user wants references first. Call design_refs (kind and a specific query), write brief.md, then build." };
           }
@@ -479,7 +482,7 @@ export class SessionHost {
         const tasteReason = research === "auto" ? taste.beforeTool(event.toolName, input, research) : null;
         if (tasteReason) {
           loadTools(["design_refs"]);
-          this.emit({ kind: "guard", label: "Gust: najpierw wzorce, potem budowanie" });
+          this.emit({ kind: "guard", label: t("Gust: najpierw wzorce, potem budowanie") });
           return { block: true, reason: tasteReason };
         }
       }
@@ -490,10 +493,10 @@ export class SessionHost {
         // Small models get the code right and the whitespace wrong, or edit from memory.
         const fix = repairEdit(input, this.cwd);
         if (fix && "block" in fix) {
-          this.emit({ kind: "guard", label: "Edycja: tekstu nie ma w pliku — pokazano najbliższy fragment" });
+          this.emit({ kind: "guard", label: t("Edycja: tekstu nie ma w pliku — pokazano najbliższy fragment") });
           return { block: true, reason: fix.block };
         }
-        if (fix) this.emit({ kind: "guard", label: `Edycja: poprawiono wcięcia (${fix.fixed})` });
+        if (fix) this.emit({ kind: "guard", label: t("Edycja: poprawiono wcięcia ({what})", { what: fix.fixed }) });
       }
       return this.gate(event.toolCallId, event.toolName, input);
     });
@@ -507,7 +510,7 @@ export class SessionHost {
       const output = event.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
       const note = hard() ? progress.afterTool(event.toolName, event.input, event.isError, output) : null;
       if (note) {
-        this.emit({ kind: "guard", label: "Postęp: model kręci się w kółko — dostał sygnał do zmiany podejścia" });
+        this.emit({ kind: "guard", label: t("Postęp: model kręci się w kółko — dostał sygnał do zmiany podejścia") });
         return { content: [...event.content, { type: "text" as const, text: `\n\n${note}` }] };
       }
       return undefined;
@@ -515,7 +518,7 @@ export class SessionHost {
 
     pi.registerTool({
       name: "todo",
-      label: "Plan",
+      label: t("Plan"),
       description: TODO_DESCRIPTION,
       parameters: Type.Object({
         items: Type.Array(
@@ -535,7 +538,7 @@ export class SessionHost {
 
     pi.registerTool({
       name: "look",
-      label: "Podgląd",
+      label: t("Podgląd"),
       description: LOOK_DESCRIPTION,
       parameters: Type.Object({
         target: Type.String({ description: "URL (http://localhost:5173/…) or a file path: .html, .svg, .dot/.gv, .mmd, .png/.jpg" }),
@@ -563,7 +566,7 @@ export class SessionHost {
 
     pi.registerTool({
       name: "look_compare",
-      label: "Porównanie",
+      label: t("Porównanie"),
       description: LOOK_COMPARE_DESCRIPTION,
       parameters: Type.Object({
         a: Type.String({ description: "Left: the reference (e.g. .pi/design-refs/<topic>/01-….png)" }),
@@ -584,7 +587,7 @@ export class SessionHost {
 
     pi.registerTool({
       name: "ui_audit",
-      label: "Audyt UI",
+      label: t("Audyt UI"),
       description: AUDIT_DESCRIPTION,
       parameters: Type.Object({
         target: Type.String({ description: "Your page: dev-server URL or .html file" }),
@@ -599,7 +602,7 @@ export class SessionHost {
 
     pi.registerTool({
       name: "design_refs",
-      label: "Wzorce",
+      label: t("Wzorce"),
       description: DESIGN_REFS_DESCRIPTION,
       parameters: Type.Object({
         topic: Type.String({ description: "Short folder name for this set, e.g. \"bakery-home\", \"goblin\"" }),
@@ -636,7 +639,7 @@ export class SessionHost {
     pi.on("before_provider_request", (event) => {
       const payload = this.answerFirst.apply(event.payload);
       if (!payload) return undefined;
-      this.emit({ kind: "guard", label: "Przerwano — model najpierw odpowiada (narzędzia wyłączone na tę odpowiedź)" });
+      this.emit({ kind: "guard", label: t("Przerwano — model najpierw odpowiada (narzędzia wyłączone na tę odpowiedź)") });
       return payload;
     });
 
@@ -715,34 +718,34 @@ export class SessionHost {
       }
       if (guard.finishedByUser && !stopNoted) {
         stopNoted = true;
-        this.emit({ kind: "guard", label: "Strażnicy wstrzymani — użytkownik kazał kończyć" });
+        this.emit({ kind: "guard", label: t("Strażnicy wstrzymani — użytkownik kazał kończyć") });
       }
       if (cfg().review.enabled && !reviewed && !extraRound && !guard.finishedByUser && guard.changedFiles.length > 0) {
         reviewed = true;
         const result = await this.review(task, guard.changedFiles, guard.verified).catch((err: unknown) => {
-          this.emit({ kind: "guard", label: `Recenzja nie wyszła: ${err instanceof Error ? err.message : String(err)}` });
+          this.emit({ kind: "guard", label: `${t("Recenzja nie wyszła")}: ${err instanceof Error ? err.message : String(err)}` });
           return null;
         });
         if (result && !result.ok) {
           const n = result.issues.split("\n").filter((l) => l.trim()).length;
           extraRound = true;
-          return back(reviewNudge(result.issues), `Recenzja: ${n} ${n === 1 ? "uwaga" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "uwagi" : "uwag"} — model poprawia`);
+          return back(reviewNudge(result.issues), plural(n, ["Recenzja: {n} uwaga — model poprawia", "Recenzja: {n} uwagi — model poprawia", "Recenzja: {n} uwag — model poprawia"], ["Review: {n} finding — the model is fixing it", "Review: {n} findings — the model is fixing them"]));
         }
-        if (result && !result.skipped) this.emit({ kind: "guard", label: "Recenzja: bez uwag" });
+        if (result && !result.skipped) this.emit({ kind: "guard", label: t("Recenzja: bez uwag") });
       }
       if (tasteOn()) {
-        const t = cfg().taste;
-        const step = taste.beforeSettle({ requireAudit: t.requireAudit, critic: t.critic, maxRounds: t.maxRounds, maxAuditNudges: cfg().constitution.maxNudges });
+        const tc = cfg().taste;
+        const step = taste.beforeSettle({ requireAudit: tc.requireAudit, critic: tc.critic, maxRounds: tc.maxRounds, maxAuditNudges: cfg().constitution.maxNudges });
         if (taste.stoppedByUser && !stopNoted) {
           stopNoted = true;
-          this.emit({ kind: "guard", label: "Gust: wstrzymany — użytkownik przejął" });
+          this.emit({ kind: "guard", label: t("Gust: wstrzymany — użytkownik przejął") });
         }
         if (step?.kind === "nudge") return back(step.nudge.content, step.nudge.label);
         if (step?.kind === "critic" && extraRound) {
-          this.emit({ kind: "guard", label: "Krytyk pominięty — w tej turze była już runda poprawek" });
+          this.emit({ kind: "guard", label: t("Krytyk pominięty — w tej turze była już runda poprawek") });
         } else if (step?.kind === "critic") {
           const verdict = await this.critic(task, step.visual, step.target, taste.image).catch((err: unknown) => {
-            this.emit({ kind: "guard", label: `Krytyk nie wyszedł: ${err instanceof Error ? err.message : String(err)}` });
+            this.emit({ kind: "guard", label: `${t("Krytyk nie wyszedł")}: ${err instanceof Error ? err.message : String(err)}` });
             return null;
           });
           if (verdict) {
@@ -750,12 +753,12 @@ export class SessionHost {
             if (!verdict.ok) {
               const n = verdict.issues.split("\n").filter((l) => l.trim().startsWith("-")).length || 1;
               extraRound = true;
-              return back(criticNudge(verdict.issues, round, t.maxRounds), `Krytyk (runda ${round}/${t.maxRounds}): ${n} ${n === 1 ? "uwaga" : n < 5 ? "uwagi" : "uwag"} — model poprawia`);
+              return back(criticNudge(verdict.issues, round, tc.maxRounds), `${t("Krytyk (runda {round}/{max})", { round, max: tc.maxRounds })}: ${plural(n, ["{n} uwaga — model poprawia", "{n} uwagi — model poprawia", "{n} uwag — model poprawia"], ["{n} finding — the model is fixing it", "{n} findings — the model is fixing them"])}`);
             }
-            this.emit({ kind: "guard", label: "Krytyk: bez uwag" });
+            this.emit({ kind: "guard", label: t("Krytyk: bez uwag") });
           }
-        } else if (taste.exhausted(t.maxRounds)) {
-          this.emit({ kind: "guard", label: `Krytyk: wykorzystano ${t.maxRounds} rundy — ostatnich poprawek nikt nie ocenił` });
+        } else if (taste.exhausted(tc.maxRounds)) {
+          this.emit({ kind: "guard", label: t("Krytyk: wykorzystano {n} rundy — ostatnich poprawek nikt nie ocenił", { n: tc.maxRounds }) });
         }
       }
       return undefined;
@@ -832,7 +835,7 @@ export class SessionHost {
     // A small change the model already proved with a passing check: a review costs more than it finds.
     const minLines = this.config.get().review.minLines;
     if (verified && this.runCheckpoint && changedLines(diff) < minLines) return { ok: true, issues: "", skipped: true };
-    this.emit({ kind: "guard", label: "Niezależna recenzja zmian…" });
+    this.emit({ kind: "guard", label: t("Niezależna recenzja zmian…") });
     const services = this.env.services;
     const key = this.config.get().review.model;
     const model = key ? this.env.modelByKey(key) : this.session!.model!;
@@ -886,7 +889,7 @@ export class SessionHost {
     let audit: string | undefined;
     let outline: string | undefined;
     const tmp = mkdtempSync(join(tmpdir(), "pi-gui-critic-"));
-    this.emit({ kind: "guard", label: ref ? "Krytyk: porównuje z wzorcem…" : "Krytyk: ocenia wynik…" });
+    this.emit({ kind: "guard", label: ref ? t("Krytyk: porównuje z wzorcem…") : t("Krytyk: ocenia wynik…") });
     try {
       if (kind === "ui") {
         if (!target) return null; // nothing to render — the audit nudge already asked for a target
@@ -969,7 +972,7 @@ export class SessionHost {
   }
 
   async restoreCheckpoint(checkpoint: string): Promise<string[]> {
-    if (this.busy) throw new Error("model pracuje — cofnij po zakończeniu");
+    if (this.busy) throw new Error(t("model pracuje — cofnij po zakończeniu"));
     const changes = await restore(this.cwd, checkpoint);
     return changes.map((c) => c.path);
   }
@@ -1014,7 +1017,7 @@ export class SessionHost {
 
   async compact(instructions?: string): Promise<void> {
     const s = this.session;
-    if (this.busy) throw new Error("model pracuje — kompaktowanie po zakończeniu");
+    if (this.busy) throw new Error(t("model pracuje — kompaktowanie po zakończeniu"));
     await this.extensionsReady;
     await withRequestContext(this.ctx("compact"), () => s.compact(instructions?.trim() || undefined));
     this.emitUsage();
@@ -1026,14 +1029,14 @@ export class SessionHost {
    */
   async rewind(fromEnd: number): Promise<string> {
     const s = this.session;
-    if (this.busy) throw new Error("model pracuje — zatrzymaj go przed cofaniem");
+    if (this.busy) throw new Error(t("model pracuje — zatrzymaj go przed cofaniem"));
     const users = s.sessionManager
       .getBranch()
       .filter((e) => e.type === "message" && (e as { message: { role: string } }).message.role === "user");
     const target = users[users.length - 1 - fromEnd];
-    if (!target) throw new Error("nie znaleziono tej wiadomości w aktywnej gałęzi");
+    if (!target) throw new Error(t("nie znaleziono tej wiadomości w aktywnej gałęzi"));
     const res = await s.navigateTree(target.id, { summarize: false });
-    if (res.cancelled) throw new Error("cofnięcie anulowane");
+    if (res.cancelled) throw new Error(t("cofnięcie anulowane"));
     this.emitUsage();
     return res.editorText ?? "";
   }
@@ -1087,14 +1090,14 @@ export class SessionHost {
     }
     this.reloadPending = false;
     this.reload().catch((err: unknown) =>
-      this.emit({ kind: "notice", level: "error", text: `Przeładowanie rozszerzeń: ${err instanceof Error ? err.message : String(err)}` }),
+      this.emit({ kind: "notice", level: "error", text: `${t("Przeładowanie rozszerzeń")}: ${err instanceof Error ? err.message : String(err)}` }),
     );
   }
 
   /** pi's /reload: extensions, skills, prompt templates, context files. */
   async reload(): Promise<void> {
     const s = this.session;
-    if (this.busy) throw new Error("model pracuje — przeładowanie po zakończeniu");
+    if (this.busy) throw new Error(t("model pracuje — przeładowanie po zakończeniu"));
     await this.extensionsReady;
     await s.reload();
     this.applyToolPolicy();
@@ -1113,7 +1116,7 @@ export class SessionHost {
   private async bindExtensions(): Promise<void> {
     const session = this.session;
     const current = () => {
-      if (this.disposed) throw new Error("sesja została już zamieniona");
+      if (this.disposed) throw new Error(t("sesja została już zamieniona"));
       return session;
     };
     // Session swaps started by an extension: the UI must reload the transcript itself.
@@ -1158,7 +1161,7 @@ export class SessionHost {
         },
       },
       onError: (err) =>
-        this.emit({ kind: "notice", level: "error", text: `Rozszerzenie ${extensionName(err.extensionPath)} (${err.event}): ${err.error}` }),
+        this.emit({ kind: "notice", level: "error", text: `${t("Rozszerzenie {name} ({event})", { name: extensionName(err.extensionPath), event: err.event })}: ${err.error}` }),
     });
   }
 

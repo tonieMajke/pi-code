@@ -77,6 +77,7 @@ export const VOICE_PRESETS: Record<VoiceProvider, Preset> = {
     keyUrl: "https://console.groq.com/keys",
     needsKey: true,
   },
+  // Worded at use (t(p.label)): this table is built before the UI sends its language.
   custom: { label: "Własny serwer", baseUrl: "http://localhost:8000/v1", model: "whisper-large-v3", needsKey: false },
 };
 
@@ -361,7 +362,7 @@ export class Dictation {
     const config = this.store.get();
     const providers = (Object.keys(VOICE_PRESETS) as VoiceProvider[]).map((id) => {
       const p = VOICE_PRESETS[id];
-      return { id, label: p.label, baseUrl: p.baseUrl, model: p.model, keyUrl: p.keyUrl ?? "", needsKey: p.needsKey, keySource: this.keys.resolve(id).source };
+      return { id, label: id === "custom" ? t(p.label) : p.label, baseUrl: p.baseUrl, model: p.model, keyUrl: p.keyUrl ?? "", needsKey: p.needsKey, keySource: this.keys.resolve(id).source };
     });
     const r = findRecorder();
     return { config, providers, recorder: r?.bin ?? "", ready: Boolean(r) && (!VOICE_PRESETS[config.provider].needsKey || this.keys.resolve(config.provider).source !== "none") };
@@ -371,7 +372,7 @@ export class Dictation {
     if (this.proc) return { recorder: "", maxSeconds: MAX_SECONDS };
     const c = this.store.get();
     if (VOICE_PRESETS[c.provider].needsKey && this.keys.resolve(c.provider).source === "none")
-      throw new Error(t("brak klucza API dla {name} — Ustawienia → Dyktowanie", { name: VOICE_PRESETS[c.provider].label }));
+      throw new Error(t("brak klucza API dla {name} — Ustawienia → Dyktowanie", { name: c.provider === "custom" ? t(VOICE_PRESETS[c.provider].label) : VOICE_PRESETS[c.provider].label }));
     const r = findRecorder();
     if (!r) throw new Error(t("nie ma czym nagrywać — zainstaluj pipewire (pw-record), pulseaudio-utils albo alsa-utils"));
     this.chunks = [];

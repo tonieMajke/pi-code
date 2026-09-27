@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { CleanupScan, OrphanSidecar, SessionSummary, TestSession } from "../../shared/protocol.js";
+import { t } from "../../shared/i18n.js";
 
 const run = promisify(execFile);
 
@@ -11,10 +12,10 @@ const PING = /^(odpowiedz|powiedz|napisz|reply|say|answer)\b[^\n]{0,40}\b(jednym
 
 /** Why a session looks like a test run (and not work), or null. Deleting is still the user's call. */
 export function testReason(s: SessionSummary): string | null {
-  if (s.cwd === "/tmp" || s.cwd.startsWith("/tmp/")) return "katalog tymczasowy";
+  if (s.cwd === "/tmp" || s.cwd.startsWith("/tmp/")) return t("katalog tymczasowy");
   const first = s.firstMessage.trim();
-  if (first === E2E_PROMPT) return "test e2e";
-  if (s.messageCount <= 4 && PING.test(first)) return "krótki test modelu";
+  if (first === E2E_PROMPT) return t("test e2e");
+  if (s.messageCount <= 4 && PING.test(first)) return t("krótki test modelu");
   return null;
 }
 
