@@ -233,6 +233,8 @@ fn sidecar_died(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Links from chat open in the default browser; the capability scopes it to http(s)/mailto.
+        .plugin(tauri_plugin_opener::init())
         .manage(CloseToTray(AtomicBool::new(true)))
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

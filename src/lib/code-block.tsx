@@ -1,6 +1,7 @@
 import { useEffect, useState, type ComponentProps } from "react";
 import { Check, Copy } from "lucide-react";
 import type { Highlighter } from "shiki";
+import { isExternalUrl, openExternal } from "./open-url";
 
 const THEME = "github-dark";
 const LANGS = ["typescript", "tsx", "javascript", "jsx", "bash", "python", "rust", "json", "css", "html"];
@@ -105,7 +106,22 @@ const codeProps = (props: ComponentProps<"code">) => {
 
 const preProps = (props: ComponentProps<"pre">) => <>{props.children}</>;
 
-const linkProps = (props: ComponentProps<"a">) => <a {...props} target="_blank" rel="noreferrer" />;
+/**
+ * Links in a reply open in the user's browser (target=_blank does nothing in the Tauri webview on
+ * Linux). Anything but http(s)/mailto stays inert: a click must not navigate the app itself.
+ */
+const linkProps = ({ node: _node, ...props }: ComponentProps<"a"> & { node?: unknown }) => (
+  <a
+    {...props}
+    target="_blank"
+    rel="noreferrer"
+    title={props.title ?? props.href}
+    onClick={(e) => {
+      e.preventDefault();
+      if (isExternalUrl(props.href)) void openExternal(props.href).catch((err) => console.warn("open link:", err));
+    }}
+  />
+);
 
 /** react-markdown components: swap the default <pre> for CodeBlock. */
 export const markdownComponents = { code: codeProps, pre: preProps, a: linkProps };

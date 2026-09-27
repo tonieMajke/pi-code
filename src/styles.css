@@ -782,6 +782,7 @@ html.win-max #root::after, html.win-max .win-grips { display: none; }
 .thumb:hover .thumb-x { opacity: 1; }
 .bubble-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
 .bubble-images img { max-width: 220px; max-height: 180px; border-radius: 10px; display: block; }
+.bubble-image { padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: 10px; }
 .drop-overlay {
   position: fixed; inset: 10px; z-index: 50; border-radius: 18px;
   border: 2px dashed var(--accent); background: color-mix(in srgb, var(--bg) 82%, transparent);

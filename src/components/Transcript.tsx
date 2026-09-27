@@ -9,6 +9,7 @@ import { CopyButton, markdownComponents } from "../lib/code-block";
 import { ToolCard } from "../lib/tool-card";
 import { formatDuration, formatTokens } from "../lib/format";
 import { dataUrl } from "../lib/images";
+import { Lightbox } from "./Lightbox";
 
 const REMARK = [remarkGfm, remarkBreaks];
 
@@ -101,6 +102,7 @@ const UserMessage = memo(function UserMessage({
   images?: Attachment[];
   onEdit?: () => void;
 }) {
+  const [zoom, setZoom] = useState<number | null>(null);
   return (
     <div className="msg user" data-msg={index} data-part={0}>
       {onEdit && (
@@ -112,12 +114,13 @@ const UserMessage = memo(function UserMessage({
         {images && images.length > 0 && (
           <div className="bubble-images">
             {images.map((a, i) => (
-              <a key={i} href={dataUrl(a)} target="_blank" rel="noreferrer">
+              <button key={i} className="bubble-image" onClick={() => setZoom(i)} title="Powiększ">
                 <img src={dataUrl(a)} alt="" />
-              </a>
+              </button>
             ))}
           </div>
         )}
+        {zoom !== null && images?.[zoom] && <Lightbox img={images[zoom]} onClose={() => setZoom(null)} />}
         {text}
       </div>
     </div>

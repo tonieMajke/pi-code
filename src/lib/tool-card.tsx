@@ -26,6 +26,7 @@ import type { Attachment } from "../../shared/protocol";
 import { dataUrl } from "./images";
 import { useImage, useSeen } from "./image-store";
 import { formatDuration } from "./format";
+import { Lightbox } from "../components/Lightbox";
 
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   read: FileText,
@@ -217,18 +218,6 @@ export function ToolCard({
 /** What the model looked at — always visible, click to enlarge. */
 function ToolShots({ images }: { images: Attachment[] }) {
   const [zoom, setZoom] = useState<number | null>(null);
-  useEffect(() => {
-    if (zoom === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        setZoom(null);
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [zoom]);
   return (
     <>
       <div className="tool-shots">
@@ -248,15 +237,6 @@ function ToolShot({ img, onZoom }: { img: Attachment; onZoom: () => void }) {
     <button ref={ref} className="tool-shot" onClick={onZoom} title="Powiększ (to widział model)">
       {full ? <img src={dataUrl(full)} alt="" /> : <span className="tool-shot-wait" />}
     </button>
-  );
-}
-
-function Lightbox({ img, onClose }: { img: Attachment; onClose: () => void }) {
-  const full = useImage(img, true);
-  return (
-    <div className="lightbox" onClick={onClose}>
-      {full && <img src={dataUrl(full)} alt="" />}
-    </div>
   );
 }
 
