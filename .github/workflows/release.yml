@@ -52,10 +52,6 @@ jobs:
           pnpm typecheck
           pnpm exec vitest run --exclude dev/e2e-smoke.test.ts
 
-      - name: Rust tests
-        working-directory: src-tauri
-        run: cargo test --lib
-
       # Node goes into the AppImage (resources/node), so Pi Code runs where Node is missing or old.
       - run: dev/fetch-node.sh
 
@@ -66,6 +62,12 @@ jobs:
         env:
           NO_STRIP: "1"
         run: pnpm exec tauri build --config src-tauri/tauri.node.conf.json
+
+      # After the build: tauri-build checks that the bundle resources (sidecar/dist/main.mjs,
+      # sidecar-rt/node_modules) exist, and only the build above makes them.
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib
 
       - uses: softprops/action-gh-release@v2
         with:
