@@ -61,6 +61,8 @@ export function Composer({
   onMode,
   attachments,
   onAddFiles,
+  onPasteNative,
+  onPickImages,
   onRemoveAttachment,
   blocked,
   files,
@@ -106,6 +108,10 @@ export function Composer({
   onMode: (m: PermissionMode) => void;
   attachments: Attachment[];
   onAddFiles: (files: File[]) => void;
+  /** Read the image from the system clipboard — the webview's paste event does not carry it. */
+  onPasteNative?: () => void;
+  /** Native image picker, in place of the hidden file input. */
+  onPickImages?: () => void;
   onRemoveAttachment: (i: number) => void;
   /** An approval card is up — Enter belongs to it. */
   blocked: boolean;
@@ -513,6 +519,11 @@ export function Composer({
             if (files.length) {
               e.preventDefault();
               onAddFiles(files);
+            } else if (onPasteNative && !e.clipboardData.types.includes("text/plain")) {
+              // A copied image reaches WebKitGTK as text/html only (or nothing): no text to paste,
+              // so this is an image paste — fetch it natively.
+              e.preventDefault();
+              onPasteNative();
             }
           }}
           onKeyDown={(e) => {
@@ -587,10 +598,10 @@ export function Composer({
               extensions={extensions}
               onPatch={onAddonsPatch}
               onSettings={() => onAddonsSettings?.()}
-              onAttach={() => fileRef.current?.click()}
+              onAttach={() => (onPickImages ? onPickImages() : fileRef.current?.click())}
             />
           ) : (
-            <button className="icon-btn attach" onClick={() => fileRef.current?.click()} title={t("Dołącz obraz (albo wklej / upuść)")}>
+            <button className="icon-btn attach" onClick={() => (onPickImages ? onPickImages() : fileRef.current?.click())} title={t("Dołącz obraz (albo wklej / upuść)")}>
               <Paperclip size={15} />
             </button>
           )}

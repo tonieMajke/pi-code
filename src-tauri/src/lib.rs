@@ -60,6 +60,71 @@ fn pi_send(state: State<'_, Sidecar>, line: String) -> Result<(), String> {
 /// With an older node the sidecar dies on start, so the restart loop below buys nothing.
 pub const MIN_NODE: (u32, u32, u32) = (22, 19, 0);
 
+/// WebKitGTK gives a paste event only `text/html` for a copied image, never the image itself
+/// (WebKitGTK 2.52: a Firefox or Spectacle copy), so the UI asks here. Raw bytes of the first
+/// image the clipboard offers, empty when it has none.
+#[tauri::command]
+async fn clipboard_image(app: AppHandle) -> Result<tauri::ipc::Response, String> {
+    #[cfg(target_os = "linux")]
+    {
+        // GTK clipboard calls belong on the main thread; wait_for_* spins a nested loop there.
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.run_on_main_thread(move || {
+            let _ = tx.send(read_clipboard_image());
+        })
+        .map_err(|e| e.to_string())?;
+        let bytes = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|_| "clipboard: no answer".to_string())?;
+        Ok(tauri::ipc::Response::new(bytes))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        Ok(tauri::ipc::Response::new(Vec::new()))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_clipboard_image() -> Vec<u8> {
+    use gtk::gdk;
+    let clipboard = gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD);
+    let Some(targets) = clipboard.wait_for_targets() else {
+        return Vec::new();
+    };
+    let offered: Vec<String> = targets.iter().map(|a| a.name().to_string()).collect();
+    for want in ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"] {
+        if !offered.iter().any(|t| t == want) {
+            continue;
+        }
+        if let Some(sel) = clipboard.wait_for_contents(&gdk::Atom::intern(want)) {
+            let bytes = sel.data();
+            if !bytes.is_empty() {
+                return bytes;
+            }
+        }
+    }
+    Vec::new()
+}
+
+const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+
+/// An image picked in the native dialog or dropped on the window. Tauri takes file drops
+/// itself (the page gets no `drop`); the picker is the dialog plugin, as for project folders.
+#[tauri::command]
+async fn read_image_file(path: String) -> Result<tauri::ipc::Response, String> {
+    let p = std::path::Path::new(&path);
+    let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        return Err(format!("not an image: {path}"));
+    }
+    let len = std::fs::metadata(p).map_err(|e| e.to_string())?.len();
+    if len > 64 << 20 {
+        return Err(format!("too big ({} MB): {path}", len >> 20));
+    }
+    std::fs::read(p).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
+}
+
 fn version_text(v: (u32, u32, u32)) -> String {
     format!("{}.{}.{}", v.0, v.1, v.2)
 }
@@ -440,7 +505,14 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![pi_send, set_close_to_tray, set_tray_labels, pi_startup_problem])
+        .invoke_handler(tauri::generate_handler![
+            pi_send,
+            set_close_to_tray,
+            set_tray_labels,
+            pi_startup_problem,
+            clipboard_image,
+            read_image_file
+        ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {

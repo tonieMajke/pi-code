@@ -2501,6 +2501,7 @@ dependencies = [
 name = "pi-gui"
 version = "0.0.4"
 dependencies = [
+ "gtk",
  "serde",
  "serde_json",
  "tauri",

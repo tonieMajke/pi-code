@@ -463,6 +463,7 @@ export const EN: Record<string, string> = {
   "Dodatki {on}/{all}": "Addons {on}/{all}",
   "Dołącz obraz · {label}": "Attach an image · {label}",
   "Dołącz obraz": "Attach an image",
+  "Obrazy": "Images",
   "albo wklej / upuść": "or paste / drop it",
   "Dodatki Pi Code": "Pi Code addons",
   "Dotyczy wszystkich sesji, działa od następnego kroku modelu.": "Applies to every session, takes effect from the model's next step.",

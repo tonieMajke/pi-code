@@ -49,6 +49,8 @@ import { CommandPalette, type Command } from "./components/CommandPalette";
 import { modes } from "./lib/modes";
 import { ApprovalCard } from "./components/Approval";
 import { fileToAttachment, imageFiles } from "./lib/images";
+import { clipboardImage, isImagePath, pickImages, readImagePaths } from "./lib/native-images";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { modeInfo, nextMode } from "./lib/modes";
 import { isNoModelFailure, noModelHint, noModelInfo } from "./lib/no-model";
 import { Sidebar } from "./components/Sidebar";
@@ -733,6 +735,39 @@ export default function App() {
     }
   }, []);
 
+  const nativeImages = useCallback(
+    async (get: () => Promise<File[]>) => {
+      try {
+        await addFiles(await get());
+      } catch (err) {
+        dispatch({ type: "error", error: `${t("obraz")}: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    },
+    [addFiles],
+  );
+
+  // Tauri takes file drops before the page sees them: the overlay and the files come from its event.
+  useEffect(() => {
+    if (!inTauri()) return;
+    let off: (() => void) | undefined;
+    let gone = false;
+    void getCurrentWebview()
+      .onDragDropEvent(({ payload }) => {
+        if (payload.type === "enter") setDragging(payload.paths.some(isImagePath));
+        else if (payload.type === "leave") setDragging(false);
+        else if (payload.type === "drop") {
+          setDragging(false);
+          void nativeImages(() => readImagePaths(payload.paths));
+        }
+      })
+      .then((f) => (gone ? f() : (off = f)))
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, [nativeImages]);
+
   const setMode = useCallback(
     (mode: typeof state.mode) => {
       // Optimistic: rapid Shift+Tab presses must cycle from the new mode, not the stale one.
@@ -1211,6 +1246,8 @@ export default function App() {
       onMode={setMode}
       attachments={attachments}
       onAddFiles={(f) => void addFiles(f)}
+      onPasteNative={inTauri() ? () => void nativeImages(async () => [await clipboardImage()].filter((f): f is File => f !== null)) : undefined}
+      onPickImages={inTauri() ? () => void nativeImages(() => pickImages(t("Dołącz obraz"), t("Obrazy"))) : undefined}
       onRemoveAttachment={(i) => setAttachments((cur) => cur.filter((_, j) => j !== i))}
       blocked={Boolean(approval) || state.terminalOpen}
       files={files}

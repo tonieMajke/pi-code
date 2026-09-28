@@ -45,3 +45,20 @@ export function imageFiles(list: FileList | DataTransferItemList | null | undefi
 }
 
 export const dataUrl = (a: Attachment) => `data:${a.mimeType};base64,${a.data}`;
+
+/** Image type from the first bytes — the clipboard and dropped files come without one. */
+export function sniffImageType(b: Uint8Array): string | null {
+  const at = (i: number, ...v: number[]) => v.every((x, j) => b[i + j] === x);
+  if (at(0, 0x89, 0x50, 0x4e, 0x47)) return "image/png";
+  if (at(0, 0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (at(0, 0x47, 0x49, 0x46, 0x38)) return "image/gif";
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return "image/webp";
+  if (at(0, 0x42, 0x4d)) return "image/bmp";
+  return null;
+}
+
+/** Raw bytes from the native side → a File that fileToAttachment takes; null when not an image. */
+export function bytesToImageFile(buf: ArrayBuffer, name: string): File | null {
+  const type = buf.byteLength ? sniffImageType(new Uint8Array(buf, 0, Math.min(16, buf.byteLength))) : null;
+  return type ? new File([buf], name, { type }) : null;
+}
