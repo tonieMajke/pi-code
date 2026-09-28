@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/a2404892-3134-42e2-bcec-8e2cc3645298
+
 <p align="center"><img src="branding/pi-code-icon.svg" width="96" alt="Pi Code icon"></p>
 
 # Pi Code
