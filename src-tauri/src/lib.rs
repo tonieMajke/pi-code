@@ -62,7 +62,7 @@ pub const MIN_NODE: (u32, u32, u32) = (22, 19, 0);
 
 /// WebKitGTK gives a paste event only `text/html` for a copied image, never the image itself
 /// (WebKitGTK 2.52: a Firefox or Spectacle copy), so the UI asks here. Raw bytes of the first
-/// image the clipboard offers, empty when it has none.
+/// image the clipboard offers, empty when it has none or it holds text.
 #[tauri::command]
 async fn clipboard_image(app: AppHandle) -> Result<tauri::ipc::Response, String> {
     #[cfg(target_os = "linux")]
@@ -93,6 +93,11 @@ fn read_clipboard_image() -> Vec<u8> {
         return Vec::new();
     };
     let offered: Vec<String> = targets.iter().map(|a| a.name().to_string()).collect();
+    // Text with an image beside it (LibreOffice, a browser selection) is a text paste: the page
+    // pastes the text itself, the image is only its rendering.
+    if offered.iter().any(|t| t == "text/plain" || t == "UTF8_STRING") {
+        return Vec::new();
+    }
     for want in ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"] {
         if !offered.iter().any(|t| t == want) {
             continue;

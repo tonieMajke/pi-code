@@ -519,10 +519,9 @@ export function Composer({
             if (files.length) {
               e.preventDefault();
               onAddFiles(files);
-            } else if (onPasteNative && !e.clipboardData.types.includes("text/plain")) {
-              // A copied image reaches WebKitGTK as text/html only (or nothing): no text to paste,
-              // so this is an image paste — fetch it natively.
-              e.preventDefault();
+            } else if (onPasteNative) {
+              // WebKitGTK lists no types here even for plain text, so the default paste must run;
+              // an image (never in this event) is fetched natively alongside it.
               onPasteNative();
             }
           }}
