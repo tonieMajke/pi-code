@@ -25,8 +25,51 @@ https://github.com/user-attachments/assets/a2404892-3134-42e2-bcec-8e2cc3645298
   (click to insert `@path`), and a changes panel with git status.
 - **Handoff to a new session**, open the same session in a terminal with `pi`, and context usage at a glance.
 - **Dictation** (optional) through any OpenAI-compatible `/audio/transcriptions` endpoint.
-- **Add-ons** you can toggle: a working constitution, guards, review, and memory.
+- **Add-ons that keep a local model on track** (below), each one a switch in the composer's **+** menu.
 - UI in **English** and **Polish** (it follows the system locale).
+
+## Keeping a small model on track
+
+Local models can write real code, but they cut corners: they edit files they have not read, loop on the
+same failing call, say "done" without running anything, and go silent for fifty tool calls. Pi Code adds a
+layer around pi that catches these habits. Each piece is a switch in the composer's **+** menu
+(details in **Settings**), so you can see what it costs on your model and turn it off.
+
+- **Constitution:** standing working rules appended to the system prompt: plan the task, read before
+  editing, check the work, report briefly.
+- **Guards** (part of the constitution) enforce the rules small models skip instead of only asking:
+  - *read before edit:* an edit to a file the model has not read in this run is sent back;
+  - *no loops:* the same failing call repeated, a file edited back to a state it already had, or the same
+    check failing the same way again gets a note on the tool result, where the model is looking;
+  - *no "done" without proof:* files changed with no test, type check, build or run afterwards means the
+    model is sent back to verify (prose, data and pictures are exempt);
+  - *a plan it has to finish:* the model's todo list is recited near the end of the context so it stays in
+    view on long tasks, and it is checked before the model may stop.
+- **Review:** after the work, a fresh session sees only the task and the diff, not the author's reasoning,
+  so it does not share the same blind spots. Findings go back to the model. Small changes are skipped.
+- **Taste** (visual work): reference images first, then the page, SVG or 3D scene is rendered and measured
+  (`ui_audit`: text contrast, spacing, alignment, overflow and clipped text at phone width, too many font sizes), because a small model's vision
+  cannot tell 13 px from 16 px. The **critic** is a separate fresh look at the screenshot before the answer.
+- **Turn limit:** after a few silent steps or minutes, the model has to write a status line. If it goes
+  silent again, the run stops.
+- **Memory:** short facts about you, kept in a hand-editable markdown file, carried into every session,
+  learned after a session ends.
+- **pi-lens and the pi guardian** (if installed): LSP diagnostics and lint after every edit, and a limit
+  on what the model may read from `~/.pi/agent/extensions`.
+
+Always on, no switch:
+
+- **Edit repair:** an edit that failed only on indentation is fixed in place. Any other miss comes back
+  with the closest real text and its line numbers, so the next try lands.
+- **Escalation:** when a model is stuck, one click hands the task to a bigger model you pick, optionally
+  undoing the stuck run first.
+- **Checkpoints:** every run snapshots the worktree (a hidden git ref, your index and stash untouched), so
+  one click undoes everything the run did to files.
+- **Answer first:** if you interrupt or write while the model works, its next reply must be text, not
+  more tool calls.
+- **Cache-friendly context:** old big tool outputs are trimmed only before the current run, so the prompt
+  prefix stays stable and llama.cpp's prefix cache keeps working. Handoff writes a prompt for a fresh
+  session instead of a lossy compaction.
 
 ## Screenshots
 
