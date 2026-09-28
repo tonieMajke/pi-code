@@ -81,7 +81,7 @@ export const VOICE_PRESETS: Record<VoiceProvider, Preset> = {
   custom: { label: "Własny serwer", baseUrl: "http://localhost:8000/v1", model: "whisper-large-v3", needsKey: false },
 };
 
-export const DEFAULT_VOICE: VoiceConfig = { enabled: true, provider: "cortecs", baseUrl: "", model: "", language: "pl", device: "" };
+export const DEFAULT_VOICE: VoiceConfig = { enabled: true, provider: "cortecs", baseUrl: "", model: "", language: "auto", device: "" };
 
 /** Empty baseUrl/model = the preset's. */
 export function effective(c: VoiceConfig): { baseUrl: string; model: string } {

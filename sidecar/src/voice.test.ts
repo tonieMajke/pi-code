@@ -55,7 +55,7 @@ describe("transcribe", () => {
 
   it("cortecs: preset URL, model, language and the task field", async () => {
     const { fn, calls } = fake(200, JSON.stringify({ text: " Cześć, świecie " }));
-    const text = await transcribe(wav(tone(1000)), { ...DEFAULT_VOICE }, "k1", fn);
+    const text = await transcribe(wav(tone(1000)), { ...DEFAULT_VOICE, language: "pl" }, "k1", fn);
     expect(text).toBe("Cześć, świecie");
     expect(calls[0].url).toBe("https://api.cortecs.ai/v1/audio/transcriptions");
     expect(calls[0].headers.Authorization).toBe("Bearer k1");
