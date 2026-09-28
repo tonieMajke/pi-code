@@ -10,7 +10,9 @@ as well as hosted providers.
 > **Early alpha. Linux only.** It has been used daily on one machine (Arch-based, Wayland, NVIDIA).
 > Expect rough edges. Windows and macOS are not supported yet.
 
-![Pi Code: a task with its plan, diff and a forced test run](docs/screenshots/task.png)
+[![Pi Code demo video (76 s)](docs/screenshots/demo-poster.png)](docs/pi-code-demo.mp4)
+
+<p align="center"><a href="docs/pi-code-demo.mp4">▶ Watch the 76-second demo</a></p>
 
 ## What it does
 
