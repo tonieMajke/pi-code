@@ -37,7 +37,9 @@ as well as hosted providers.
 - A model: a server on your machine (llama.cpp, vLLM, LM Studio, Ollama) or a hosted provider.
   See [Connect a model](#connect-a-model).
 - Optional: the `pi` CLI (for "open in terminal" and sign-ins that need a browser),
-  `nvidia-smi` (GPU status), `pw-record` / `parecord` / `arecord` (dictation)
+  `nvidia-smi` (GPU status), `pw-record` / `parecord` / `arecord` (dictation),
+  ImageMagick 7 (`magick`), `rsvg-convert` and Graphviz (`dot`) for the agent's `look` tool
+  (previews of images, SVG, diagrams and pages)
 
 ## Install
 

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,7 +61,10 @@ describe("design_refs helpers", () => {
   });
 });
 
-describe("designRefs offline", () => {
+/** The gallery fixtures and the contact sheet need ImageMagick 7 (`magick`). */
+const hasMagick = spawnSync("sh", ["-c", "command -v magick"]).status === 0;
+
+describe.skipIf(!hasMagick)("designRefs offline", () => {
   it("falls back to the local gallery and writes sources + a contact sheet", async () => {
     const gallery = mkdtempSync(join(tmpdir(), "pi-gui-gallery-"));
     for (const name of ["bakery-warm", "bakery-dark", "fintech"])

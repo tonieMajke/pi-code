@@ -1,9 +1,14 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { closeBrowser } from "./browser.js";
 import { look, lookCompare } from "./look.js";
+
+/** The look tool shells out to these; a machine without them (a bare CI runner) skips the render tests. */
+const has = (cmd: string) => spawnSync("sh", ["-c", `command -v ${cmd}`]).status === 0;
+const RENDER = has("magick") && has("rsvg-convert") && has("dot");
 
 const PNG = /^iVBORw0KGgo/; // base64 of the PNG signature
 
@@ -13,14 +18,14 @@ describe("look", () => {
   writeFileSync(join(dir, "g.dot"), "digraph { a -> b }");
   writeFileSync(join(dir, "p.html"), "<h1>hi</h1>");
 
-  it("renders svg and graphviz", async () => {
+  it.skipIf(!RENDER)("renders svg and graphviz", async () => {
     const svg = await look({ target: "a.svg", width: 400 }, dir);
     expect(svg.data).toMatch(PNG);
     expect(svg.note).toMatch(/400x200 px/);
     expect((await look({ target: "g.dot" }, dir)).data).toMatch(PNG);
   });
 
-  it("screenshots an html file at the requested size", async () => {
+  it.skipIf(!RENDER)("screenshots an html file at the requested size", async () => {
     const r = await look({ target: "p.html", width: 640, height: 480 }, dir);
     expect(r.note).toMatch(/640x480 px/);
   }, 60000);
@@ -32,7 +37,7 @@ describe("look", () => {
   });
 });
 
-describe("look extras", () => {
+describe.skipIf(!RENDER)("look extras", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-gui-look-x-"));
   writeFileSync(join(dir, "a.html"), "<body style='margin:0;background:#fff'><h1 style='font:600 32px system-ui'>Left</h1></body>");
   writeFileSync(join(dir, "b.html"), "<body style='margin:0;background:#222;color:#eee'><h1 style='font:600 32px system-ui'>Right</h1></body>");
@@ -53,7 +58,7 @@ describe("look extras", () => {
   afterAll(() => closeBrowser());
 });
 
-describe("look warnings", () => {
+describe.skipIf(!RENDER)("look warnings", () => {
   afterAll(() => closeBrowser());
 
   it("says so when the page threw or rendered nothing", async () => {
