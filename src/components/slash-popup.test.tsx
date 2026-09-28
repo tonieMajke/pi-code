@@ -114,7 +114,7 @@ describe("Composer: slash commands", () => {
 
   it("paths are not commands", () => {
     const { type } = setup();
-    type("/home/majke/x");
+    type("/home/u/x");
     expect(screen.queryByText("brak takiej komendy")).toBeNull();
     expect(screen.queryByText("/compact")).toBeNull();
   });

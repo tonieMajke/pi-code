@@ -39,6 +39,6 @@
       "../skills/": "skills/"
     },
     "category": "Development",
-    "shortDescription": "GUI do pi (pi-coding-agent)"
+    "shortDescription": "Desktop app for the pi coding agent"
   }
 }

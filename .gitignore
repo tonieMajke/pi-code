@@ -16,3 +16,7 @@ plan-*.md
 
 # Node bundled into the AppImage by dev/fetch-node.sh (CI)
 vendor/
+
+# Python bytecode (eval task fixtures)
+__pycache__/
+*.pyc
