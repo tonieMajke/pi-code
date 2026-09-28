@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/a2404892-3134-42e2-bcec-8e2cc3645298
-
 <p align="center"><img src="branding/pi-code-icon.svg" width="96" alt="Pi Code icon"></p>
 
 # Pi Code
@@ -14,9 +10,7 @@ as well as hosted providers.
 > **Early alpha. Linux only.** It has been used daily on one machine (Arch-based, Wayland, NVIDIA).
 > Expect rough edges. Windows and macOS are not supported yet.
 
-[![Pi Code demo video (76 s)](docs/screenshots/demo-poster.png)](docs/pi-code-demo.mp4)
-
-<p align="center"><a href="docs/pi-code-demo.mp4">▶ Watch the 76-second demo</a></p>
+https://github.com/user-attachments/assets/a2404892-3134-42e2-bcec-8e2cc3645298
 
 ## What it does
 
