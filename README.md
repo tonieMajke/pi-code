@@ -10,6 +10,8 @@ as well as hosted providers.
 > **Early alpha. Linux only.** It has been used daily on one machine (Arch-based, Wayland, NVIDIA).
 > Expect rough edges. Windows and macOS are not supported yet.
 
+![Pi Code: a task with its plan, diff and a forced test run](docs/screenshots/task.png)
+
 ## What it does
 
 - **Live view of the agent:** streaming answers, thinking, and every tool call with its arguments and result.
@@ -25,6 +27,17 @@ as well as hosted providers.
 - **Dictation** (optional) through any OpenAI-compatible `/audio/transcriptions` endpoint.
 - **Add-ons** you can toggle: a working constitution, guards, review, and memory.
 - UI in **English** and **Polish** (it follows the system locale).
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Welcome screen with recent projects](docs/screenshots/welcome.png) | ![A stuck model, handed to a bigger one](docs/screenshots/escalation.png) |
+| Welcome screen: sessions, recent projects, your model | A model going in circles is told to change approach, then handed to a bigger one |
+| ![A task: diff and a forced test run](docs/screenshots/task.png) | ![The agent renders its page and checks it](docs/screenshots/visual-check.png) |
+| Every step on screen; no "done" without a check | Pages and SVGs are rendered and looked at before the answer |
+
+<sub>Screenshots come from a staged session (a scripted sidecar), rendered by the real UI.</sub>
 
 ## Requirements
 
